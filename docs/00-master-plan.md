@@ -1,4 +1,6 @@
-# Monolith AI — Master Plan
+# Aatmiq — Master Plan
+
+> **Aatmiq** (from Sanskrit *ātmik*, "of the self, one's own"): **your own AI.** Pronounced *AAT-mik*.
 
 > A private, self-hosted AI workplace for small and mid-size organizations:
 > **Chat**, **Work AI** (agent harness) and **Code** (VS Code–based IDE) in one product,
@@ -10,7 +12,7 @@ Status: **Planning** · Owner: Super Admin (product owner) · Last updated: 2026
 
 ## 1. Product vision
 
-| Problem | Monolith answer |
+| Problem | Aatmiq answer |
 |---|---|
 | Claude Code, Codex, Cursor, ChatGPT etc. send prompts, code and documents to a vendor cloud. | Everything runs on the org's server. Models are open source (Ollama / vLLM) or a provider the org chooses. |
 | Orgs buy 3–5 separate AI tools (chat, agents, coding) with separate admin, billing and data policies. | One product, one login, one admin portal, one usage/quota system. |
@@ -22,7 +24,7 @@ Status: **Planning** · Owner: Super Admin (product owner) · Last updated: 2026
 
 ## 2. Market scan (what we learn from each)
 
-| Product | Category | What to borrow | Gap Monolith fills |
+| Product | Category | What to borrow | Gap Aatmiq fills |
 |---|---|---|---|
 | ChatGPT / Claude.ai (Team/Enterprise) | Chat + docs | Clean chat UX, projects/folders, file upload, model picker | Cloud-only; data leaves the org |
 | Claude Code / Claude Cowork / OpenAI Codex | Agent harness | Task → plan → tool calls → diffs, approvals, skills, MCP connectors | Closed models, cloud-hosted |
@@ -58,7 +60,7 @@ Status: **Planning** · Owner: Super Admin (product owner) · Last updated: 2026
 
 ## 4. The product surfaces
 
-### 4.1 Public website + login (`monolith` marketing site)
+### 4.1 Public website + login (aatmiq.com marketing site)
 - Landing page: product story, three sections, privacy pitch, screenshots and demo, pricing/contact, "Request a demo". This doubles as the company profile you can share.
 - Login: email + password (with optional two-factor codes), Google / Microsoft SSO, SAML/OIDC (Okta, Azure AD).
 - Each deployment serves its own branded login at `ai.<customer>.com`. The marketing site is hosted by us.
@@ -78,14 +80,14 @@ The user assigns a task and the agent carries it out.
 - Task UI: plan → live steps timeline → tool calls with inputs/outputs → approvals for risky actions → final result/artifacts.
 - Background tasks, scheduled tasks, task history, and a skills library (org-shared plus personal).
 
-### 4.4 Section 3 — Code (Monolith IDE)
-- **Fork of Code-OSS** (the MIT-licensed VS Code source), rebranded to Monolith.
+### 4.4 Section 3 — Code (Aatmiq IDE)
+- **Fork of Code-OSS** (the MIT-licensed VS Code source), rebranded to Aatmiq.
 - Two builds from one fork:
   - **Desktop app** (Electron) for Win/macOS/Linux; connects to the org server.
-  - **Web IDE** (the browser version served from the org server, like code-server) that opens inside the Monolith web app.
+  - **Web IDE** (the browser version served from the org server, like code-server) that opens inside the Aatmiq web app.
 - Workspaces live in the user's container, so the terminal, run/debug, git and extensions all work there. It is fully usable without AI.
 - Extensions come from **Open VSX** plus an optional private org registry. Microsoft's Marketplace is not permitted for forks.
-- **Monolith AI panel** built into the right-side (secondary) sidebar, collapsible: chat, agent task, live activity feed, inline diffs with accept/reject, checkpoints/undo. It reuses the Work AI engine, so the agent edits files directly in the workspace.
+- **Aatmiq panel** built into the right-side (secondary) sidebar, collapsible: chat, agent task, live activity feed, inline diffs with accept/reject, checkpoints/undo. It reuses the Work AI engine, so the agent edits files directly in the workspace.
 
 ### 4.5 Org Admin portal
 Users and groups, invitations, roles, SSO config, model providers, model access, token quotas, usage analytics, connectors, audit log, branding, data retention, license status.
@@ -98,7 +100,7 @@ Customers/orgs, licenses (seats, tier, features, expiry, branding defaults), upd
 ## 5. Architecture
 
 ```
-                        ┌──────────────── Monolith License Server (our cloud) ───────────────┐
+                        ┌──────────────── Aatmiq License Server (our cloud) ───────────────┐
                         │ Super Admin console · license signing · update channel · heartbeats│
                         └──────────────▲─────────────────────────────────────────────────────┘
                                        │ license + aggregate counts only (no content)
@@ -145,7 +147,7 @@ Customers/orgs, licenses (seats, tier, features, expiry, branding defaults), upd
 | Connectors | MCP servers | Industry standard, reusable |
 | Web search | SearXNG (self-hosted) | Private search |
 | Sandboxes | Docker (one container per user), Kubernetes later | Isolation |
-| IDE | Code-OSS fork (separate repo `monolith-ide`) | True VS Code parity |
+| IDE | Code-OSS fork (separate repo `aatmiq-ide`) | True VS Code parity |
 | Deploy | Docker Compose (v1), Helm chart (v2) | Simple for small orgs, scalable for mid-size |
 | Observability | OpenTelemetry, Prometheus/Grafana (optional bundle) | Ops |
 
@@ -154,7 +156,7 @@ Customers/orgs, licenses (seats, tier, features, expiry, branding defaults), upd
 ## 7. Repository layout (planned)
 
 ```
-Monolith-AI/
+Monolith-AI/          # repo name (historical); product = Aatmiq
 ├─ apps/
 │  ├─ web/              # Next.js: login, chat, work AI, admin portal, settings
 │  ├─ api/              # Fastify API + realtime
@@ -173,7 +175,7 @@ Monolith-AI/
 ├─ deploy/              # docker-compose, env templates, Helm (later)
 └─ docs/                # This plan + per-part specs
 ```
-The IDE fork lives in a **separate repo** (`monolith-ide`) because Code-OSS is huge and has its own build. It communicates with `apps/api` over a documented API.
+The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is huge and has its own build. It communicates with `apps/api` over a documented API.
 
 ---
 
@@ -211,7 +213,7 @@ The IDE fork lives in a **separate repo** (`monolith-ide`) because Code-OSS is h
 - Dark mode first, with light mode included. Typeface: Inter (UI) + JetBrains Mono (code).
 - Minimal, dense-but-calm layouts inspired by Claude.ai, ChatGPT, Linear and VS Code.
 - Micro-animations: 120–200 ms ease-out for hover/press, panel slide, streaming caret, skeletons. Respects `prefers-reduced-motion`.
-- The IDE fork ships a matching "Monolith Dark" theme, with the accent injected from org branding.
+- The IDE fork ships a matching "Aatmiq Dark" theme, with the accent injected from org branding.
 
 ---
 
@@ -222,7 +224,7 @@ The IDE fork lives in a **separate repo** (`monolith-ide`) because Code-OSS is h
 | **P0 Foundation** | Monorepo, design system, auth (email/pw + Google/Microsoft), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, Docker Compose, license client | Installable, admin-manageable shell |
 | **P1 Chat** | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
 | **P2 Work AI** | DSH adapter, sandbox containers, tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules | Cowork-class agent |
-| **P3 Code** | Code-OSS fork, branding, Open VSX, web + desktop builds, Monolith AI panel wired to the harness | Cursor-class IDE |
+| **P3 Code** | Code-OSS fork, branding, Open VSX, web + desktop builds, Aatmiq panel wired to the harness | Cursor-class IDE |
 | **P4 Enterprise** | SAML/OIDC, audit exports, retention policies, Helm/K8s, offline licenses, backups, SOC2-style docs | Mid-size readiness |
 | **Parallel** | Marketing site + Super Admin license server | Sales and customer management |
 

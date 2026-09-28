@@ -93,7 +93,7 @@ Login rate limiting and lockout, CSRF protection, secure headers, 12h idle / 30d
 
 | Mode | Who manages LLMs | How it works |
 |---|---|---|
-| **Monolith-managed** | **Super Admin** | We set up and operate the org's model servers. The license server pushes a **model config** (providers, models, default parameters). The Org Admin can only enable/disable those models per workspace. |
+| **Aatmiq-managed** | **Super Admin** | We set up and operate the org's model servers. The license server pushes a **model config** (providers, models, default parameters). The Org Admin can only enable/disable those models per workspace. |
 | **Self-managed** | **Org Admin** | The org runs its own Ollama/vLLM/API endpoints. The Org Admin adds providers and models in the portal. The Super Admin's catalog appears as *suggestions*. |
 
 In both modes, **prompts and responses never pass through our cloud.** Only configuration flows down from the license server.
@@ -219,8 +219,8 @@ optional profiles: ollama (GPU) · searxng (P2) · sandbox-manager (P2) · otel/
 ```
 - **Installer:** `curl -fsSL https://get.<domain>/install.sh | sh`. It checks Docker, asks for the domain and license key, generates secrets, writes `.env`, and starts the stack.
 - **Minimum:** 4 vCPU / 16 GB RAM / 100 GB SSD without local models. GPU sizing is documented per model tier.
-- **Updates:** `monolith update` pulls signed images and runs DB migrations. Rollback keeps the previous image tag.
-- **Backups:** `monolith backup` (pg_dump + MinIO mirror). A cron template is included.
+- **Updates:** `aatmiq update` pulls signed images and runs DB migrations. Rollback keeps the previous image tag.
+- **Backups:** `aatmiq backup` (pg_dump + MinIO mirror). A cron template is included.
 - **Air-gapped (P4):** offline image bundle + offline signed license.
 
 ---
@@ -236,7 +236,7 @@ workspaces(id, org_id, name, slug, icon, settings jsonb, archived_at)
 workspace_members(workspace_id, user_id, role[admin|member|viewer], sections[] )
 groups(id, workspace_id, name) · group_members(group_id, user_id)
 
-model_providers(id, org_id, type, name, base_url, api_key_enc, managed_by[org|monolith], health jsonb)
+model_providers(id, org_id, type, name, base_url, api_key_enc, managed_by[org|aatmiq], health jsonb)
 models(id, org_id, provider_id, model_key, display_name, capabilities[], context_len, default_params jsonb, sections[], cost_in, cost_out, enabled, catalog_ref)
 workspace_models(workspace_id, model_id, is_default_for[] )
 model_grants(workspace_id, subject_type[user|group], subject_id, model_id)
@@ -296,8 +296,8 @@ auth.login / login_failed / logout / 2fa_enabled · user.invited / deactivated /
 
 ---
 
-## 16. Open questions (to settle before F2)
-1. Should Workspace Admins be allowed to **invite new people to the org**, or only add existing org users? (Proposed: only existing users. Org Admins invite.)
-2. Default user quota when a workspace is created? (Proposed: the workspace budget ÷ member count, rounded, adjustable.)
-3. Is **prompt/response logging** for compliance something customers will ask for (e.g. finance)? (Proposed: off by default, admin toggle, users see a notice.)
-4. The product name needs a trademark check (see `pricing-and-business.md` §4) before we buy a domain. All UI strings pull the name from config, so renaming is cheap.
+## 16. Resolved questions
+1. Workspace Admins **cannot** invite new people to the org. Only Org Admins/Owners invite. Workspace Admins add existing org users to their workspace. (D18)
+2. Default user quota = **workspace budget ÷ member count** (rounded), recalculated when members join or leave, unless an admin has set a manual override for that user. (D19)
+3. Prompt/response logging is **off by default**. When an Org Admin turns it on, every user sees a persistent notice in the app and a one-time acknowledgement dialog. (D20)
+4. Product name = **Aatmiq**. (D16)

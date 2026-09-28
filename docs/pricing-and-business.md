@@ -34,11 +34,20 @@ These sit below the cloud tools a buyer compares against (roughly $25–40 per s
 ## 3. What the license encodes
 `tier`, `seats`, `sections[]`, `features[]` (sso_saml, audit_export, connectors, …), `model_mode` (managed|self), `workspace_limit`, `expires_at`, and `branding`. Changing plan = issuing a new key; no reinstall.
 
-## 4. Name and trademark ⚠️
-**"Monolith AI" is already used**: Monolith AI Ltd (London, founded 2016, engineering ML software, monolithai.com) holds a registered trademark. Selling B2B AI software under the same name risks a dispute and makes the product hard to find in search.
+## 4. Name and trademark ✅
+**Chosen name: Aatmiq** (from Sanskrit *ātmik*, "of the self, one's own"). Tagline direction: **"Your own AI."**
 
-Options:
-1. A distinct name, e.g. **Monolith Works**, **Monolyth**, **Obelisk AI**, **Vault AI**, **Keystone AI** (each still needs a trademark and domain check).
-2. Keep "Monolith" as the codename. The product name is config-driven everywhere (the license `branding.name` and app config), so a rename later is cheap.
+Why we moved away from "Monolith AI": Monolith AI Ltd (London, founded 2016, monolithai.com) holds a registered trademark for AI software.
 
-Recommendation: keep building under the codename "Monolith". Pick the final name and buy the domain before the marketing site goes live (P1).
+Screening done (2026-09-28, web search + DNS lookup, **not** a legal clearance):
+- No company, product or app found using "Aatmiq".
+- `aatmiq.com` and `aatmiq.ai` had no DNS records, so they are likely unregistered.
+- Rejected names: Menhir, Plinth, Lithos, Dolmen, Inhouse AI, Keepstone, Corelith, Obelith, Stelith, Enlith, Durgam (conflicts with existing AI/software companies). Runners-up: Onelith, Ekanta, Ekastra.
+
+**Next steps (owner action):**
+1. Register `aatmiq.com` and `aatmiq.ai` now (plus `aatmiq.in` if selling in India).
+2. Search the trademark databases: IP India, USPTO, WIPO Global Brand Database, in classes 9 (software) and 42 (SaaS).
+3. File a trademark application in India (classes 9 and 42), then in other markets when you expand.
+4. Claim the same handle on GitHub, LinkedIn, X and YouTube.
+
+The product name stays config-driven in code (`branding.name`), so white-labelled customer deployments can show their own name.
