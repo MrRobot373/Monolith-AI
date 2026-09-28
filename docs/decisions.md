@@ -15,7 +15,7 @@
 | D11 | 2026-09-28 | Brand = black/gray/white + configurable accent (default cyan) | — | White-label per customer |
 | D12 | 2026-09-28 | Tenancy = one org per install with **multiple workspaces (teams)**, each with its own models, budget and connectors | Single-team org | Teams need separate models and budgets |
 | D13 | 2026-09-28 | Over-quota = **request more tokens in-app**; admins approve/deny; paused agent tasks resume | Hard stop | Keeps work flowing, admin stays in control |
-| D14 | 2026-09-28 | Models: Super Admin curates catalog; **Monolith-managed** orgs → Super Admin config; **self-managed** orgs → Org Admin | Fixed list | Supports both customer types; no content passes through our cloud |
+| D14 | 2026-09-28 | Models: Super Admin curates catalog; **Aatmiq-managed** orgs → Super Admin config; **self-managed** orgs → Org Admin | Fixed list | Supports both customer types; no content passes through our cloud |
 | D15 | 2026-09-28 | Pricing = tiered per-seat (Chat / Work / Complete / Enterprise) + platform fee + managed LLM add-on (proposal) | Flat per org; usage-based | Familiar to buyers, upgrade path, covers support cost |
 | D16 | 2026-09-28 | Product name = **Aatmiq** ("your own AI"); name stays config-driven | Monolith AI (UK trademark conflict); Onelith; Ekanta; Ekastra | No conflicts found; .com and .ai both likely free; meaning sells privacy |
 | D17 | 2026-09-28 | Add **Workspace Admin** role | Org Admin only | Delegation for team budgets and token requests |

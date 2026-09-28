@@ -8,7 +8,7 @@ Why this mix:
 - **Per seat** is how buyers already compare ChatGPT Team, Claude Team and Cursor Business, so the comparison is easy.
 - **Tiers by section** let a small company start cheap (Chat) and upgrade (Work AI, Code). The license already gates sections, so this costs almost nothing to build.
 - **Platform fee** covers install, updates and support. Self-hosted products carry real support cost, and a 10-seat customer must still be profitable.
-- **Managed LLM** is a separate, high-margin line for customers without an AI/infra team. It matches the "Monolith-managed" model mode in the foundation spec.
+- **Managed LLM** is a separate, high-margin line for customers without an AI/infra team. It matches the "Aatmiq-managed" model mode in the foundation spec.
 
 Flat per-org pricing is simpler, but it underprices growing customers and gives no upgrade path. Pure usage pricing makes no sense when the customer owns the GPUs.
 
