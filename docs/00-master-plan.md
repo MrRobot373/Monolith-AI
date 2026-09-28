@@ -231,11 +231,11 @@ The IDE fork lives in a **separate repo** (`monolith-ide`) because Code-OSS is h
 ## 13. How we plan from here
 Each part gets its own detailed spec in `docs/` before implementation:
 
-1. `01-foundation.md` — auth, roles, admin portal, gateway, quotas, deployment
+1. `01-foundation.md` — auth, roles, admin portal, gateway, quotas, deployment ✅ draft
 2. `02-chat.md`
 3. `03-work-ai.md`
 4. `04-code-ide.md`
 5. `05-website-and-license-server.md`
 6. `06-design-system.md` — UI/UX, screens, motion, branding
 
-Decisions already made are recorded in `docs/decisions.md`.
+Decisions already made are recorded in `docs/decisions.md`. Pricing and name: `docs/pricing-and-business.md`.
