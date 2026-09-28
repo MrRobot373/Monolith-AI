@@ -170,7 +170,7 @@ d("Aatmiq API", () => {
   it("splits the workspace budget evenly and blocks when exhausted (D19)", async () => {
     expect((await call(owner, "PUT", `/api/admin/workspaces/${workspaceId}/budget`, { tokenLimit: 200 })).status).toBe(200);
     const members = await call(owner, "GET", `/api/admin/workspaces/${workspaceId}/members`);
-    expect(members.json.every((m: { effectiveLimit: number }) => m.effectiveLimit === 100)).toBe(true);
+    expect(members.json.map((m: { effectiveLimit: number }) => m.effectiveLimit)).toEqual([100, 100]);
 
     // The first chat already used more than 100 tokens, so the next message is blocked.
     const blocked = await call(member, "POST", `/api/chats/${chatId}/messages`, { content: "one more?" });
@@ -198,6 +198,21 @@ d("Aatmiq API", () => {
     expect(ok.status).toBe(200);
     const memberNotes = await call(member, "GET", "/api/notifications");
     expect(memberNotes.json[0].type).toBe("token_request.approved");
+  });
+
+  it("a permanent approval unblocks the member even when the workspace budget is used up", async () => {
+    // Give the member a large personal allowance so the workspace is the tighter limit.
+    await call(owner, "PATCH", `/api/admin/workspaces/${workspaceId}/members/${memberId}`, { tokenLimit: 100_000_000 });
+    const q = await call(member, "GET", `/api/workspaces/${workspaceId}/quota`);
+    const wsRemaining = q.json.workspace.limit + q.json.workspace.bonus - q.json.workspace.used;
+    // Use up the whole workspace allowance, including the earlier bonus.
+    await db.execute(sql`insert into usage_event (workspace_id, user_id, section, input_tokens, output_tokens)
+      values (${workspaceId}, ${memberId}, 'chat', ${wsRemaining + 10}, 0)`);
+    const blocked = await call(member, "POST", `/api/chats/${chatId}/messages`, { content: "blocked?" });
+    expect(blocked.json.details.result.blockedBy).toBe("workspace");
+    const r = await call(member, "POST", "/api/token-requests", { workspaceId, amount: 500_000, duration: "permanent" });
+    await call(owner, "POST", `/api/token-requests/${r.json.id}/decide`, { decision: "approved" });
+    expect((await call(member, "POST", `/api/chats/${chatId}/messages`, { content: "unblocked" })).status).toBe(200);
   });
 
   it("promotes a workspace admin who can manage members but not org settings", async () => {
@@ -228,6 +243,17 @@ d("Aatmiq API", () => {
     const again = jar();
     const r = await call(again, "POST", "/api/auth/sign-in/email", { email: "dev@acme.test", password: "another-good-password" });
     expect(r.status).not.toBe(200);
+  });
+
+  it("locks an account after 10 failed sign-ins without blocking other accounts", async () => {
+    const j = jar();
+    // More than Better Auth's default of 3 per 10s per IP must be allowed (shared office IPs).
+    for (let i = 0; i < 10; i++) {
+      expect((await call(j, "POST", "/api/auth/sign-in/email", { email: "someone@acme.test", password: `wrong-password-${i}` })).status).toBe(401);
+    }
+    const locked = await call(j, "POST", "/api/auth/sign-in/email", { email: "someone@acme.test", password: "whatever-password" });
+    expect(locked.status).toBe(429);
+    expect(locked.json.code).toBe("too_many_attempts");
   });
 
   it("signs the owner in with email and password", async () => {

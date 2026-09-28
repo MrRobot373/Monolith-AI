@@ -215,6 +215,10 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     requireOrgCap(u, "org.workspaces.manage");
     const body = parse(workspaceSchema, req.body);
     const [ws] = await db.insert(workspace).values(body).returning();
+    // The creator joins as workspace admin so it shows up in their workspace switcher.
+    await db
+      .insert(workspaceMember)
+      .values({ workspaceId: ws!.id, userId: u.id, role: "admin", sections: ["chat", "work", "code"] });
     await audit(ctx, { actor: u, action: "workspace.created", workspaceId: ws!.id, targetType: "workspace", targetId: ws!.id, meta: { name: body.name } });
     return ws;
   });

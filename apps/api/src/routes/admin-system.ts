@@ -23,6 +23,7 @@ import {
   DEFAULT_ACCENT,
   isOrgAdmin,
   modelSchema,
+  modelUpdateSchema,
   orgSettingsSchema,
   PRODUCT_NAME,
   providerSchema,
@@ -175,7 +176,7 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
   app.patch<{ Params: { id: string } }>("/api/admin/models/:id", async (req) => {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.models.manage");
-    const body = parse(modelSchema.partial().omit({ providerId: true, modelKey: true }), req.body);
+    const body = parse(modelUpdateSchema, req.body);
     const [m] = await db.update(model).set(body).where(eq(model.id, req.params.id)).returning();
     if (!m) throw notFound("Model not found");
     await audit(ctx, { actor: u, action: body.enabled === false ? "model.disabled" : body.enabled ? "model.enabled" : "model.updated", targetType: "model", targetId: m.id, meta: body });

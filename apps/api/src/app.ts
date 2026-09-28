@@ -21,7 +21,13 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
   });
   const ctx: AppContext = { db, cfg, auth: createAuth(db, cfg), box: createSecretBox(cfg.secret) };
 
-  await app.register(rateLimit, { global: true, max: 600, timeWindow: "1 minute" });
+  // Keyed by session when signed in, so colleagues behind one office IP don't share a bucket.
+  await app.register(rateLimit, {
+    global: true,
+    max: 1200,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => /better-auth\.session_token=([^;]+)/.exec(req.headers.cookie ?? "")?.[1] ?? req.ip,
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {

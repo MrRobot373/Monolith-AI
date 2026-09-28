@@ -29,7 +29,14 @@ export function createAuth(db: DB, cfg: Config) {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
     },
-    rateLimit: { enabled: true, window: 60, max: 30 },
+    // Per-IP limits must allow a whole office behind one NAT address. Brute force is
+    // limited per account in routes/auth.ts instead.
+    rateLimit: {
+      enabled: true,
+      window: 60,
+      max: 600,
+      customRules: { "/sign-in/email": { window: 60, max: 120 } },
+    },
     databaseHooks: {
       session: {
         create: {

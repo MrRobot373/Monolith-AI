@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  modelUpdateSchema,
   defaultUserQuota,
   evaluateQuota,
   formatTokens,
@@ -78,5 +79,12 @@ describe("quota", () => {
   it("formats token counts", () => {
     expect(formatTokens(1_500_000)).toBe("1.5M");
     expect(formatTokens(null)).toBe("Unlimited");
+  });
+});
+
+describe("update schemas", () => {
+  it("partial model updates do not reset other fields", () => {
+    expect(modelUpdateSchema.parse({ enabled: false })).toEqual({ enabled: false });
+    expect(modelUpdateSchema.parse({ sections: ["chat"] })).toEqual({ sections: ["chat"] });
   });
 });

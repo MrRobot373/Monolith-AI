@@ -64,13 +64,12 @@ export async function getQuotaStatus(
         and(eq(usageEvent.workspaceId, workspaceId), eq(usageEvent.userId, userId), gte(usageEvent.createdAt, start)),
       ),
     db
-      .select({ userId: tokenRequest.userId, amount: tokenRequest.decidedAmount })
+      .select({ userId: tokenRequest.userId, amount: tokenRequest.decidedAmount, duration: tokenRequest.duration })
       .from(tokenRequest)
       .where(
         and(
           eq(tokenRequest.workspaceId, workspaceId),
           eq(tokenRequest.status, "approved"),
-          eq(tokenRequest.duration, "period"),
           eq(tokenRequest.periodStart, start),
         ),
       ),
@@ -79,9 +78,13 @@ export async function getQuotaStatus(
   const wsLimit = ws?.limit ?? null;
   const override = member?.limit ?? null;
   const userLimit = override ?? defaultUserQuota(wsLimit, memberCount?.n ?? 1);
-  // Approved "this period" requests raise both the user's and the workspace's ceiling.
+  // Every approval raises the workspace's ceiling for the period it was approved in, so it
+  // unblocks the person even when the workspace budget itself is used up. "period" approvals
+  // also raise the user's ceiling for that period; "permanent" ones already raised their limit.
   const wsBonus = bonuses.reduce((s, b) => s + (b.amount ?? 0), 0);
-  const userBonus = bonuses.filter((b) => b.userId === userId).reduce((s, b) => s + (b.amount ?? 0), 0);
+  const userBonus = bonuses
+    .filter((b) => b.userId === userId && b.duration === "period")
+    .reduce((s, b) => s + (b.amount ?? 0), 0);
 
   const input = {
     userLimit,

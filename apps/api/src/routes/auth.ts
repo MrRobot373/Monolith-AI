@@ -25,6 +25,18 @@ function forwardCookies(reply: FastifyReply, headers: Headers) {
   if (cookies.length) reply.header("set-cookie", cookies);
 }
 
+/** Failed sign-ins per account: 10 per 15 minutes (brute-force protection that doesn't punish shared office IPs). */
+const FAIL_WINDOW_MS = 15 * 60_000;
+const FAIL_MAX = 10;
+const failedSignIns = new Map<string, number[]>();
+
+function recentFailures(email: string, now = Date.now()): number[] {
+  const list = (failedSignIns.get(email) ?? []).filter((t) => now - t < FAIL_WINDOW_MS);
+  if (list.length) failedSignIns.set(email, list);
+  else failedSignIns.delete(email);
+  return list;
+}
+
 export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db, auth, cfg } = ctx;
 
@@ -32,10 +44,15 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
   app.route({
     method: ["GET", "POST"],
     url: "/api/auth/*",
-    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+    config: { rateLimit: { max: 600, timeWindow: "1 minute" } },
     async handler(req, reply) {
       if (req.url.startsWith("/api/auth/sign-up")) {
         throw new HttpError(403, "Accounts are created by invitation. Ask your admin for an invite.", "signup_disabled");
+      }
+      const isSignIn = req.method === "POST" && req.url.startsWith("/api/auth/sign-in/email");
+      const email = isSignIn ? String((req.body as { email?: unknown } | undefined)?.email ?? "").toLowerCase() : "";
+      if (isSignIn && email && recentFailures(email).length >= FAIL_MAX) {
+        throw new HttpError(429, "Too many failed sign-in attempts for this account. Try again in 15 minutes.", "too_many_attempts");
       }
       const url = new URL(req.url, cfg.appUrl);
       const res = await auth.handler(
@@ -45,6 +62,10 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
           body: req.method === "GET" || req.body === undefined ? undefined : JSON.stringify(req.body),
         }),
       );
+      if (isSignIn && email) {
+        if (res.status === 401) failedSignIns.set(email, [...recentFailures(email), Date.now()]);
+        else if (res.ok) failedSignIns.delete(email);
+      }
       reply.status(res.status);
       res.headers.forEach((v, k) => {
         if (k !== "set-cookie" && k !== "content-length") reply.header(k, v);

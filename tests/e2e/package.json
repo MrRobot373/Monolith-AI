@@ -1,0 +1,10 @@
+{
+  "name": "aatmiq-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fake-llm": "node fake-llm.mjs",
+    "test": "node full.mjs"
+  },
+  "dependencies": { "playwright-core": "^1.63.0" }
+}

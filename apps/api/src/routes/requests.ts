@@ -147,7 +147,7 @@ export async function requestRoutes(app: FastifyInstance, ctx: AppContext) {
         decidedBy: u.id,
         decidedAt: new Date(),
         note: body.note ?? null,
-        periodStart: body.decision === "approved" && r.duration === "period" ? start : null,
+        periodStart: body.decision === "approved" ? start : null,
       })
       .where(and(eq(tokenRequest.id, r.id), eq(tokenRequest.status, "pending")))
       .returning();

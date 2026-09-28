@@ -61,6 +61,16 @@ export const modelSchema = z.object({
   costOutPerM: z.number().nonnegative().optional(),
 });
 
+/** Updates must not carry defaults, or a partial update would silently reset other fields. */
+export const modelUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(80).optional(),
+  contextLength: z.number().int().positive().max(10_000_000).optional(),
+  sections: z.array(z.enum(SECTIONS)).optional(),
+  enabled: z.boolean().optional(),
+  costInPerM: z.number().nonnegative().optional(),
+  costOutPerM: z.number().nonnegative().optional(),
+});
+
 export const workspaceModelsSchema = z.object({
   modelIds: z.array(z.string()),
   defaultModelId: z.string().nullable().optional(),
