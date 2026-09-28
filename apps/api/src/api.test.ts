@@ -17,6 +17,7 @@ const cfg: Config = {
   secret: "test-secret-test-secret-test-secret-1234",
   allowMockProvider: true,
   port: 0,
+  storageDir: "",
 };
 
 let app: FastifyInstance;
@@ -274,5 +275,137 @@ d("Aatmiq API", () => {
     expect(enc).not.toContain("sk-secret");
     const list = await call(owner, "GET", "/api/admin/providers");
     expect(JSON.stringify(list.json)).not.toContain("sk-secret");
+  });
+});
+
+/* ───────────── Documents ───────────── */
+
+function multipart(fields: Record<string, string>, file: { name: string; content: Buffer | string; type?: string }) {
+  const boundary = `----aatmiq${Math.random().toString(16).slice(2)}`;
+  const parts: Buffer[] = [];
+  for (const [k, v] of Object.entries(fields))
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  parts.push(
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${file.type ?? "text/plain"}\r\n\r\n`,
+    ),
+  );
+  parts.push(Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content));
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+d("Documents", () => {
+  const owner = jar();
+  const member = jar();
+  let workspaceId = "";
+  let storageDir = "";
+  let policyId = "";
+  let handbookId = "";
+
+  async function upload(j: Jar, name: string, content: string, scope = "private") {
+    const { body, contentType } = multipart({ workspaceId, scope }, { name, content });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: { origin: APP_URL, cookie: j.cookie, "content-type": contentType },
+      payload: body,
+    });
+    return { status: res.statusCode, json: res.json() };
+  }
+  async function waitReady(j: Jar, id: string) {
+    for (let i = 0; i < 50; i++) {
+      const r = await call(j, "GET", `/api/documents/${id}`);
+      if (r.json.status !== "processing") return r.json;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("document stayed in processing");
+  }
+
+  beforeAll(async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    storageDir = await mkdtemp(`${tmpdir()}/aatmiq-docs-`);
+    await app?.close();
+    ({ db, close } = createDb(url));
+    await db.execute(sql`
+      do $$ declare r record; begin
+        for r in (select tablename from pg_tables where schemaname = 'public' and tablename not like '%drizzle%') loop
+          execute 'truncate table "' || r.tablename || '" cascade';
+        end loop;
+      end $$;`);
+    app = await buildApp(db, { ...cfg, storageDir });
+    await call(owner, "POST", "/api/setup", { orgName: "Docs Co", name: "Owner", email: "o@docs.test", password: "correct-horse-battery" });
+    workspaceId = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+    const inv = await call(owner, "POST", "/api/admin/invites", { email: "m@docs.test", workspaces: [{ workspaceId, role: "member" }] });
+    await call(member, "POST", `/api/invites/${inv.json.link.split("/invite/")[1]}/accept`, { name: "Member", password: "another-good-password" });
+  });
+
+  it("rejects unsupported file types", async () => {
+    const r = await upload(owner, "photo.png", "not really a png");
+    expect(r.status).toBe(415);
+  });
+
+  it("uploads, processes and embeds a document", async () => {
+    const r = await upload(owner, "leave-policy.md", "# Leave policy\n\nEmployees get 24 days of annual leave per year.\n\nSick leave is 10 days.");
+    expect(r.status).toBe(200);
+    policyId = r.json.id;
+    const doc = await waitReady(owner, policyId);
+    expect(doc.status).toBe("ready");
+    expect(doc.chunkCount).toBeGreaterThan(0);
+    expect(doc.embeddingModelId).toBeTruthy();
+  });
+
+  it("keeps private documents private until shared", async () => {
+    expect((await call(member, "GET", `/api/documents?workspaceId=${workspaceId}`)).json).toHaveLength(0);
+    expect((await call(member, "GET", `/api/documents/${policyId}`)).status).toBe(404);
+    expect((await call(member, "PATCH", `/api/documents/${policyId}`, { scope: "workspace" })).status).toBe(404);
+    expect((await call(owner, "PATCH", `/api/documents/${policyId}`, { scope: "workspace" })).status).toBe(200);
+    expect((await call(member, "GET", `/api/documents?workspaceId=${workspaceId}`)).json).toHaveLength(1);
+    // Shared, but only the owner or a workspace admin can change or delete it.
+    expect((await call(member, "DELETE", `/api/documents/${policyId}`)).status).toBe(403);
+  });
+
+  it("answers with numbered citations from attached documents", async () => {
+    const c = await call(member, "POST", "/api/chats", { workspaceId });
+    const r = await call(member, "POST", `/api/chats/${c.json.id}/messages`, { content: "How many days of annual leave?", documentIds: [policyId] });
+    expect(r.status).toBe(200);
+    const start = JSON.parse(r.body.split("event: start\ndata: ")[1]!.split("\n")[0]!);
+    expect(start.citations[0]).toMatchObject({ n: 1, documentId: policyId, name: "leave-policy.md" });
+    expect(r.body).toContain("[1]");
+    const full = await call(member, "GET", `/api/chats/${c.json.id}`);
+    expect(full.json.documents.map((x: { id: string }) => x.id)).toEqual([policyId]);
+    expect(full.json.messages[0].attachments[0].name).toBe("leave-policy.md");
+    expect(full.json.messages[1].citations[0].snippet).toContain("24 days");
+  });
+
+  it("can't attach someone else's private document", async () => {
+    const r = await upload(owner, "secret.txt", "Board salary numbers");
+    await waitReady(owner, r.json.id);
+    const c = await call(member, "POST", "/api/chats", { workspaceId });
+    const res = await call(member, "POST", `/api/chats/${c.json.id}/messages`, { content: "hi", documentIds: [r.json.id] });
+    expect(res.status).toBe(400);
+  });
+
+  it("finds the right passage in a long document", async () => {
+    const filler = Array.from({ length: 60 }, (_, i) => `Section ${i}. ${"General company information and routine procedures. ".repeat(8)}`);
+    filler.splice(41, 0, "Facilities. The office parking code for the basement garage is 4471, changed every quarter.");
+    const r = await upload(owner, "handbook.txt", filler.join("\n\n"));
+    handbookId = r.json.id;
+    const doc = await waitReady(owner, handbookId);
+    expect(doc.chunkCount).toBeGreaterThan(10);
+    const c = await call(owner, "POST", "/api/chats", { workspaceId });
+    const res = await call(owner, "POST", `/api/chats/${c.json.id}/messages`, { content: "What is the parking garage code?", documentIds: [handbookId] });
+    const start = JSON.parse(res.body.split("event: start\ndata: ")[1]!.split("\n")[0]!);
+    expect(start.citations.length).toBeLessThanOrEqual(6);
+    expect(start.citations[0].snippet).toContain("4471");
+  });
+
+  it("deletes a document and its file", async () => {
+    const { readdir } = await import("node:fs/promises");
+    const before = (await readdir(`${storageDir}/${workspaceId}`)).length;
+    expect((await call(owner, "DELETE", `/api/documents/${handbookId}`)).status).toBe(200);
+    expect((await call(owner, "GET", `/api/documents/${handbookId}`)).status).toBe(404);
+    expect((await readdir(`${storageDir}/${workspaceId}`)).length).toBe(before - 1);
   });
 });

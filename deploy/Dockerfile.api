@@ -16,9 +16,11 @@ RUN pnpm --filter @aatmiq/api build \
  && cp -r packages/db/migrations /out/migrations
 
 FROM node:22-alpine
-ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000
+ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000 STORAGE_DIR=/data/files
 WORKDIR /app
 COPY --from=build /out /app
+RUN mkdir -p /data/files && chown -R node:node /data
 USER node
+VOLUME /data
 EXPOSE 4000
 CMD ["node", "dist/server.js"]

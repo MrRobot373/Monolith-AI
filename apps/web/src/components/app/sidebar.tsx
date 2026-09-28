@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Code2,
+  FileText,
   LogOut,
   MessageSquare,
   MoreHorizontal,
@@ -249,6 +250,11 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
         {can("chat") && (
           <NavItem href="/app/chat" icon={<MessageSquare />} active={pathname.startsWith("/app/chat/")}>
             Chat
+          </NavItem>
+        )}
+        {can("chat") && (
+          <NavItem href="/app/documents" icon={<FileText />} active={pathname.startsWith("/app/documents")}>
+            Documents
           </NavItem>
         )}
         {can("work") && (

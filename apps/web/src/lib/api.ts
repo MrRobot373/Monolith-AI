@@ -61,3 +61,21 @@ export async function* readSse(res: Response): AsyncGenerator<{ event: string; d
     }
   }
 }
+
+/** Upload one file to the workspace document library. */
+export async function uploadDocument(workspaceId: string, file: File, scope: "private" | "workspace" = "private") {
+  const form = new FormData();
+  form.append("workspaceId", workspaceId);
+  form.append("scope", scope);
+  form.append("file", file);
+  const res = await fetch("/api/documents", { method: "POST", credentials: "include", body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error ?? "Upload failed", data.code);
+  return data as import("./types").DocumentRow;
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}

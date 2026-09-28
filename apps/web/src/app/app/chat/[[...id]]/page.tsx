@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { ChatView } from "@/components/chat/chat-view";
 
 /**
@@ -26,6 +26,7 @@ export default function ChatPage() {
 
   const isLocal = !paramId || paramId === localId;
   return (
+    <Suspense>
     <ChatView
       key={isLocal ? `new-${fresh}` : paramId}
       chatId={isLocal ? undefined : paramId}
@@ -34,5 +35,6 @@ export default function ChatPage() {
         window.history.replaceState(null, "", `/app/chat/${id}`);
       }}
     />
+    </Suspense>
   );
 }

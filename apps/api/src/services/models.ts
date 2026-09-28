@@ -30,7 +30,7 @@ export async function availableModels(db: DB, workspaceId: string, section: Sect
     .from(workspaceModel)
     .innerJoin(model, eq(model.id, workspaceModel.modelId))
     .innerJoin(modelProvider, eq(modelProvider.id, model.providerId))
-    .where(and(eq(workspaceModel.workspaceId, workspaceId), eq(model.enabled, true)))
+    .where(and(eq(workspaceModel.workspaceId, workspaceId), eq(model.enabled, true), eq(model.kind, "chat")))
     .orderBy(asc(model.displayName));
   return rows
     .filter((r) => r.sections.includes(section))

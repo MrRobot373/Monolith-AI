@@ -58,6 +58,8 @@ export interface ChatMessageRow {
   inputTokens: number | null;
   outputTokens: number | null;
   error: string | null;
+  attachments?: { id: string; name: string }[] | null;
+  citations?: Citation[] | null;
   createdAt: string;
 }
 
@@ -100,4 +102,27 @@ export interface WorkspaceRow {
   modelCount: number;
   used: number;
   pendingRequests: number;
+}
+
+export interface DocumentRow {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  scope: "private" | "workspace";
+  status: "processing" | "ready" | "failed";
+  error: string | null;
+  pageCount: number | null;
+  chunkCount: number | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  createdAt: string;
+}
+
+export interface Citation {
+  n: number;
+  documentId: string;
+  name: string;
+  page: number | null;
+  snippet: string;
 }

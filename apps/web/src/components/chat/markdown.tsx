@@ -5,6 +5,8 @@ import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import type { Citation } from "@/lib/types";
+import { CitationChip, linkCitations } from "./citations";
 
 function textOf(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -39,7 +41,15 @@ function CodeBlock({ children, className }: { children?: ReactNode; className?: 
   );
 }
 
-export const Markdown = memo(function Markdown({ content }: { content: string }) {
+export const Markdown = memo(function Markdown({
+  content,
+  citations,
+  onCite,
+}: {
+  content: string;
+  citations?: Citation[] | null;
+  onCite?: (c: Citation) => void;
+}) {
   return (
     <div className="prose-chat">
       <ReactMarkdown
@@ -56,14 +66,19 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
               </code>
             );
           },
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            const n = href?.startsWith("#cite-") ? Number(href.slice(6)) : null;
+            const c = n ? citations?.find((x) => x.n === n) : undefined;
+            if (c) return <CitationChip citation={c} onOpen={(x) => onCite?.(x)} />;
+            return (
+              <a href={href} target="_blank" rel="noreferrer noopener">
+                {children}
+              </a>
+            );
+          },
         }}
       >
-        {content}
+        {linkCitations(content, citations)}
       </ReactMarkdown>
     </div>
   );

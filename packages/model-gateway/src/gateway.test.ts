@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { completeChat, listModels, openAiBase, streamChat, testProvider } from "./index";
+import { completeChat, embed, listModels, mockEmbed, openAiBase, streamChat, testProvider } from "./index";
 
 let server: Server;
 let base = "";
@@ -11,6 +11,11 @@ beforeAll(async () => {
     if (req.url === "/v1/models") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ data: [{ id: "qwen-test" }] }));
+      return;
+    }
+    if (req.url === "/v1/embeddings") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: [{ index: 1, embedding: [0, 1] }, { index: 0, embedding: [1, 0] }], usage: { prompt_tokens: 7 } }));
       return;
     }
     if (req.url === "/v1/chat/completions") {
@@ -69,5 +74,21 @@ describe("helpers", () => {
     const r = await completeChat({ type: "mock" }, "aatmiq-demo", [{ role: "user", content: "ping" }]);
     expect(r.text).toContain("ping");
     expect(r.usage.outputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe("embeddings", () => {
+  it("returns vectors in input order with provider usage", async () => {
+    const r = await embed({ type: "openai_compatible", baseUrl: base }, "e5", ["a", "b"]);
+    expect(r.vectors).toEqual([[1, 0], [0, 1]]);
+    expect(r.inputTokens).toBe(7);
+  });
+  it("mock embeddings are normalized and similar for overlapping text", () => {
+    const a = mockEmbed("annual leave policy for employees");
+    const b = mockEmbed("how many days of annual leave do employees get");
+    const c = mockEmbed("quarterly revenue forecast");
+    const dot = (x: number[], y: number[]) => x.reduce((s, v, i) => s + v * y[i]!, 0);
+    expect(Math.hypot(...a)).toBeCloseTo(1);
+    expect(dot(a, b)).toBeGreaterThan(dot(a, c));
   });
 });

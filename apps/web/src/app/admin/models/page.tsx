@@ -30,6 +30,7 @@ interface ModelRow {
   providerType: string;
   modelKey: string;
   displayName: string;
+  kind: "chat" | "embedding";
   contextLength: number | null;
   sections: string[];
   enabled: boolean;
@@ -127,7 +128,7 @@ export default function ModelsPage() {
 
       <Section title="Models" description="Turn a model off to hide it everywhere. Sections control where it can be used.">
         {models.data?.length ? (
-          <Table head={["Model", "Provider", "Context", "Available in", "Enabled", ""]}>
+          <Table head={["Model", "Type", "Provider", "Available in", "Enabled", ""]}>
             {models.data.map((m) => (
               <tr key={m.id} className="hover:bg-surface-2/50">
                 <Td>
@@ -139,9 +140,12 @@ export default function ModelsPage() {
                     </div>
                   </div>
                 </Td>
+                <Td className="text-fg-muted">{m.kind === "embedding" ? "Embeddings" : "Chat"}</Td>
                 <Td className="text-fg-muted">{m.providerName}</Td>
-                <Td className="text-fg-muted tabular-nums">{m.contextLength ? formatTokens(m.contextLength) : "—"}</Td>
                 <Td>
+                  {m.kind === "embedding" ? (
+                    <span className="text-[12px] text-fg-subtle">Document search</span>
+                  ) : (
                   <div className="flex gap-1">
                     {(["chat", "work", "code"] as const).map((s) => {
                       const on = m.sections.includes(s);
@@ -159,6 +163,7 @@ export default function ModelsPage() {
                       );
                     })}
                   </div>
+                  )}
                 </Td>
                 <Td>
                   <Switch checked={m.enabled} onCheckedChange={(v) => updateModel.mutate({ id: m.id, enabled: v })} label={`Enable ${m.displayName}`} />
@@ -252,11 +257,12 @@ function AddModelsDialog({ provider, onClose, onDone }: { provider: Provider; on
     retry: false,
   });
   const [manual, setManual] = useState("");
+  const [manualKind, setManualKind] = useState<"chat" | "embedding">("chat");
   const [adding, setAdding] = useState<string | null>(null);
-  const add = async (modelKey: string) => {
+  const add = async (modelKey: string, kind?: "chat" | "embedding") => {
     setAdding(modelKey);
     try {
-      await post("/api/admin/models", { providerId: provider.id, modelKey, displayName: prettyName(modelKey) });
+      await post("/api/admin/models", { providerId: provider.id, modelKey, displayName: prettyName(modelKey), kind: kind ?? kindFor(modelKey) });
       toast.success(`Added ${prettyName(modelKey)}`, { description: "Enable it for workspaces under Workspaces › Models." });
       discover.refetch();
       onDone();
@@ -280,6 +286,7 @@ function AddModelsDialog({ provider, onClose, onDone }: { provider: Provider; on
           {discover.data?.map((m) => (
             <div key={m.modelKey} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-0">
               <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{m.modelKey}</span>
+              {kindFor(m.modelKey) === "embedding" && !m.added && <span className="text-[11px] text-fg-subtle">embeddings</span>}
               {m.added ? (
                 <Badge tone="success">Added</Badge>
               ) : (
@@ -290,8 +297,25 @@ function AddModelsDialog({ provider, onClose, onDone }: { provider: Provider; on
         </div>
         <Field label="Or add by name">
           <div className="flex gap-2">
-            <Input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="e.g. deepseek-v4:32b" className="font-mono text-[13px]" />
-            <Button disabled={!manual.trim()} loading={adding === manual} onClick={() => add(manual.trim())}>Add</Button>
+            <Input
+              value={manual}
+              onChange={(e) => {
+                setManual(e.target.value);
+                setManualKind(kindFor(e.target.value));
+              }}
+              placeholder="e.g. deepseek-v4:32b"
+              className="font-mono text-[13px]"
+            />
+            <select
+              value={manualKind}
+              onChange={(e) => setManualKind(e.target.value as "chat" | "embedding")}
+              aria-label="Model type"
+              className="h-9 rounded-lg border border-border bg-surface px-2 text-[13px]"
+            >
+              <option value="chat">Chat</option>
+              <option value="embedding">Embeddings</option>
+            </select>
+            <Button disabled={!manual.trim()} loading={adding === manual} onClick={() => add(manual.trim(), manualKind)}>Add</Button>
           </div>
         </Field>
       </div>
@@ -306,4 +330,9 @@ function prettyName(key: string): string {
     .replace(/\b([a-z])/g, (c) => c.toUpperCase())
     .replace(/\b(\d+)b\b/gi, "$1B")
     .trim();
+}
+
+/** Guess whether a model name is an embedding model (nomic-embed-text, bge-m3, e5, all-minilm…). */
+function kindFor(key: string): "chat" | "embedding" {
+  return /embed|bge|(^|[^a-z])e5([^a-z]|$)|minilm|gte-|arctic-embed|mxbai/i.test(key) ? "embedding" : "chat";
 }

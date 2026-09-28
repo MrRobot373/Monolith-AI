@@ -36,6 +36,7 @@ interface ModelRow {
   id: string;
   displayName: string;
   providerName: string;
+  kind: "chat" | "embedding";
   enabled: boolean;
   sections: string[];
 }
@@ -310,17 +311,24 @@ function QuotaDialog({ member, onClose, onSave }: { member: Member; onClose: () 
 function Models({ ws }: { ws: WorkspaceRow }) {
   const qc = useQueryClient();
   const all = useQuery({ queryKey: ["admin-models"], queryFn: () => get<ModelRow[]>("/api/admin/models") });
-  const current = useQuery({ queryKey: ["ws-models", ws.id], queryFn: () => get<{ modelIds: string[]; defaultModelId: string | null }>(`/api/admin/workspaces/${ws.id}/models`) });
+  const current = useQuery({
+    queryKey: ["ws-models", ws.id],
+    queryFn: () => get<{ modelIds: string[]; defaultModelId: string | null; embeddingModelId: string | null }>(`/api/admin/workspaces/${ws.id}/models`),
+  });
   const [ids, setIds] = useState<string[]>([]);
   const [def, setDef] = useState<string | null>(null);
+  const [emb, setEmb] = useState<string | null>(null);
   useEffect(() => {
     if (current.data) {
       setIds(current.data.modelIds);
       setDef(current.data.defaultModelId);
+      setEmb(current.data.embeddingModelId);
     }
   }, [current.data]);
+  const chatModels = all.data?.filter((m) => m.kind !== "embedding");
+  const embedModels = all.data?.filter((m) => m.kind === "embedding" && m.enabled) ?? [];
   const save = useMutation({
-    mutationFn: () => put(`/api/admin/workspaces/${ws.id}/models`, { modelIds: ids, defaultModelId: def }),
+    mutationFn: () => put(`/api/admin/workspaces/${ws.id}/models`, { modelIds: ids, defaultModelId: def, embeddingModelId: emb }),
     onSuccess: () => {
       toast.success("Models updated");
       qc.invalidateQueries({ queryKey: ["ws-models", ws.id] });
@@ -329,7 +337,11 @@ function Models({ ws }: { ws: WorkspaceRow }) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
-  const dirty = current.data && (JSON.stringify([...ids].sort()) !== JSON.stringify([...current.data.modelIds].sort()) || def !== current.data.defaultModelId);
+  const dirty =
+    current.data &&
+    (JSON.stringify([...ids].sort()) !== JSON.stringify([...current.data.modelIds].sort()) ||
+      def !== current.data.defaultModelId ||
+      emb !== current.data.embeddingModelId);
   return (
     <Section
       title="Models in this workspace"
@@ -337,7 +349,7 @@ function Models({ ws }: { ws: WorkspaceRow }) {
       actions={<Button variant="primary" size="sm" disabled={!dirty} loading={save.isPending} onClick={() => save.mutate()}>Save changes</Button>}
     >
       <Card className="divide-y divide-border">
-        {all.data?.map((m) => {
+        {chatModels?.map((m) => {
           const on = ids.includes(m.id);
           return (
             <div key={m.id} className="flex items-center gap-4 px-4 py-3">
@@ -359,8 +371,33 @@ function Models({ ws }: { ws: WorkspaceRow }) {
             </div>
           );
         })}
-        {all.data?.length === 0 && <p className="px-4 py-8 text-center text-sm text-fg-subtle">No models in the organization yet.</p>}
+        {chatModels?.length === 0 && <p className="px-4 py-8 text-center text-sm text-fg-subtle">No chat models in the organization yet.</p>}
       </Card>
+      <div className="pt-6">
+        <h3 className="text-[14px] text-fg">Document search</h3>
+        <p className="mt-0.5 text-[12.5px] text-fg-subtle">
+          Keyword search always works. Add an embedding model to also search by meaning, which finds answers phrased differently from the question.
+        </p>
+        <Card className="mt-3 flex flex-wrap items-center gap-3 p-4">
+          <select
+            value={emb ?? ""}
+            onChange={(e) => setEmb(e.target.value || null)}
+            aria-label="Embedding model"
+            className="h-9 min-w-64 rounded-lg border border-border bg-surface px-2 text-[13px]"
+          >
+            <option value="">Keyword search only</option>
+            {embedModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.displayName} · {m.providerName}
+              </option>
+            ))}
+          </select>
+          {embedModels.length === 0 && <span className="text-[12.5px] text-fg-subtle">Add an embedding model (e.g. nomic-embed-text) under Models.</span>}
+          {emb && emb !== current.data?.embeddingModelId && (
+            <span className="text-[12.5px] text-fg-subtle">New uploads use it right away. Existing documents use it after you reprocess them.</span>
+          )}
+        </Card>
+      </div>
     </Section>
   );
 }

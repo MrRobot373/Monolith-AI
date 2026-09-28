@@ -19,10 +19,11 @@
 | Budgets: workspace budget split evenly per member, per-user overrides | ✅ |
 | "Request more tokens": member asks, admin approves/declines, notifications | ✅ |
 | Chat: streaming, Markdown/code, history, rename/pin/delete, model picker | ✅ |
+| Documents: library per workspace (private/shared), PDF/Word/text/code upload, attach in chat (+ upload, @ library), answers with numbered sources and passage preview, keyword + optional vector search (pgvector) | ✅ |
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
 | Compliance recording notice, accent-color branding, dark/light themes | ✅ |
 | Docker images + Compose stack | ✅ |
-| Document upload & retrieval, SSO (Google/Microsoft/SAML), license server | ⏭ next (P1) |
+| SSO (Google/Microsoft/SAML), license server | ⏭ next (P1) |
 | Work AI (DeepSeek Harness), Code (VS Code fork) | ⏭ P2 / P3 |
 
 ## Repository layout
@@ -39,7 +40,7 @@ docs/               Plans, specs and decisions
 
 ## Run it locally (development)
 
-Requirements: Node 22, pnpm 10, PostgreSQL 16.
+Requirements: Node 22, pnpm 10, PostgreSQL 16 with the pgvector extension.
 
 ```bash
 pnpm install

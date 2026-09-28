@@ -54,6 +54,7 @@ export const modelSchema = z.object({
   providerId: z.string(),
   modelKey: z.string().trim().min(1).max(200),
   displayName: z.string().trim().min(1).max(80),
+  kind: z.enum(["chat", "embedding"]).default("chat"),
   contextLength: z.number().int().positive().max(10_000_000).optional(),
   sections: z.array(z.enum(SECTIONS)).default(["chat", "work", "code"]),
   enabled: z.boolean().default(true),
@@ -64,6 +65,7 @@ export const modelSchema = z.object({
 /** Updates must not carry defaults, or a partial update would silently reset other fields. */
 export const modelUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
+  kind: z.enum(["chat", "embedding"]).optional(),
   contextLength: z.number().int().positive().max(10_000_000).optional(),
   sections: z.array(z.enum(SECTIONS)).optional(),
   enabled: z.boolean().optional(),
@@ -74,6 +76,7 @@ export const modelUpdateSchema = z.object({
 export const workspaceModelsSchema = z.object({
   modelIds: z.array(z.string()),
   defaultModelId: z.string().nullable().optional(),
+  embeddingModelId: z.string().nullable().optional(),
 });
 
 export const budgetSchema = z.object({
@@ -124,6 +127,7 @@ export const chatUpdateSchema = z.object({
 export const sendMessageSchema = z.object({
   content: z.string().min(1).max(200_000),
   modelId: z.string().optional(),
+  documentIds: z.array(z.string()).max(20).optional(),
 });
 
 export const profileSchema = z.object({

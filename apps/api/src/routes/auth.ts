@@ -125,8 +125,12 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
         .insert(model)
         .values({ providerId: p!.id, modelKey: "aatmiq-demo", displayName: "Aatmiq Demo", contextLength: 32768 })
         .returning();
+      const [e] = await db
+        .insert(model)
+        .values({ providerId: p!.id, modelKey: "aatmiq-embed", displayName: "Aatmiq Demo Embeddings", kind: "embedding", sections: [] })
+        .returning();
       await db.insert(workspaceModel).values({ workspaceId: ws!.id, modelId: m!.id });
-      await db.update(workspace).set({ defaultModelId: m!.id }).where(eq(workspace.id, ws!.id));
+      await db.update(workspace).set({ defaultModelId: m!.id, embeddingModelId: e!.id }).where(eq(workspace.id, ws!.id));
     }
 
     await audit(ctx, {

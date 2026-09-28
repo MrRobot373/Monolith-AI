@@ -157,6 +157,21 @@ export function estimateUsage(messages: ChatMessage[], output: string): Usage {
 
 function mockReply(messages: ChatMessage[]): string {
   const last = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  const sys = messages.find((m) => m.role === "system")?.content ?? "";
+  const sources = [...sys.matchAll(/\[(\d+)\] ([^\n]+)\n([\s\S]*?)(?=\n\n---\n\n|\n<\/sources>)/g)];
+  if (sources.length) {
+    const lines = sources.slice(0, 3).map((m) => {
+      const text = m[3]!.replace(/\s+/g, " ").trim();
+      return `- ${text.slice(0, 160)}${text.length > 160 ? "…" : ""} [${m[1]}]`;
+    });
+    return [
+      `Here's what your documents say about _"${last.slice(0, 120)}"_ (demo model, quoting the most relevant passages):`,
+      "",
+      ...lines,
+      "",
+      `Connect a real model in **Admin → Models** for full answers.`,
+    ].join("\n");
+  }
   return [
     `This is a reply from the **Aatmiq demo model**. It runs locally and never leaves this server.`,
     ``,
@@ -216,8 +231,58 @@ export async function completeChat(
   return { text, usage: estimateUsage(messages, text) };
 }
 
+/* ───────────── Embeddings ───────────── */
+
+export interface EmbedResult {
+  vectors: number[][];
+  inputTokens: number;
+}
+
+/** Deterministic bag-of-words embedding for the demo provider (no GPU needed). */
+export function mockEmbed(text: string, dims = 256): number[] {
+  const v = new Array<number>(dims).fill(0);
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [];
+  for (const w of words) {
+    let h = 2166136261;
+    for (let i = 0; i < w.length; i++) h = Math.imul(h ^ w.charCodeAt(i), 16777619);
+    v[(h >>> 0) % dims]! += 1;
+  }
+  const norm = Math.hypot(...v) || 1;
+  return v.map((x) => x / norm);
+}
+
+/** Embed a batch of texts with an OpenAI-compatible /embeddings endpoint (Ollama, vLLM, TEI…). */
+export async function embed(
+  cfg: ProviderConfig,
+  modelKey: string,
+  inputs: string[],
+  signal?: AbortSignal,
+): Promise<EmbedResult> {
+  if (inputs.length === 0) return { vectors: [], inputTokens: 0 };
+  if (cfg.type === "mock") {
+    return { vectors: inputs.map((t) => mockEmbed(t)), inputTokens: inputs.reduce((n, t) => n + estimateTokens(t), 0) };
+  }
+  const res = await fetch(`${openAiBase(cfg)}/embeddings`, {
+    method: "POST",
+    headers: headers(cfg),
+    signal,
+    body: JSON.stringify({ model: modelKey, input: inputs }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new GatewayError(`Embedding provider returned ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as { data?: { embedding: number[]; index?: number }[]; usage?: { prompt_tokens?: number } };
+  const data = [...(json.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  if (data.length !== inputs.length) throw new GatewayError("Embedding provider returned the wrong number of vectors");
+  return {
+    vectors: data.map((d) => d.embedding),
+    inputTokens: json.usage?.prompt_tokens ?? inputs.reduce((n, t) => n + estimateTokens(t), 0),
+  };
+}
+
 export async function listModels(cfg: ProviderConfig, signal?: AbortSignal): Promise<string[]> {
-  if (cfg.type === "mock") return ["aatmiq-demo"];
+  if (cfg.type === "mock") return ["aatmiq-demo", "aatmiq-embed"];
   if (cfg.type === "ollama" && cfg.baseUrl) {
     const res = await fetch(`${trimSlash(cfg.baseUrl).replace(/\/v1$/, "")}/api/tags`, { signal });
     if (!res.ok) throw new GatewayError(`Ollama returned ${res.status}`);

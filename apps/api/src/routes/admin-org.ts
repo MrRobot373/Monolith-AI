@@ -334,8 +334,11 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     await requireWorkspaceCap(ctx, u, req.params.id, "workspace.models.grant");
     const rows = await db.select({ modelId: workspaceModel.modelId }).from(workspaceModel).where(eq(workspaceModel.workspaceId, req.params.id));
-    const [ws] = await db.select({ d: workspace.defaultModelId }).from(workspace).where(eq(workspace.id, req.params.id));
-    return { modelIds: rows.map((r) => r.modelId), defaultModelId: ws?.d ?? null };
+    const [ws] = await db
+      .select({ d: workspace.defaultModelId, e: workspace.embeddingModelId })
+      .from(workspace)
+      .where(eq(workspace.id, req.params.id));
+    return { modelIds: rows.map((r) => r.modelId), defaultModelId: ws?.d ?? null, embeddingModelId: ws?.e ?? null };
   });
 
   /** Enabling models for a workspace is an org-level decision (docs §4.4). */
@@ -344,16 +347,31 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     requireOrgCap(u, "org.models.manage");
     const body = parse(workspaceModelsSchema, req.body);
     const valid = body.modelIds.length
-      ? await db.select({ id: model.id }).from(model).where(inArray(model.id, body.modelIds))
+      ? await db.select({ id: model.id }).from(model).where(and(inArray(model.id, body.modelIds), eq(model.kind, "chat")))
       : [];
     const ids = valid.map((v) => v.id);
+    let embeddingModelId: string | null | undefined = undefined;
+    if (body.embeddingModelId !== undefined) {
+      if (body.embeddingModelId === null) embeddingModelId = null;
+      else {
+        const [e] = await db
+          .select({ id: model.id })
+          .from(model)
+          .where(and(eq(model.id, body.embeddingModelId), eq(model.kind, "embedding")));
+        if (!e) throw badRequest("That isn't an embedding model.");
+        embeddingModelId = e.id;
+      }
+    }
     await db.transaction(async (tx) => {
       await tx.delete(workspaceModel).where(eq(workspaceModel.workspaceId, req.params.id));
       if (ids.length) await tx.insert(workspaceModel).values(ids.map((modelId) => ({ workspaceId: req.params.id, modelId })));
       const def = body.defaultModelId && ids.includes(body.defaultModelId) ? body.defaultModelId : (ids[0] ?? null);
-      await tx.update(workspace).set({ defaultModelId: def }).where(eq(workspace.id, req.params.id));
+      await tx
+        .update(workspace)
+        .set({ defaultModelId: def, ...(embeddingModelId !== undefined && { embeddingModelId }) })
+        .where(eq(workspace.id, req.params.id));
     });
-    await audit(ctx, { actor: u, action: "workspace.models_changed", workspaceId: req.params.id, targetType: "workspace", targetId: req.params.id, meta: { modelIds: ids } });
+    await audit(ctx, { actor: u, action: "workspace.models_changed", workspaceId: req.params.id, targetType: "workspace", targetId: req.params.id, meta: { modelIds: ids, embeddingModelId } });
     return { ok: true };
   });
 

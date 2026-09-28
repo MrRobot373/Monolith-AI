@@ -1,9 +1,10 @@
-import { and, asc, chat, desc, eq, message, organization, usageEvent, user, type DB } from "@aatmiq/db";
+import { and, asc, chat, chatDocument, desc, document, eq, inArray, message, organization, usageEvent, user, type DB } from "@aatmiq/db";
 import { streamChat, type ChatMessage } from "@aatmiq/model-gateway";
 import { chatCreateSchema, chatUpdateSchema, isOrgAdmin, PRODUCT_NAME, sendMessageSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
-import { forbidden, HttpError, notFound } from "../errors";
+import { badRequest, forbidden, HttpError, notFound } from "../errors";
+import { accessibleDocs, buildContext, retrieve } from "../services/documents";
 import { resolveModel } from "../services/models";
 import { getQuotaStatus } from "../services/quota";
 
@@ -18,6 +19,19 @@ async function loadOwnChat(db: DB, u: SessionUser, chatId: string) {
 async function requireChatSection(ctx: AppContext, u: SessionUser, workspaceId: string) {
   const m = await requireWorkspaceCap(ctx, u, workspaceId, "workspace.use");
   if (m && !m.sections.includes("chat") && !isOrgAdmin(u.orgRole)) throw forbidden("Chat is not enabled for you.");
+}
+
+/** Give just-uploaded documents a moment to finish processing before answering (max ~30s). */
+async function waitForProcessing(db: DB, ids: string[]) {
+  if (ids.length === 0) return;
+  for (let i = 0; i < 60; i++) {
+    const pending = await db
+      .select({ id: document.id })
+      .from(document)
+      .where(and(inArray(document.id, ids), eq(document.status, "processing")));
+    if (pending.length === 0) return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }
 
 function titleFrom(text: string): string {
@@ -58,7 +72,13 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       .from(message)
       .where(eq(message.chatId, c.id))
       .orderBy(asc(message.createdAt));
-    return { ...c, messages };
+    const documents = await db
+      .select({ id: document.id, name: document.name, status: document.status })
+      .from(chatDocument)
+      .innerJoin(document, eq(document.id, chatDocument.documentId))
+      .where(eq(chatDocument.chatId, c.id))
+      .orderBy(asc(chatDocument.createdAt));
+    return { ...c, messages, documents };
   });
 
   app.patch<{ Params: { id: string } }>("/api/chats/:id", async (req) => {
@@ -78,7 +98,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
 
   /**
    * Send a message and stream the reply as server-sent events:
-   *   event: start  {userMessageId, model}
+   *   event: start  {userMessageId, model, citations}
    *   event: delta  {text}
    *   event: done   {messageId, usage, quota}
    *   event: error  {message}
@@ -96,6 +116,24 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
 
     const { model: m, provider } = await resolveModel(db, box, c.workspaceId, "chat", body.modelId ?? c.modelId);
 
+    // Attach any newly referenced documents to the chat (only ones this user may read).
+    let attachments: { id: string; name: string }[] = [];
+    if (body.documentIds?.length) {
+      attachments = await db
+        .select({ id: document.id, name: document.name })
+        .from(document)
+        .where(and(accessibleDocs(c.workspaceId, u.id), inArray(document.id, body.documentIds)));
+      if (attachments.length !== new Set(body.documentIds).size) throw badRequest("Some attached documents aren't available.");
+      await db
+        .insert(chatDocument)
+        .values(attachments.map((a) => ({ chatId: c.id, documentId: a.id })))
+        .onConflictDoNothing();
+    }
+    const chatDocIds = (
+      await db.select({ id: chatDocument.documentId }).from(chatDocument).where(eq(chatDocument.chatId, c.id))
+    ).map((r) => r.id);
+    await waitForProcessing(db, chatDocIds);
+
     const history = await db
       .select({ role: message.role, content: message.content, error: message.error })
       .from(message)
@@ -105,7 +143,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
 
     const [userMsg] = await db
       .insert(message)
-      .values({ chatId: c.id, role: "user", content: body.content })
+      .values({ chatId: c.id, role: "user", content: body.content, attachments: attachments.length ? attachments : null })
       .returning({ id: message.id });
 
     const [[org], [profile]] = await Promise.all([
@@ -119,8 +157,26 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       profile?.ci ? `\nThe user's custom instructions:\n${profile.ci}` : "",
     ].join("\n");
 
+    const retrieval = await retrieve(db, box, {
+      workspaceId: c.workspaceId,
+      userId: u.id,
+      documentIds: chatDocIds,
+      query: body.content,
+    });
+    const docContext = buildContext(retrieval.chunks);
+    if (retrieval.embedTokens > 0) {
+      await db.insert(usageEvent).values({
+        workspaceId: c.workspaceId,
+        userId: u.id,
+        modelId: retrieval.embeddingModelId,
+        section: "chat",
+        inputTokens: retrieval.embedTokens,
+        outputTokens: 0,
+      });
+    }
+
     const messages: ChatMessage[] = [
-      { role: "system", content: system },
+      { role: "system", content: docContext.system ? `${system}\n\n${docContext.system}` : system },
       ...history
         .reverse()
         .filter((h) => !h.error && h.role !== "system")
@@ -144,7 +200,12 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     const abort = new AbortController();
     res.on("close", () => abort.abort());
 
-    send("start", { userMessageId: userMsg!.id, model: { id: m.id, displayName: m.displayName }, ...titleUpdate });
+    send("start", {
+      userMessageId: userMsg!.id,
+      model: { id: m.id, displayName: m.displayName },
+      citations: docContext.citations,
+      ...titleUpdate,
+    });
 
     const started = Date.now();
     let text = "";
@@ -176,6 +237,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         error,
+        citations: docContext.citations.length ? docContext.citations : null,
       })
       .returning({ id: message.id });
     await db.insert(usageEvent).values({

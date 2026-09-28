@@ -21,7 +21,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Popover } from "radix-ui";
+import { FileIcon, useDocuments } from "@/components/documents/use-documents";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { TopBar, TopBarButton } from "@/components/app/frame";
@@ -31,11 +33,12 @@ import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/ui/logo";
 import { Meter, Tooltip } from "@/components/ui/misc";
 import { Skeleton } from "@/components/ui/spinner";
-import { ApiError, get, post, readSse } from "@/lib/api";
+import { ApiError, get, post, readSse, uploadDocument } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { greeting, timeAgo } from "@/lib/format";
-import type { AvailableModel, ChatMessageRow, QuotaStatus } from "@/lib/types";
-import { Composer, type ComposerHandle } from "./composer";
+import type { AvailableModel, ChatMessageRow, Citation, DocumentRow, QuotaStatus } from "@/lib/types";
+import { SourcesRow, useSourceDialog } from "./citations";
+import { Composer, type Attachment, type ComposerHandle } from "./composer";
 import { Markdown } from "./markdown";
 import { RequestTokensDialog } from "./request-tokens";
 
@@ -46,6 +49,8 @@ interface UiMessage {
   streaming?: boolean;
   error?: string | null;
   model?: string;
+  attachments?: { id: string; name: string }[] | null;
+  citations?: Citation[] | null;
 }
 
 const PERIOD_ADJ = { day: "daily", week: "weekly", month: "monthly" } as const;
@@ -80,6 +85,11 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const composerRef = useRef<ComposerHandle>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [chatDocs, setChatDocs] = useState<{ id: string; name: string }[]>([]);
+  const library = useDocuments(workspaceId);
+  const searchParams = useSearchParams();
+  const { openSource, sourceDialog } = useSourceDialog();
 
   const models = useQuery({
     queryKey: ["models", workspaceId, "chat"],
@@ -93,7 +103,10 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
   });
   const existing = useQuery({
     queryKey: ["chat", initialId],
-    queryFn: () => get<{ id: string; modelId: string | null; title: string; messages: ChatMessageRow[] }>(`/api/chats/${initialId}`),
+    queryFn: () =>
+      get<{ id: string; modelId: string | null; title: string; messages: ChatMessageRow[]; documents: { id: string; name: string }[] }>(
+        `/api/chats/${initialId}`,
+      ),
     enabled: !!initialId,
     staleTime: Infinity,
   });
@@ -109,10 +122,64 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
     setMessages(
       existing.data.messages
         .filter((m) => m.role !== "system")
-        .map((m) => ({ id: m.id, role: m.role as UiMessage["role"], content: m.content, error: m.error, model: m.modelId ?? undefined })),
+        .map((m) => ({
+          id: m.id,
+          role: m.role as UiMessage["role"],
+          content: m.content,
+          error: m.error,
+          model: m.modelId ?? undefined,
+          attachments: m.attachments,
+          citations: m.citations,
+        })),
     );
+    setChatDocs(existing.data.documents ?? []);
     if (existing.data.modelId) setModelId(existing.data.modelId);
   }, [existing.data]);
+
+  // Keep attachment chips in sync with processing status from the library.
+  useEffect(() => {
+    if (!library.data) return;
+    setAttachments((list) =>
+      list.map((a) => {
+        const d = a.id ? library.data.find((x) => x.id === a.id) : undefined;
+        return d && a.status !== "uploading" && d.status !== a.status ? { ...a, status: d.status } : a;
+      }),
+    );
+  }, [library.data]);
+
+  // "Ask about this" from the Documents page: /app/chat?doc=<id>
+  const docParam = searchParams.get("doc");
+  const attachedParam = useRef<string | null>(null);
+  useEffect(() => {
+    if (!docParam || attachedParam.current === docParam || !library.data) return;
+    const d = library.data.find((x) => x.id === docParam);
+    if (d) {
+      attachedParam.current = docParam;
+      setAttachments((l) => (l.some((a) => a.id === d.id) ? l : [...l, { key: d.id, id: d.id, name: d.name, status: d.status }]));
+      composerRef.current?.focus();
+    }
+  }, [docParam, library.data]);
+
+  const attachFiles = useCallback(
+    async (files: File[]) => {
+      for (const f of files) {
+        const key = `${f.name}-${Date.now()}-${Math.random()}`;
+        setAttachments((l) => [...l, { key, name: f.name, status: "uploading" }]);
+        try {
+          const doc = await uploadDocument(workspaceId, f);
+          setAttachments((l) => l.map((a) => (a.key === key ? { ...a, id: doc.id, status: doc.status } : a)));
+          qc.invalidateQueries({ queryKey: ["documents", workspaceId] });
+        } catch (e) {
+          toast.error(`${f.name}: ${(e as Error).message}`);
+          setAttachments((l) => l.filter((a) => a.key !== key));
+        }
+      }
+    },
+    [qc, workspaceId],
+  );
+  const attachDocument = useCallback((d: DocumentRow) => {
+    setAttachments((l) => (l.some((a) => a.id === d.id) ? l : [...l, { key: d.id, id: d.id, name: d.name, status: d.status }]));
+  }, []);
 
   useEffect(() => {
     if (quota.data) setQuotaBlocked(!quota.data.result.allowed);
@@ -133,7 +200,9 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
     async (text: string) => {
       const content = text.trim();
       if (!content || streaming || !workspaceId) return;
+      const sending = attachments.filter((a) => a.id && a.status !== "failed") as (Attachment & { id: string })[];
       setInput("");
+      setAttachments([]);
       stickRef.current = true;
 
       let id = chatId;
@@ -150,7 +219,10 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         return;
       }
 
-      const tempUser: UiMessage = { id: `u-${Date.now()}`, role: "user", content };
+      const newAttachments = sending.map((a) => ({ id: a.id, name: a.name }));
+      const tempUser: UiMessage = { id: `u-${Date.now()}`, role: "user", content, attachments: newAttachments };
+      if (newAttachments.length)
+        setChatDocs((l) => [...l, ...newAttachments.filter((a) => !l.some((x) => x.id === a.id))]);
       const tempAsst: UiMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", streaming: true, model: model?.id };
       setMessages((m) => [...m, tempUser, tempAsst]);
       setStreaming(true);
@@ -165,7 +237,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ content, modelId: model?.id }),
+          body: JSON.stringify({ content, modelId: model?.id, documentIds: sending.length ? sending.map((a) => a.id) : undefined }),
           signal: ctrl.signal,
         });
         if (!res.ok) {
@@ -175,7 +247,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         for await (const ev of readSse(res)) {
           if (ev.event === "start") {
             if (ev.data.title) qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
-            patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model }));
+            patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model, citations: ev.data.citations?.length ? ev.data.citations : null }));
           } else if (ev.event === "delta") patchAsst((m) => ({ ...m, content: m.content + ev.data.text }));
           else if (ev.event === "done") {
             patchAsst((m) => ({ ...m, id: ev.data.messageId, streaming: false }));
@@ -200,7 +272,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         qc.invalidateQueries({ queryKey: ["quota", workspaceId] });
       }
     },
-    [chatId, model?.id, onCreated, qc, streaming, workspaceId],
+    [attachments, chatId, model?.id, onCreated, qc, streaming, workspaceId],
   );
 
   const regenerate = () => {
@@ -234,6 +306,11 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
       models={models.data}
       model={model}
       onModelChange={(m) => setModelId(m.id)}
+      attachments={attachments}
+      onAttachFiles={attachFiles}
+      onAttachDocument={attachDocument}
+      onRemoveAttachment={(key) => setAttachments((l) => l.filter((a) => a.key !== key))}
+      library={library.data}
     />
   );
 
@@ -255,6 +332,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         title={<span className={cn(isHome && "text-fg-muted")}>{title}</span>}
         actions={
           <>
+            {!isHome && chatDocs.length > 0 && <ChatDocsButton docs={chatDocs} />}
             <Tooltip content="Conversations stay on your organization's servers">
               <span className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-fg-subtle">
                 <Lock className="size-3.5" /> Private
@@ -384,6 +462,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
                       modelLabel={modelName(m.model) ?? model?.displayName ?? "Aatmiq"}
                       isLast={i === messages.length - 1}
                       onRegenerate={!streaming ? regenerate : undefined}
+                      onCite={openSource}
                     />
                   ))}
                 </AnimatePresence>
@@ -400,6 +479,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         </>
       )}
       <RequestTokensDialog open={requestOpen} onOpenChange={setRequestOpen} workspaceId={workspaceId} />
+      {sourceDialog}
     </div>
   );
 }
@@ -409,17 +489,29 @@ function MessageBlock({
   modelLabel,
   isLast,
   onRegenerate,
+  onCite,
 }: {
   message: UiMessage;
   modelLabel: string;
   isLast: boolean;
   onRegenerate?: () => void;
+  onCite: (c: Citation) => void;
 }) {
   const [copied, setCopied] = useState(false);
   if (m.role === "user") {
     return (
       <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="mb-6">
         <div className="rounded-xl border border-border bg-surface-2 px-4 py-3 text-[14px] leading-relaxed whitespace-pre-wrap text-fg">
+          {m.attachments && m.attachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5 whitespace-normal">
+              {m.attachments.map((a) => (
+                <span key={a.id} className="inline-flex h-6 max-w-60 items-center gap-1.5 rounded-md border border-border bg-bg px-2 text-[12px]">
+                  <FileIcon name={a.name} className="size-3.5" />
+                  <span className="truncate">{a.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
           {m.content}
         </div>
       </motion.div>
@@ -437,8 +529,9 @@ function MessageBlock({
         )}
       </div>
       <div className="pl-6">
-        {m.content ? <Markdown content={m.content} /> : null}
+        {m.content ? <Markdown content={m.content} citations={m.citations} onCite={onCite} /> : null}
         {m.streaming && m.content && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-[2px] animate-caret bg-fg" />}
+        {!m.streaming && m.citations && m.citations.length > 0 && <SourcesRow citations={m.citations} onOpen={onCite} />}
         {m.error && (
           <div className="mt-2 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-[13px] text-danger">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
@@ -506,5 +599,32 @@ function FooterHint({ quota, blocked, orgName, onRequest }: { quota?: QuotaStatu
         </button>
       )}
     </div>
+  );
+}
+
+function ChatDocsButton({ docs }: { docs: { id: string; name: string }[] }) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg">
+          <FileText className="size-3.5" /> {docs.length} {docs.length === 1 ? "document" : "documents"}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} className="z-50 w-72 animate-rise rounded-xl border border-border-strong bg-surface p-1 shadow-soft outline-none">
+          <div className="px-2 pt-1.5 pb-1 text-[11.5px] text-fg-subtle">Answers in this chat can use</div>
+          {docs.map((d) => (
+            <a
+              key={d.id}
+              href={`/api/documents/${d.id}/file`}
+              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] hover:bg-surface-2"
+            >
+              <FileIcon name={d.name} />
+              <span className="min-w-0 flex-1 truncate">{d.name}</span>
+            </a>
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

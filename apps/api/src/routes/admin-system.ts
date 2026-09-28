@@ -151,6 +151,7 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         providerType: modelProvider.type,
         modelKey: model.modelKey,
         displayName: model.displayName,
+        kind: model.kind,
         contextLength: model.contextLength,
         sections: model.sections,
         enabled: model.enabled,

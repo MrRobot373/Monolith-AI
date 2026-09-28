@@ -20,7 +20,7 @@ async function newUser(tag, viewport = { width: 1440, height: 900 }) {
   const ctx = await browser.newContext({ viewport, permissions: ["clipboard-read", "clipboard-write"], acceptDownloads: true });
   const page = await ctx.newPage();
   page.on("console", (m) => {
-    if (m.type() === "error" && !/status of (401|402|403|404|409)/.test(m.text())) consoleErrors.push(`[${tag}] ${m.text()}`);
+    if (m.type() === "error" && !/status of (401|402|403|404|409|415)/.test(m.text())) consoleErrors.push(`[${tag}] ${m.text()}`);
   });
   page.on("pageerror", (e) => consoleErrors.push(`[${tag}] pageerror: ${e.message}`));
   page.setDefaultTimeout(10000);
@@ -251,7 +251,7 @@ await step("Models", "Add a model by name", owner, async () => {
   await wait(700);
   await owner.keyboard.press("Escape");
   await owner.getByText("gemma3:12b").first().waitFor();
-  expect((await owner.locator("tbody tr").count()) === 4, `expected 4 models, got ${await owner.locator("tbody tr").count()}`);
+  expect((await owner.locator("tbody tr").count()) === 5, `expected 5 models (incl. demo embeddings), got ${await owner.locator("tbody tr").count()}`);
 });
 await step("Models", "Unreachable provider is added with a clear error", owner, async () => {
   await owner.click("text=Add provider");
@@ -317,6 +317,63 @@ await step("Chat", "Stop button halts a long reply and keeps partial text", owne
   await wait(500);
   const text = await owner.locator(".prose-chat").last().innerText();
   expect(text.includes("word1") && !text.includes("word199"), `not partial: ${text.slice(-40)}`);
+});
+
+/* ═════════════ D2. Documents ═════════════ */
+const fixture = (n) => new URL(`../../apps/api/test/fixtures/${n}`, import.meta.url).pathname;
+const docRow = (page, name) => page.locator("div.group", { hasText: name }).first();
+
+await step("Documents", "Upload a PDF on the Documents page; it becomes ready", owner, async () => {
+  await owner.goto(`${BASE}/app/documents`);
+  await owner.getByText("Drop files here or click to upload").waitFor();
+  await owner.locator('[data-testid="doc-upload"]').setInputFiles(fixture("report.pdf"));
+  await docRow(owner, "report.pdf").getByText("Ready").waitFor({ timeout: 15000 });
+  await docRow(owner, "report.pdf").getByText("2 pages").waitFor();
+});
+await step("Documents", "Unsupported files are rejected with a clear message", owner, async () => {
+  await owner.locator('[data-testid="doc-upload"]').setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: Buffer.from("x") });
+  await toast(owner, "isn't supported");
+});
+await step("Documents", "Ask about a document: cited answer and source preview", owner, async () => {
+  await docRow(owner, "report.pdf").getByRole("button", { name: "Ask" }).click();
+  await owner.waitForURL(/\/app\/chat\?doc=/);
+  await owner.locator("form span", { hasText: "report.pdf" }).first().waitFor();
+  await send(owner, "How much did revenue grow?");
+  await owner.locator('button[data-cite="1"]').first().waitFor();
+  await owner.getByText("Sources").waitFor();
+  await owner.locator('button[data-cite="1"]').first().click();
+  await owner.locator('[role="dialog"]', { hasText: "revenue grew 18 percent" }).waitFor();
+  await owner.keyboard.press("Escape");
+  await owner.getByText("1 document").waitFor();
+});
+await step("Documents", "Composer: + uploads a file and @ attaches one from the library", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  await owner.locator('[data-testid="composer-upload"]').setInputFiles(fixture("policy.docx"));
+  await owner.locator("form span", { hasText: "policy.docx" }).first().waitFor();
+  await owner.click('button[aria-label="Attach a document"]');
+  await owner.locator('[role="dialog"] button', { hasText: "report.pdf" }).click();
+  await owner.locator("form span", { hasText: "report.pdf" }).first().waitFor();
+  await owner.waitForFunction(() => !document.querySelector("form .animate-spin"), null, { timeout: 15000 });
+  await send(owner, "What is the travel policy for short flights?");
+  await owner.getByText("2 documents").waitFor();
+  const userCard = await owner.locator("main .bg-surface-2", { hasText: "What is the travel policy" }).first().innerText();
+  expect(userCard.includes("policy.docx") && userCard.includes("report.pdf"), "attachments not shown on message");
+  await owner.locator('button[data-cite="1"]').first().waitFor();
+});
+await step("Documents", "Share a document with the workspace", owner, async () => {
+  await owner.goto(`${BASE}/app/documents`);
+  await docRow(owner, "report.pdf").locator('button[aria-label^="Actions for"]').click();
+  await owner.getByRole("menuitem", { name: "Share with workspace" }).click();
+  await docRow(owner, "report.pdf").getByText("Workspace", { exact: true }).waitFor();
+});
+await step("Documents", "Delete a document after confirming", owner, async () => {
+  await owner.locator('[data-testid="doc-upload"]').setInputFiles({ name: "old-notes.txt", mimeType: "text/plain", buffer: Buffer.from("Old meeting notes") });
+  await docRow(owner, "old-notes.txt").getByText("Ready").waitFor({ timeout: 15000 });
+  await docRow(owner, "old-notes.txt").locator('button[aria-label^="Actions for"]').click();
+  await owner.getByRole("menuitem", { name: "Delete" }).click();
+  await owner.click('[role="dialog"] >> button:has-text("Delete document")');
+  await toast(owner, "Document deleted");
+  expect((await owner.getByText("old-notes.txt").count()) === 0, "still listed");
 });
 
 /* ═════════════ F. Workspaces ═════════════ */
@@ -440,6 +497,14 @@ await step("Member", "Light theme applies and persists", dev, async () => {
   await dev.screenshot({ path: `${OUT}member-light-settings.png` });
   await dev.click("button:has-text('Appearance')");
   await dev.click("button:has-text('Dark')");
+});
+await step("Member", "Member sees shared documents but not private ones", dev, async () => {
+  await dev.goto(`${BASE}/app/documents`);
+  await dev.getByText("report.pdf").waitFor();
+  expect((await dev.getByText("policy.docx").count()) === 0, "private doc visible to member");
+  await dev.locator('button[aria-label^="Actions for"]').first().click();
+  expect((await dev.getByRole("menuitem", { name: "Delete" }).count()) === 0, "member can delete owner's doc");
+  await dev.keyboard.press("Escape");
 });
 await step("Member", "Owner disabling Code hides it from the member", owner, async () => {
   await owner.goto(`${BASE}/admin/workspaces/${generalId}`);

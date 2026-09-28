@@ -1,4 +1,5 @@
 import type { DB } from "@aatmiq/db";
+import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createAuth } from "./auth";
@@ -6,6 +7,8 @@ import type { Config } from "./config";
 import type { AppContext } from "./context";
 import { createSecretBox } from "./crypto";
 import { HttpError } from "./errors";
+import { documentRoutes } from "./routes/documents";
+import { createLocalStorage, type Storage } from "./services/storage";
 import { adminOrgRoutes } from "./routes/admin-org";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
@@ -13,13 +16,19 @@ import { chatRoutes } from "./routes/chat";
 import { meRoutes } from "./routes/me";
 import { requestRoutes } from "./routes/requests";
 
-export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; storage?: Storage } = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
   });
-  const ctx: AppContext = { db, cfg, auth: createAuth(db, cfg), box: createSecretBox(cfg.secret) };
+  const ctx: AppContext = {
+    db,
+    cfg,
+    auth: createAuth(db, cfg),
+    box: createSecretBox(cfg.secret),
+    storage: opts.storage ?? createLocalStorage(cfg.storageDir),
+  };
 
   // Keyed by session when signed in, so colleagues behind one office IP don't share a bucket.
   await app.register(rateLimit, {
@@ -41,11 +50,14 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean } =
     return reply.status(500).send({ error: "Something went wrong on the server.", code: "internal" });
   });
 
+  await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+
   app.get("/api/health", async () => ({ ok: true }));
 
   await authRoutes(app, ctx);
   await meRoutes(app, ctx);
   await chatRoutes(app, ctx);
+  await documentRoutes(app, ctx);
   await requestRoutes(app, ctx);
   await adminOrgRoutes(app, ctx);
   await adminSystemRoutes(app, ctx);

@@ -4,6 +4,7 @@ export interface Config {
   secret: string;
   allowMockProvider: boolean;
   port: number;
+  storageDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -16,5 +17,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     secret,
     allowMockProvider: env.ALLOW_MOCK_PROVIDER === "true",
     port: Number(env.PORT ?? 4000),
+    storageDir: env.STORAGE_DIR ?? ".data/files",
   };
 }

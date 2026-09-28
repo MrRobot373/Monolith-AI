@@ -5,6 +5,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  customType,
   boolean,
   index,
   integer,
@@ -37,6 +38,17 @@ export const budgetPeriodEnum = pgEnum("budget_period", ["day", "week", "month"]
 export const sectionEnum = pgEnum("section", ["chat", "work", "code", "system", "api"]);
 export const requestStatusEnum = pgEnum("token_request_status", ["pending", "approved", "denied"]);
 export const messageRoleEnum = pgEnum("message_role", ["system", "user", "assistant"]);
+export const modelKindEnum = pgEnum("model_kind", ["chat", "embedding"]);
+export const documentScopeEnum = pgEnum("document_scope", ["private", "workspace"]);
+export const documentStatusEnum = pgEnum("document_status", ["processing", "ready", "failed"]);
+
+/** pgvector column without fixed dimensions (models differ: 384, 768, 1024…). */
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType: () => "vector",
+  toDriver: (v) => `[${v.join(",")}]`,
+  fromDriver: (v) => (typeof v === "string" ? JSON.parse(v) : v),
+});
+const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 /* ───────────── Organization (singleton per install) ───────────── */
 
@@ -143,6 +155,8 @@ export const workspace = pgTable("workspace", {
   description: text("description"),
   tokenLimit: bigint("token_limit", { mode: "number" }),
   defaultModelId: text("default_model_id"),
+  /** Model used to embed documents for meaning-based search; null = keyword search only. */
+  embeddingModelId: text("embedding_model_id"),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -188,6 +202,7 @@ export const model = pgTable(
       .references(() => modelProvider.id, { onDelete: "cascade" }),
     modelKey: text("model_key").notNull(),
     displayName: text("display_name").notNull(),
+    kind: modelKindEnum("kind").notNull().default("chat"),
     contextLength: integer("context_length"),
     sections: text("sections").array().notNull().default(sql`ARRAY['chat','work','code']::text[]`),
     enabled: boolean("enabled").notNull().default(true),
@@ -294,6 +309,10 @@ export const message = pgTable(
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
     error: text("error"),
+    /** Documents attached with this user message. */
+    attachments: jsonb("attachments").$type<{ id: string; name: string }[]>(),
+    /** Sources used for this assistant reply, numbered as cited in the text. */
+    citations: jsonb("citations").$type<Citation[]>(),
     createdAt: createdAt(),
   },
   (t) => [index("message_chat_idx").on(t.chatId, t.createdAt)],
@@ -333,4 +352,73 @@ export const auditLog = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("audit_time_idx").on(t.createdAt)],
+);
+
+/* ───────────── Documents ───────────── */
+
+export interface Citation {
+  n: number;
+  documentId: string;
+  name: string;
+  page: number | null;
+  snippet: string;
+}
+
+export const document = pgTable(
+  "document",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    storageKey: text("storage_key").notNull(),
+    scope: documentScopeEnum("scope").notNull().default("private"),
+    status: documentStatusEnum("status").notNull().default("processing"),
+    error: text("error"),
+    pageCount: integer("page_count"),
+    chunkCount: integer("chunk_count"),
+    charCount: integer("char_count"),
+    embeddingModelId: text("embedding_model_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("document_ws_idx").on(t.workspaceId, t.createdAt)],
+);
+
+export const documentChunk = pgTable(
+  "document_chunk",
+  {
+    id: id(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => document.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    page: integer("page"),
+    content: text("content").notNull(),
+    tsv: tsvector("tsv").generatedAlwaysAs(sql`to_tsvector('simple', content)`),
+    embedding: vector("embedding"),
+  },
+  (t) => [
+    index("chunk_doc_idx").on(t.documentId, t.ordinal),
+    index("chunk_tsv_idx").using("gin", t.tsv),
+  ],
+);
+
+export const chatDocument = pgTable(
+  "chat_document",
+  {
+    chatId: text("chat_id")
+      .notNull()
+      .references(() => chat.id, { onDelete: "cascade" }),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => document.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.chatId, t.documentId] })],
 );

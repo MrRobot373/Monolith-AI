@@ -24,6 +24,7 @@ import type { z } from "zod";
 import type { Auth } from "./auth";
 import type { Config } from "./config";
 import type { SecretBox } from "./crypto";
+import type { Storage } from "./services/storage";
 import { badRequest, forbidden, notFound, unauthorized } from "./errors";
 
 export interface AppContext {
@@ -31,6 +32,7 @@ export interface AppContext {
   auth: Auth;
   cfg: Config;
   box: SecretBox;
+  storage: Storage;
 }
 
 export interface SessionUser {

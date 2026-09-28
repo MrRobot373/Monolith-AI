@@ -30,6 +30,8 @@ services:
       APP_URL: ${APP_URL:?set APP_URL}
       APP_SECRET: ${APP_SECRET:?set APP_SECRET}
       ALLOW_MOCK_PROVIDER: ${ALLOW_MOCK_PROVIDER:-false}
+    volumes:
+      - files:/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
       interval: 10s
@@ -60,4 +62,5 @@ services:
 
 volumes:
   pgdata:
+  files:
   ollama:
