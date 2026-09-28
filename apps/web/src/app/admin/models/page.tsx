@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleCheck, CircleX, Cpu, MoreHorizontal, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
+import { CircleCheck, CircleDashed, CircleX, Cpu, MoreHorizontal, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Section, Table, Td } from "@/components/admin/table";
@@ -97,8 +97,8 @@ export default function ModelsPage() {
                     </div>
                     <div className="mt-0.5 truncate font-mono text-xs text-fg-subtle">{p.baseUrl ?? "built-in"}</div>
                     <div className="mt-2 flex items-center gap-1.5 text-xs">
-                      {p.health?.ok ? <CircleCheck className="size-3.5 text-success" /> : <CircleX className="size-3.5 text-danger" />}
-                      <span className={p.health?.ok ? "text-fg-muted" : "text-danger"}>
+                      {p.health?.ok ? <CircleCheck className="size-3.5 text-success" /> : p.health ? <CircleX className="size-3.5 text-danger" /> : <CircleDashed className="size-3.5 text-fg-subtle" />}
+                      <span className={p.health?.ok ? "text-fg-muted" : p.health ? "text-danger" : "text-fg-subtle"}>
                         {p.health?.ok ? `Healthy · ${p.health.latencyMs}ms` : (p.health?.error ?? "Not checked")}
                       </span>
                       {p.health?.checkedAt && <span className="text-fg-subtle">· {timeAgo(p.health.checkedAt)}</span>}

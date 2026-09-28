@@ -96,7 +96,10 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     });
 
     if (cfg.allowMockProvider) {
-      const [p] = await db.insert(modelProvider).values({ name: "Aatmiq Demo", type: "mock" }).returning();
+      const [p] = await db
+        .insert(modelProvider)
+        .values({ name: "Aatmiq Demo", type: "mock", health: { ok: true, latencyMs: 0, checkedAt: new Date().toISOString() } })
+        .returning();
       const [m] = await db
         .insert(model)
         .values({ providerId: p!.id, modelKey: "aatmiq-demo", displayName: "Aatmiq Demo", contextLength: 32768 })

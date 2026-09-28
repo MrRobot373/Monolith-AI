@@ -314,8 +314,8 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
               ))}
             </div>
           )}
-          <div className="mt-2.5 flex items-center justify-center gap-3 text-[11.5px] text-fg-subtle">
-            <span className="inline-flex items-center gap-1">
+          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11.5px] text-fg-subtle">
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
               <ShieldCheck className="size-3" /> Private to {me.org.name || "your organization"}
             </span>
             {quota.data && quota.data.result.usedFraction !== null && !quotaBlocked && (
@@ -435,7 +435,7 @@ function UsageHint({ quota, onRequest }: { quota: QuotaStatus; onRequest: () => 
   const f = quota.result.usedFraction ?? 0;
   if (f < 0.5) return null;
   return (
-    <button onClick={onRequest} className="inline-flex items-center gap-2 transition-colors hover:text-fg">
+    <button onClick={onRequest} className="inline-flex items-center gap-2 whitespace-nowrap transition-colors hover:text-fg">
       <Meter value={f} className="w-14" />
       {Math.round(f * 100)}% of your {PERIOD_ADJ[quota.period]} allowance
     </button>
