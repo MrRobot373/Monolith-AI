@@ -9,7 +9,7 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "generate": "drizzle-kit generate",
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.3",

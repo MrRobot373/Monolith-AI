@@ -1,0 +1,24 @@
+# Aatmiq API
+FROM node:22-alpine AS build
+RUN corepack enable
+WORKDIR /repo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/db/package.json packages/db/
+COPY packages/shared/package.json packages/shared/
+COPY packages/model-gateway/package.json packages/model-gateway/
+RUN pnpm install --frozen-lockfile --filter @aatmiq/api...
+COPY packages packages
+COPY apps/api apps/api
+RUN pnpm --filter @aatmiq/api build \
+ && pnpm --filter @aatmiq/api deploy --prod --legacy /out \
+ && cp -r apps/api/dist /out/dist \
+ && cp -r packages/db/migrations /out/migrations
+
+FROM node:22-alpine
+ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000
+WORKDIR /app
+COPY --from=build /out /app
+USER node
+EXPOSE 4000
+CMD ["node", "dist/server.js"]

@@ -1,0 +1,63 @@
+# Aatmiq: self-hosted stack.
+#   cp deploy/.env.example deploy/.env   (then edit it)
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
+# Optional local models: add `--profile ollama`.
+name: aatmiq
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aatmiq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: aatmiq
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aatmiq"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: { context: .., dockerfile: deploy/Dockerfile.api }
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://aatmiq:${POSTGRES_PASSWORD}@postgres:5432/aatmiq
+      APP_URL: ${APP_URL:?set APP_URL}
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+      ALLOW_MOCK_PROVIDER: ${ALLOW_MOCK_PROVIDER:-false}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: { context: .., dockerfile: deploy/Dockerfile.web }
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      SHOW_MARKETING: "false"
+    ports:
+      - "${HTTP_PORT:-3000}:3000"
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # Uncomment for NVIDIA GPUs:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+volumes:
+  pgdata:
+  ollama:

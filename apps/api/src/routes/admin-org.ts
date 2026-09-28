@@ -47,6 +47,11 @@ import { getOrgPeriod } from "../services/quota";
 
 const INVITE_TTL_DAYS = 7;
 
+// Drizzle omits table prefixes in single-table selects, so correlated subqueries must
+// reference the outer row explicitly (otherwise "id" binds to the inner table).
+const OUTER_USER_ID = sql.raw(`"user"."id"`);
+const OUTER_WORKSPACE_ID = sql.raw(`"workspace"."id"`);
+
 export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db, cfg } = ctx;
 
@@ -67,7 +72,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         jobTitle: user.jobTitle,
         lastActiveAt: user.lastActiveAt,
         createdAt: user.createdAt,
-        tokensThisPeriod: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.userId} = ${user.id} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
+        tokensThisPeriod: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.userId} = ${OUTER_USER_ID} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
       })
       .from(user)
       .orderBy(asc(user.createdAt));
@@ -194,10 +199,10 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         tokenLimit: workspace.tokenLimit,
         defaultModelId: workspace.defaultModelId,
         createdAt: workspace.createdAt,
-        memberCount: sql<number>`(select count(*) from ${workspaceMember} where ${workspaceMember.workspaceId} = ${workspace.id})::int`,
-        modelCount: sql<number>`(select count(*) from ${workspaceModel} where ${workspaceModel.workspaceId} = ${workspace.id})::int`,
-        used: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.workspaceId} = ${workspace.id} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
-        pendingRequests: sql<number>`(select count(*) from ${tokenRequest} where ${tokenRequest.workspaceId} = ${workspace.id} and ${tokenRequest.status} = 'pending')::int`,
+        memberCount: sql<number>`(select count(*) from ${workspaceMember} where ${workspaceMember.workspaceId} = ${OUTER_WORKSPACE_ID})::int`,
+        modelCount: sql<number>`(select count(*) from ${workspaceModel} where ${workspaceModel.workspaceId} = ${OUTER_WORKSPACE_ID})::int`,
+        used: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.workspaceId} = ${OUTER_WORKSPACE_ID} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
+        pendingRequests: sql<number>`(select count(*) from ${tokenRequest} where ${tokenRequest.workspaceId} = ${OUTER_WORKSPACE_ID} and ${tokenRequest.status} = 'pending')::int`,
       })
       .from(workspace)
       .where(and(isNull(workspace.archivedAt), ids ? inArray(workspace.id, ids) : undefined))

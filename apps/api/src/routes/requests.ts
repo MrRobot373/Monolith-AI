@@ -160,7 +160,7 @@ export async function requestRoutes(app: FastifyInstance, ctx: AppContext) {
           ? `Your request was approved: +${formatTokens(amount)} tokens`
           : "Your token request was declined",
       body: body.note ?? undefined,
-      link: "/app/settings/usage",
+      link: "/app/settings#usage",
     });
     await audit(ctx, {
       actor: u,

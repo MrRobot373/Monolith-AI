@@ -6,7 +6,7 @@
 > **Chat**, **Work AI** (agent harness) and **Code** (VS Code–based IDE) in one product,
 > running on the customer's own servers with open-source models. Their data never leaves their infrastructure.
 
-Status: **Planning** · Owner: Super Admin (product owner) · Last updated: 2026-09-28
+Status: **P0 Foundation built** (see README "What works today") · Owner: Super Admin (product owner) · Last updated: 2026-09-28
 
 ---
 
@@ -221,7 +221,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 
 | Phase | Scope | Result |
 |---|---|---|
-| **P0 Foundation** | Monorepo, design system, auth (email/pw + Google/Microsoft), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, Docker Compose, license client | Installable, admin-manageable shell |
+| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw; Google/Microsoft SSO still to do), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, Docker Compose. License client still to do | Installable, admin-manageable shell |
 | **P1 Chat** | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
 | **P2 Work AI** | DSH adapter, sandbox containers, tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules | Cowork-class agent |
 | **P3 Code** | Code-OSS fork, branding, Open VSX, web + desktop builds, Aatmiq panel wired to the harness | Cursor-class IDE |

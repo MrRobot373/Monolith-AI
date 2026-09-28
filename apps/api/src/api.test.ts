@@ -212,6 +212,11 @@ d("Aatmiq API", () => {
     const u = await call(owner, "GET", "/api/admin/usage?days=7");
     expect(u.json.totals.requests).toBeGreaterThanOrEqual(2);
     expect(u.json.daily).toHaveLength(7);
+    // Correlated per-row totals (regression: must not be 0 when usage exists).
+    const ws = await call(owner, "GET", "/api/admin/workspaces");
+    expect(ws.json[0].used).toBeGreaterThan(0);
+    const users = await call(owner, "GET", "/api/admin/users");
+    expect(users.json.find((x: { id: string }) => x.id === memberId).tokensThisPeriod).toBeGreaterThan(0);
     const a = await call(owner, "GET", "/api/admin/audit");
     const actions = a.json.map((e: { action: string }) => e.action);
     expect(actions).toEqual(expect.arrayContaining(["org.setup", "user.invited", "token_request.approved", "budget.changed"]));
