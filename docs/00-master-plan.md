@@ -209,8 +209,8 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 ---
 
 ## 11. Design system
-- Palette: **black / grays / white**, with a single **accent** (default cyan, `#22D3EE`), exposed as the `--accent` CSS token. Each org's license/branding overrides it, along with the logo and product name.
-- Dark mode first, with light mode included. Typeface: Inter (UI) + JetBrains Mono (code).
+- Palette: **neutral charcoal / grays / white** (native pro-tool look, see D21). Primary actions are white-on-black. A single **accent** (default cyan, `#22D3EE`, the `--accent` token) is used sparingly: logo dot, focus rings, unread/pending indicators. Each org overrides it, along with the logo and product name.
+- Dark mode first, with light mode included. Typefaces: Inter (UI), Newsreader serif (greetings, page titles, marketing headlines), Geist Mono (code). All self-hosted, so air-gapped installs work.
 - Minimal, dense-but-calm layouts inspired by Claude.ai, ChatGPT, Linear and VS Code.
 - Micro-animations: 120–200 ms ease-out for hover/press, panel slide, streaming caret, skeletons. Respects `prefers-reduced-motion`.
 - The IDE fork ships a matching "Aatmiq Dark" theme, with the accent injected from org branding.

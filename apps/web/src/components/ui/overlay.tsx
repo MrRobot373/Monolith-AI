@@ -27,7 +27,7 @@ export function Dialog({
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
-        <RDialog.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] data-[state=open]:animate-fade-in" />
+        <RDialog.Overlay className="fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-fade-in" />
         <RDialog.Content
           className={cn(
             "fixed top-1/2 left-1/2 z-50 w-[calc(100vw-32px)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-surface shadow-soft outline-none data-[state=open]:animate-rise",
@@ -36,7 +36,7 @@ export function Dialog({
         >
           <div className="flex items-start justify-between gap-4 px-5 pt-5">
             <div>
-              <RDialog.Title className="text-base font-semibold text-fg">{title}</RDialog.Title>
+              <RDialog.Title className="text-[15px] font-medium text-fg">{title}</RDialog.Title>
               {description ? (
                 <RDialog.Description className="mt-1 text-sm text-fg-muted">{description}</RDialog.Description>
               ) : (
@@ -79,7 +79,7 @@ export function MenuContent({
         side={side}
         sideOffset={6}
         className={cn(
-          "z-50 min-w-48 animate-rise rounded-xl border border-border bg-surface p-1 shadow-soft outline-none",
+          "z-50 min-w-48 animate-rise rounded-xl border border-border-strong bg-surface p-1 shadow-soft outline-none",
           className,
         )}
       >

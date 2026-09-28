@@ -7,8 +7,8 @@ import { cn } from "@/lib/cn";
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 32 32" className={cn("size-7", className)} fill="none" aria-hidden>
-      <rect x="1" y="1" width="30" height="30" rx="9" className="fill-fg" />
-      <path d="M10 24 L16 7.5 L22 24" stroke="var(--bg)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--surface-3)" stroke="var(--border-strong)" />
+      <path d="M10 24 L16 7.5 L22 24" stroke="var(--fg)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx="16" cy="18.2" r="2.4" fill="var(--accent)" />
     </svg>
   );

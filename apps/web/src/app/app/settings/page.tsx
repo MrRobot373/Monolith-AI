@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Settings, Sun } from "lucide-react";
+import { TopBar } from "@/components/app/frame";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/app/page-header";
@@ -24,8 +25,10 @@ export default function SettingsPage() {
     if (window.location.hash === "#usage") setTab("Usage");
   }, []);
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-2xl px-4 pt-14 pb-16 sm:px-6">
+    <div className="flex h-full min-h-0 flex-col">
+      <TopBar icon={<Settings />} title="Settings" />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-2xl px-4 pt-10 pb-16 sm:px-6">
         <PageHeader title="Settings" description="Manage your profile, appearance and usage." />
         <div className="mt-6 flex gap-1 border-b border-border">
           {TABS.map((t) => (
@@ -38,7 +41,7 @@ export default function SettingsPage() {
               )}
             >
               {t}
-              {tab === t && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />}
+              {tab === t && <span className="absolute inset-x-2 -bottom-px h-px bg-fg" />}
             </button>
           ))}
         </div>
@@ -47,6 +50,7 @@ export default function SettingsPage() {
           {tab === "Appearance" && <Appearance />}
           {tab === "Usage" && <Usage />}
         </div>
+      </div>
       </div>
     </div>
   );
@@ -114,7 +118,7 @@ function Appearance() {
             }}
             className={cn(
               "flex flex-col items-center gap-2 rounded-xl border p-4 text-sm transition-colors",
-              pref === o.v ? "border-accent bg-accent-soft text-fg" : "border-border text-fg-muted hover:border-border-strong",
+              pref === o.v ? "border-fg-subtle bg-surface-2 text-fg" : "border-border text-fg-muted hover:border-border-strong",
             )}
           >
             <o.icon className="size-5" />

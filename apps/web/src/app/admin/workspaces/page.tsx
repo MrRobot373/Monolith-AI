@@ -106,7 +106,7 @@ export default function WorkspacesPage() {
                   key={i}
                   type="button"
                   onClick={() => setIcon(i)}
-                  className={`flex size-9 items-center justify-center rounded-lg border text-base transition-colors ${icon === i ? "border-accent bg-accent-soft" : "border-border hover:border-border-strong"}`}
+                  className={`flex size-9 items-center justify-center rounded-lg border text-base transition-colors ${icon === i ? "border-fg-subtle bg-surface-2" : "border-border hover:border-border-strong"}`}
                 >
                   {i}
                 </button>

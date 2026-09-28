@@ -151,7 +151,7 @@ export default function ModelsPage() {
                           onClick={() => updateModel.mutate({ id: m.id, sections: on ? m.sections.filter((x) => x !== s) : [...m.sections, s] })}
                           className={cn(
                             "rounded-md border px-1.5 py-0.5 text-[11.5px] transition-colors",
-                            on ? "border-accent-line bg-accent-soft text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
+                            on ? "border-border-strong bg-surface-3 text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
                           )}
                         >
                           {SECTION_LABELS[s]}
@@ -223,7 +223,7 @@ function AddProviderDialog({ open, onOpenChange, onDone }: { open: boolean; onOp
                   setName(t === "ollama" ? "Ollama" : "vLLM");
                   setBaseUrl(t === "ollama" ? "http://localhost:11434" : "http://localhost:8000/v1");
                 }}
-                className={cn("h-16 rounded-lg border px-3 text-left transition-colors", type === t ? "border-accent bg-accent-soft" : "border-border hover:border-border-strong")}
+                className={cn("h-16 rounded-lg border px-3 text-left transition-colors", type === t ? "border-fg-subtle bg-surface-2" : "border-border hover:border-border-strong")}
               >
                 <div className="text-sm font-medium">{TYPE_LABEL[t]}</div>
                 <div className="text-[11.5px] text-fg-muted">{t === "ollama" ? "Simple local serving" : "vLLM, LM Studio, TGI, APIs"}</div>

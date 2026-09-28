@@ -3,7 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const base =
-  "w-full rounded-lg border border-border bg-surface px-3 text-sm text-fg placeholder:text-fg-subtle transition-[border-color,box-shadow] duration-150 outline-none focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)] disabled:opacity-60";
+  "w-full rounded-lg border border-border bg-surface px-3 text-[13px] text-fg placeholder:text-fg-subtle transition-[border-color,box-shadow] duration-150 outline-none focus:border-border-strong focus:shadow-[0_0_0_3px_var(--color-accent-soft)] focus-visible:outline-none disabled:opacity-60";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...props },
@@ -48,7 +48,7 @@ export function Field({
 }) {
   return (
     <label className={cn("block space-y-1.5", className)}>
-      {label && <span className="block text-[13px] font-medium text-fg">{label}</span>}
+      {label && <span className="block text-[12.5px] font-medium text-fg-muted">{label}</span>}
       {children}
       {error ? (
         <span className="block text-xs text-danger">{error}</span>

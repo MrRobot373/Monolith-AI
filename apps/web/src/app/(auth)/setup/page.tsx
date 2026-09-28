@@ -46,7 +46,7 @@ export default function SetupPage() {
     >
       <div className="mb-6 flex justify-center gap-1.5">
         {[0, 1].map((i) => (
-          <span key={i} className={cn("h-1 rounded-full transition-all duration-300", i === step ? "w-6 bg-accent" : "w-3 bg-surface-3")} />
+          <span key={i} className={cn("h-1 rounded-full transition-all duration-300", i === step ? "w-6 bg-fg" : "w-3 bg-surface-3")} />
         ))}
       </div>
       <form onSubmit={submit} className="space-y-4">

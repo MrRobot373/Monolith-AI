@@ -128,14 +128,17 @@ await step("Setup", "Setup page is closed after setup", pub, async () => {
 });
 
 /* ═════════════ C. Chat basics (demo model) ═════════════ */
-await step("Chat", "Suggestion chip sends a message and streams a reply", owner, async () => {
-  await owner.click("text=Draft a polite follow-up email");
+await step("Chat", "Quick action fills the composer; sending streams a reply", owner, async () => {
+  await owner.click("button:has-text('Draft an email')");
+  expect((await owner.locator("textarea").inputValue()) === "Draft a polite email to ", "quick action did not fill composer");
+  await owner.locator("textarea").pressSequentially("Acme about the overdue invoice");
+  await owner.keyboard.press("Enter");
   await waitReply(owner, 0);
   expect((await assistantCount(owner)) === 1, "no assistant reply");
   expect(owner.url().match(/\/app\/chat\/[\w-]+$/), "URL not updated to chat id");
 });
 await step("Chat", "New chat appears in sidebar with an auto title", owner, async () => {
-  await owner.locator('aside a[href^="/app/chat/"]', { hasText: "Draft a polite follow-up" }).waitFor();
+  await owner.locator('aside a[href^="/app/chat/"]', { hasText: "Draft a polite email to Acme" }).waitFor();
 });
 await step("Chat", "Shift+Enter inserts a newline instead of sending", owner, async () => {
   const ta = owner.locator("textarea");
@@ -170,11 +173,11 @@ await step("Chat", "Reloading a chat URL restores the conversation", owner, asyn
 await step("Chat", "New chat button opens an empty chat", owner, async () => {
   await owner.click("aside >> text=New chat");
   await owner.waitForURL("**/app/chat");
-  await owner.getByText("How can I help today?").waitFor();
+  await owner.getByText("where should we start today?").waitFor();
   await send(owner, "Second conversation about budgets");
 });
 await step("Chat", "Clicking a chat in the sidebar opens it", owner, async () => {
-  await owner.locator("aside a", { hasText: "Draft a polite follow-up" }).click();
+  await owner.locator("aside a", { hasText: "Draft a polite email to Acme" }).click();
   await owner.waitForURL(firstChatUrl);
   await owner.locator(".prose-chat").nth(2).waitFor();
 });
@@ -197,7 +200,7 @@ await step("Chat", "Pin a chat moves it under Pinned", owner, async () => {
 await step("Chat", "Search filters the chat list", owner, async () => {
   await owner.fill('input[placeholder="Search chats"]', "budget");
   await wait(300);
-  expect((await owner.locator("aside a", { hasText: "Draft a polite" }).count()) === 0, "filter did not hide");
+  expect((await owner.locator("aside a", { hasText: "Draft a polite email" }).count()) === 0, "filter did not hide");
   expect((await owner.locator("aside a", { hasText: "Budget planning" }).count()) === 1, "filter hid match");
   await owner.fill('input[placeholder="Search chats"]', "");
 });
@@ -216,9 +219,9 @@ await step("Chat", "Sidebar collapses with button and Ctrl+B", owner, async () =
   await owner.locator('button[aria-label="Collapse sidebar"]').waitFor();
 });
 await step("Chat", "Work AI and Code preview pages open", owner, async () => {
-  await owner.click("aside >> text=Work AI");
-  await owner.getByText("Task timeline").waitFor();
-  await owner.click("aside >> text=Code");
+  await owner.click("aside a:has-text('Work AI')");
+  await owner.getByText("Implementation plan").waitFor();
+  await owner.click("aside a:has-text('Code')");
   await owner.getByText("invoices.ts").first().waitFor();
 });
 

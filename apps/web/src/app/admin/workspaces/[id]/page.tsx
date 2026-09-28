@@ -72,7 +72,7 @@ export default function WorkspaceDetail() {
         {tabs.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={cn("relative px-3 pb-2.5 text-sm transition-colors", tab === t ? "text-fg" : "text-fg-muted hover:text-fg")}>
             {t}
-            {tab === t && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />}
+            {tab === t && <span className="absolute inset-x-2 -bottom-px h-px bg-fg" />}
           </button>
         ))}
       </div>
@@ -150,7 +150,7 @@ function Members({ ws }: { ws: WorkspaceRow }) {
                         }
                         className={cn(
                           "rounded-md border px-1.5 py-0.5 text-[11.5px] transition-colors",
-                          on ? "border-accent-line bg-accent-soft text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
+                          on ? "border-border-strong bg-surface-3 text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
                         )}
                       >
                         {SECTION_LABELS[s]}
@@ -286,8 +286,8 @@ function QuotaDialog({ member, onClose, onSave }: { member: Member; onClose: () 
     >
       <div className="space-y-3">
         {(["default", "custom"] as const).map((m) => (
-          <label key={m} className={cn("flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors", mode === m ? "border-accent bg-accent-soft" : "border-border")}>
-            <input type="radio" className="mt-1 accent-[var(--accent)]" checked={mode === m} onChange={() => setMode(m)} />
+          <label key={m} className={cn("flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors", mode === m ? "border-fg-subtle bg-surface-2" : "border-border")}>
+            <input type="radio" className="mt-1 accent-[var(--fg)]" checked={mode === m} onChange={() => setMode(m)} />
             <div className="flex-1">
               <div className="text-sm font-medium">{m === "default" ? "Workspace default" : "Custom allowance"}</div>
               <div className="text-xs text-fg-muted">
@@ -351,7 +351,7 @@ function Models({ ws }: { ws: WorkspaceRow }) {
               {on && (
                 <button
                   onClick={() => setDef(m.id)}
-                  className={cn("rounded-md border px-2 py-1 text-xs transition-colors", def === m.id ? "border-accent-line bg-accent-soft text-fg" : "border-border text-fg-subtle hover:text-fg")}
+                  className={cn("rounded-md border px-2 py-1 text-xs transition-colors", def === m.id ? "border-border-strong bg-surface-3 text-fg" : "border-border text-fg-subtle hover:text-fg")}
                 >
                   {def === m.id ? "Default" : "Make default"}
                 </button>

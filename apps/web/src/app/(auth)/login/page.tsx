@@ -62,7 +62,7 @@ function LoginForm() {
         <Button variant="outline" disabled className="w-full" title="Configured by your admin (coming soon)">
           Continue with Microsoft
         </Button>
-        <p className="text-center text-[11.5px] text-fg-subtle">Single sign-on is enabled by your admin.</p>
+        <p className="text-center text-[11.5px] text-fg-subtle">Single sign-on is set up by your admin.</p>
       </div>
     </AuthShell>
   );

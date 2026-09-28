@@ -1,8 +1,10 @@
 import { GeistMono } from "geist/font/mono";
-import { GeistSans } from "geist/font/sans";
 import type { Metadata, Viewport } from "next";
 import { themeBootScript } from "@/lib/theme";
 import { Providers } from "./providers";
+import "@fontsource-variable/inter";
+import "@fontsource/newsreader/400.css";
+import "@fontsource/newsreader/400-italic.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,14 +15,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+    { media: "(prefers-color-scheme: dark)", color: "#1c1c1c" },
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
   ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="dark" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning>
+    <html lang="en" data-theme="dark" className={GeistMono.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>

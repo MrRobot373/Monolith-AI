@@ -11,8 +11,8 @@ export function Card({ className, children }: { className?: string; children: Re
 
 type Tone = "neutral" | "accent" | "success" | "warning" | "danger";
 const tones: Record<Tone, string> = {
-  neutral: "bg-surface-2 text-fg-muted border-border",
-  accent: "bg-accent-soft text-accent-text border-accent-line",
+  neutral: "bg-transparent text-fg-muted border-border",
+  accent: "bg-surface-2 text-fg border-border-strong",
   success: "bg-success-soft text-success border-transparent",
   warning: "bg-warning-soft text-warning border-transparent",
   danger: "bg-danger-soft text-danger border-transparent",
@@ -22,7 +22,7 @@ export function Badge({ tone = "neutral", className, children }: { tone?: Tone; 
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[11px] whitespace-nowrap",
         tones[tone],
         className,
       )}
@@ -65,9 +65,9 @@ export function Switch({
       onCheckedChange={onCheckedChange}
       disabled={disabled}
       aria-label={label}
-      className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border bg-surface-3 transition-colors duration-200 data-[state=checked]:border-accent data-[state=checked]:bg-accent disabled:opacity-50"
+      className="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-border bg-surface-3 transition-colors duration-200 data-[state=checked]:border-fg data-[state=checked]:bg-fg disabled:opacity-50"
     >
-      <RSwitch.Thumb className="block size-3.5 translate-x-0.5 rounded-full bg-fg shadow transition-transform duration-200 ease-[var(--ease-out-soft)] data-[state=checked]:translate-x-[18px] data-[state=checked]:bg-accent-fg" />
+      <RSwitch.Thumb className="block size-3.5 translate-x-0.5 rounded-full bg-fg shadow transition-transform duration-200 ease-[var(--ease-out-soft)] data-[state=checked]:translate-x-[18px] data-[state=checked]:bg-bg" />
     </RSwitch.Root>
   );
 }
@@ -118,9 +118,9 @@ export function EmptyState({
 
 export function Meter({ value, className }: { value: number | null; className?: string }) {
   const v = value === null ? 0 : Math.min(1, Math.max(0, value));
-  const tone = v >= 0.95 ? "bg-danger" : v >= 0.8 ? "bg-warning" : "bg-accent";
+  const tone = v >= 0.95 ? "bg-danger" : v >= 0.8 ? "bg-warning" : "bg-fg-muted";
   return (
-    <div className={cn("h-1.5 w-full overflow-hidden rounded-full bg-surface-3", className)}>
+    <div className={cn("h-1 w-full overflow-hidden rounded-full bg-surface-3", className)}>
       <div className={cn("h-full rounded-full transition-[width] duration-500 ease-out", tone)} style={{ width: `${v * 100}%` }} />
     </div>
   );

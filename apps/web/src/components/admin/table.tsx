@@ -8,7 +8,7 @@ export function Table({ head, children, className }: { head: ReactNode[]; childr
         <thead>
           <tr className="border-b border-border text-[12px] text-fg-subtle">
             {head.map((h, i) => (
-              <th key={i} className="px-4 py-2.5 font-medium whitespace-nowrap">
+              <th key={i} className="px-4 py-2.5 font-normal whitespace-nowrap">
                 {h}
               </th>
             ))}
@@ -29,8 +29,8 @@ export function Section({ title, description, actions, children, className }: { 
     <section className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-medium">{title}</h2>
-          {description && <p className="mt-0.5 text-[13px] text-fg-muted">{description}</p>}
+          <h2 className="text-[14px] text-fg">{title}</h2>
+          {description && <p className="mt-0.5 text-[12.5px] text-fg-subtle">{description}</p>}
         </div>
         {actions}
       </div>

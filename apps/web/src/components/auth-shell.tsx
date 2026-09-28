@@ -19,20 +19,21 @@ export function AuthShell({ title, subtitle, children, footer }: { title: ReactN
   const { data } = usePublicStatus();
   const product = data?.org.productName ?? "Aatmiq";
   return (
-    <div className="relative flex min-h-dvh flex-col items-center justify-center px-4 py-12">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(50%_60%_at_50%_0%,color-mix(in_oklab,var(--accent)_12%,transparent),transparent)]" />
-      <div className="relative w-full max-w-[380px] animate-rise">
-        <Link href="/" className="mb-8 flex flex-col items-center gap-3" aria-label={`${product} home`}>
-          <LogoMark className="size-10" />
-          {data?.org.name && <span className="text-sm text-fg-muted">{data.org.name}</span>}
+    <div className="relative flex min-h-dvh flex-col items-center justify-center bg-canvas px-4 py-12">
+      <div className="relative w-full max-w-[400px] animate-rise">
+        <Link href="/" className="mb-6 flex items-center justify-center gap-2" aria-label={`${product} home`}>
+          <LogoMark className="size-7" />
+          <span className="text-[14px] text-fg">{data?.org.name || product}</span>
         </Link>
-        <h1 className="text-center text-2xl font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-2 text-center text-sm text-fg-muted">{subtitle}</p>}
-        <div className="mt-8">{children}</div>
+        <div className="rounded-2xl border border-border bg-bg p-7 shadow-soft">
+          <h1 className="text-center font-serif text-[30px] leading-tight tracking-[-0.02em]">{title}</h1>
+          {subtitle && <p className="mt-2 text-center text-[13px] text-fg-subtle">{subtitle}</p>}
+          <div className="mt-7">{children}</div>
+        </div>
         {data?.org.loginMessage && (
-          <p className="mt-6 rounded-lg border border-border bg-surface px-3 py-2 text-center text-xs text-fg-muted">{data.org.loginMessage}</p>
+          <p className="mt-4 text-center text-xs text-fg-subtle">{data.org.loginMessage}</p>
         )}
-        {footer && <div className="mt-8 text-center text-sm text-fg-muted">{footer}</div>}
+        {footer && <div className="mt-5 text-center text-[13px] text-fg-subtle">{footer}</div>}
       </div>
       <p className="absolute bottom-5 flex items-center gap-1.5 text-xs text-fg-subtle">
         <ShieldCheck className="size-3.5" /> Private deployment · your data stays on your servers

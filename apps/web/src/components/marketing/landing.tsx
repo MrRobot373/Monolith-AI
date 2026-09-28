@@ -39,14 +39,14 @@ function Section({ id, children, className = "" }: { id?: string; children: Reac
 }
 
 function Eyebrow({ children }: { children: ReactNode }) {
-  return <div className="mb-3 text-[12px] font-medium tracking-[0.14em] text-accent-text uppercase">{children}</div>;
+  return <div className="mb-3 text-[12px] tracking-[0.12em] text-fg-subtle uppercase">{children}</div>;
 }
 
 export function Landing() {
   return (
     <div className="min-h-dvh overflow-x-clip bg-bg">
       {/* Nav */}
-      <header className="sticky top-0 z-40 border-b border-transparent bg-bg/70 backdrop-blur-xl supports-[backdrop-filter]:bg-bg/60">
+      <header className="sticky top-0 z-40 border-b border-border bg-bg/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link href="/" aria-label="Aatmiq home">
             <Logo />
@@ -61,7 +61,7 @@ export function Landing() {
             <Button asChild variant="ghost" size="sm">
               <Link href="/login">Sign in</Link>
             </Button>
-            <Button asChild variant="primary" size="sm" className="max-sm:hidden">
+            <Button asChild variant="primary" size="sm">
               <a href={CONTACT}>Book a demo</a>
             </Button>
           </div>
@@ -71,14 +71,14 @@ export function Landing() {
       {/* Hero */}
       <Section className="pt-16 pb-20 text-center sm:pt-24">
         <div className="mx-auto mb-6 inline-flex animate-rise items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-[12.5px] text-fg-muted">
-          <span className="size-1.5 rounded-full bg-accent shadow-[0_0_10px_var(--accent)]" />
+          <span className="size-1.5 rounded-full bg-accent" />
           Private AI for teams · runs on your own servers
         </div>
-        <h1 className="mx-auto max-w-4xl animate-rise text-5xl font-semibold tracking-[-0.035em] text-fg [animation-delay:60ms] sm:text-7xl">
+        <h1 className="mx-auto max-w-4xl animate-rise font-serif text-[56px] leading-[1.02] tracking-[-0.03em] text-fg [animation-delay:60ms] sm:text-[88px]">
           Your own AI.
-          <span className="block text-fg-subtle">Nowhere else.</span>
+          <span className="block text-fg-subtle italic">Nowhere else.</span>
         </h1>
-        <p className="mx-auto mt-6 max-w-2xl animate-rise text-[17px] leading-relaxed text-fg-muted [animation-delay:120ms]">
+        <p className="mx-auto mt-6 max-w-2xl animate-rise text-[16px] leading-relaxed text-fg-muted [animation-delay:120ms]">
           Aatmiq gives your whole company a chat assistant, autonomous AI agents and a full code editor in one
           workspace you own. It runs open-source models on your infrastructure, so your data never goes to a third-party AI.
         </p>
@@ -107,7 +107,7 @@ export function Landing() {
       <Section id="product" className="py-20">
         <div className="mx-auto max-w-2xl text-center">
           <Eyebrow>One platform, three ways to work</Eyebrow>
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Everything your team uses AI for, in one place.</h2>
+          <h2 className="font-serif text-[36px] leading-tight tracking-[-0.02em] sm:text-[44px]">Everything your team uses AI for, in one place.</h2>
           <p className="mt-4 text-fg-muted">
             Replace separate subscriptions for chat, agents and coding tools with one private workspace, one login and one
             admin panel.
@@ -139,10 +139,10 @@ export function Landing() {
 
       {/* Privacy */}
       <Section id="privacy" className="py-20">
-        <div className="grid items-center gap-12 rounded-3xl border border-border bg-surface p-8 sm:p-12 lg:grid-cols-2">
+        <div className="grid items-center gap-12 rounded-2xl border border-border bg-surface p-8 sm:p-12 lg:grid-cols-2">
           <div>
             <Eyebrow>Privacy by architecture</Eyebrow>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Nothing leaves your building.</h2>
+            <h2 className="font-serif text-[36px] leading-tight tracking-[-0.02em] sm:text-[44px]">Nothing leaves your building.</h2>
             <p className="mt-4 leading-relaxed text-fg-muted">
               Cloud AI tools send your prompts, code and documents to someone else&apos;s servers. Aatmiq installs on
               your hardware or private cloud and runs open-source models there, so your data stays inside your network.
@@ -155,7 +155,7 @@ export function Landing() {
                 "Full audit log of every sign-in, change and agent action",
               ].map((t) => (
                 <li key={t} className="flex gap-3">
-                  <Check className="mt-0.5 size-4 shrink-0 text-accent" />
+                  <Check className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
                   <span className="text-fg-muted">{t}</span>
                 </li>
               ))}
@@ -169,9 +169,9 @@ export function Landing() {
       <Section id="admin" className="py-20">
         <div className="mx-auto max-w-2xl text-center">
           <Eyebrow>Built for the people who run it</Eyebrow>
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Control who uses what, and how much.</h2>
+          <h2 className="font-serif text-[36px] leading-tight tracking-[-0.02em] sm:text-[44px]">Control who uses what, and how much.</h2>
         </div>
-        <div className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
           {[
             { i: <Layers />, t: "Workspaces per team", d: "Engineering, Sales, Finance: each with its own models, budget and tools." },
             { i: <Gauge />, t: "Token budgets", d: "Set budgets per team and per person. Usage is split fairly by default and adjustable." },
@@ -184,10 +184,10 @@ export function Landing() {
             { i: <Building2 />, t: "Your brand", d: "Your logo, name and accent color across the whole product." },
           ].map((f) => (
             <div key={f.t} className="group bg-surface p-6 transition-colors hover:bg-surface-2">
-              <div className="mb-4 flex size-9 items-center justify-center rounded-lg border border-border bg-bg-subtle text-fg-muted transition-colors group-hover:border-accent-line group-hover:text-accent [&>svg]:size-4">
+              <div className="mb-4 flex size-9 items-center justify-center rounded-lg border border-border bg-bg-subtle text-fg-muted transition-colors group-hover:border-border-strong group-hover:text-fg [&>svg]:size-4">
                 {f.i}
               </div>
-              <h3 className="font-medium">{f.t}</h3>
+              <h3 className="text-[14px] text-fg">{f.t}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">{f.d}</p>
             </div>
           ))}
@@ -199,7 +199,7 @@ export function Landing() {
         <div className="grid gap-10 lg:grid-cols-[1fr_1.4fr]">
           <div>
             <Eyebrow>Up and running in a day</Eyebrow>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Install it. Connect your models. Invite your team.</h2>
+            <h2 className="font-serif text-[36px] leading-tight tracking-[-0.02em] sm:text-[44px]">Install it. Connect your models. Invite your team.</h2>
             <p className="mt-4 text-fg-muted">We help you set it up and keep it updated. You keep full ownership of the server and the data.</p>
           </div>
           <ol className="space-y-3">
@@ -209,7 +209,7 @@ export function Landing() {
               { i: <Users />, t: "Invite your team", d: "Create workspaces, set budgets and send invites. People sign in with their work account." },
             ].map((s, idx) => (
               <li key={s.t} className="flex gap-4 rounded-2xl border border-border bg-surface p-5">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft font-mono text-sm font-semibold text-accent-text">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 font-mono text-sm text-fg">
                   {idx + 1}
                 </div>
                 <div>
@@ -226,7 +226,7 @@ export function Landing() {
       <Section id="plans" className="py-20">
         <div className="mx-auto max-w-2xl text-center">
           <Eyebrow>Plans</Eyebrow>
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Start with chat. Grow into agents and code.</h2>
+          <h2 className="font-serif text-[36px] leading-tight tracking-[-0.02em] sm:text-[44px]">Start with chat. Grow into agents and code.</h2>
           <p className="mt-4 text-fg-muted">Per-seat plans with an annual platform fee that covers installation, updates and support.</p>
         </div>
         <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -239,10 +239,9 @@ export function Landing() {
 
       {/* CTA */}
       <Section className="py-24">
-        <div className="relative overflow-hidden rounded-3xl border border-border bg-surface px-6 py-16 text-center sm:px-12">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(50%_80%_at_50%_100%,color-mix(in_oklab,var(--accent)_16%,transparent),transparent)]" />
+        <div className="relative overflow-hidden rounded-2xl border border-border bg-surface px-6 py-16 text-center sm:px-12">
           <LogoMark className="relative mx-auto mb-6 size-10" />
-          <h2 className="relative text-3xl font-semibold tracking-tight sm:text-4xl">Give your team AI they can trust.</h2>
+          <h2 className="relative font-serif text-[36px] leading-tight tracking-[-0.02em] sm:text-[48px]">Give your team AI they can trust.</h2>
           <p className="relative mx-auto mt-4 max-w-xl text-fg-muted">
             See Aatmiq running on real hardware, with your own documents, in a 30-minute demo.
           </p>
@@ -277,17 +276,17 @@ export function Landing() {
 
 function Pillar({ icon, name, tagline, points, soon }: { icon: ReactNode; name: string; tagline: string; points: string[]; soon?: boolean }) {
   return (
-    <div className="group relative rounded-2xl border border-border bg-surface p-6 transition-[border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-border-strong">
+    <div className="group relative rounded-xl border border-border bg-surface p-6 transition-[border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-border-strong">
       <div className="mb-5 flex items-center justify-between">
-        <div className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent-text [&>svg]:size-5">{icon}</div>
+        <div className="flex size-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-fg [&>svg]:size-4">{icon}</div>
         {soon && <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-fg-subtle">Coming soon</span>}
       </div>
-      <h3 className="text-lg font-semibold">{name}</h3>
+      <h3 className="font-serif text-[26px] leading-tight">{name}</h3>
       <p className="mt-1 text-fg-muted">{tagline}</p>
       <ul className="mt-5 space-y-2.5 text-sm">
         {points.map((p) => (
           <li key={p} className="flex gap-2.5 text-fg-muted">
-            <Check className="mt-0.5 size-4 shrink-0 text-accent" /> {p}
+            <Check className="mt-0.5 size-4 shrink-0 text-fg-subtle" /> {p}
           </li>
         ))}
       </ul>
@@ -298,12 +297,12 @@ function Pillar({ icon, name, tagline, points, soon }: { icon: ReactNode; name: 
 function Plan({ name, desc, items, featured }: { name: string; desc: string; items: string[]; featured?: boolean }) {
   return (
     <div
-      className={`relative flex flex-col rounded-2xl border p-6 ${featured ? "border-accent-line bg-surface shadow-[0_0_0_1px_var(--color-accent-line),0_20px_60px_-30px_var(--accent)]" : "border-border bg-surface"}`}
+      className={`relative flex flex-col rounded-2xl border p-6 ${featured ? "border-fg-subtle bg-surface" : "border-border bg-surface"}`}
     >
       {featured && (
-        <span className="absolute -top-2.5 left-6 rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-accent-fg">Most complete</span>
+        <span className="absolute -top-2.5 left-6 rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-fg">Most complete</span>
       )}
-      <h3 className="font-semibold">{name}</h3>
+      <h3 className="font-serif text-[24px] leading-tight">{name}</h3>
       <p className="mt-1 text-sm text-fg-muted">{desc}</p>
       <ul className="mt-5 flex-1 space-y-2.5 text-sm">
         {items.map((i) => (
@@ -321,11 +320,11 @@ function Plan({ name, desc, items, featured }: { name: string; desc: string; ite
 
 function PrivacyDiagram() {
   return (
-    <div className="relative rounded-2xl border border-border bg-bg-subtle p-6">
+    <div className="relative rounded-xl border border-border bg-bg p-6">
       <div className="mb-3 flex items-center gap-2 text-[12px] font-medium text-fg-subtle">
         <Lock className="size-3.5" /> Your network
       </div>
-      <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed border-accent-line p-4">
+      <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed border-border-strong p-4">
         {[
           { i: <Users />, t: "Employees", d: "Browser & desktop" },
           { i: <LogoMark className="size-4" />, t: "Aatmiq", d: "Web, API, agents" },
@@ -344,7 +343,7 @@ function PrivacyDiagram() {
         ))}
       </div>
       <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-surface p-3 text-[12.5px]">
-        <ShieldCheck className="size-4 shrink-0 text-accent" />
+        <ShieldCheck className="size-4 shrink-0 text-fg-muted" />
         <span className="text-fg-muted">
           Only license status and seat counts reach Aatmiq. <span className="text-fg">No prompts, files or code.</span>
         </span>

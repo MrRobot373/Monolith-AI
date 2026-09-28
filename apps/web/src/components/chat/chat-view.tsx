@@ -2,33 +2,40 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUp,
+  ArrowUpRight,
   Check,
-  ChevronDown,
+  Code2,
   Copy,
-  Cpu,
   FileText,
+  Github,
+  HardDrive,
   Lightbulb,
+  Lock,
+  Mail,
+  MessageSquare,
   PenLine,
   RefreshCw,
-  ShieldCheck,
-  Square,
+  Slack,
+  SquarePen,
   TriangleAlert,
-  Code2,
 } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { TopBar, TopBarButton } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
+import { useChats } from "@/components/app/sidebar";
 import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/ui/logo";
 import { Meter, Tooltip } from "@/components/ui/misc";
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from "@/components/ui/overlay";
 import { Skeleton } from "@/components/ui/spinner";
 import { ApiError, get, post, readSse } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatTokens, greeting } from "@/lib/format";
+import { greeting, timeAgo } from "@/lib/format";
 import type { AvailableModel, ChatMessageRow, QuotaStatus } from "@/lib/types";
+import { Composer, type ComposerHandle } from "./composer";
 import { Markdown } from "./markdown";
 import { RequestTokensDialog } from "./request-tokens";
 
@@ -38,19 +45,29 @@ interface UiMessage {
   content: string;
   streaming?: boolean;
   error?: string | null;
+  model?: string;
 }
 
 const PERIOD_ADJ = { day: "daily", week: "weekly", month: "monthly" } as const;
 
-const SUGGESTIONS = [
-  { icon: PenLine, text: "Draft a polite follow-up email to a client who hasn't paid an invoice" },
-  { icon: Lightbulb, text: "Explain our options for reducing cloud costs, as a short list" },
-  { icon: Code2, text: "Write a Python script that merges CSV files in a folder" },
-  { icon: FileText, text: "Summarize the key points of a contract I'll paste in" },
+/** Quick actions put a starter prompt into the composer for the user to finish. */
+const QUICK_ACTIONS = [
+  { icon: PenLine, label: "Draft an email", prompt: "Draft a polite email to " },
+  { icon: FileText, label: "Summarize text", prompt: "Summarize the key points of the following:\n\n" },
+  { icon: Code2, label: "Write code", prompt: "Write a function that " },
+  { icon: Lightbulb, label: "Brainstorm ideas", prompt: "Give me 10 ideas for " },
+];
+
+const APPS = [
+  { name: "Slack", icon: Slack, hue: 300, desc: "Read channels, post summaries and reply to threads on your behalf." },
+  { name: "Google Drive", icon: HardDrive, hue: 145, desc: "Search, read and organize documents and spreadsheets." },
+  { name: "Gmail", icon: Mail, hue: 25, desc: "Draft replies, triage your inbox and follow up automatically." },
+  { name: "GitHub", icon: Github, hue: 260, desc: "Review pull requests, open issues and work in repositories." },
 ];
 
 export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; onCreated?: (id: string) => void }) {
   const { me, workspaceId } = useSession();
+  const router = useRouter();
   const qc = useQueryClient();
   const [chatId, setChatId] = useState<string | undefined>(initialId);
   const [messages, setMessages] = useState<UiMessage[]>([]);
@@ -62,7 +79,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<ComposerHandle>(null);
 
   const models = useQuery({
     queryKey: ["models", workspaceId, "chat"],
@@ -80,13 +97,19 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
     enabled: !!initialId,
     staleTime: Infinity,
   });
+  const chats = useChats(workspaceId);
+
+  const modelName = useCallback(
+    (id: string | null | undefined) => models.data?.find((m) => m.id === id)?.displayName,
+    [models.data],
+  );
 
   useEffect(() => {
     if (!existing.data) return;
     setMessages(
       existing.data.messages
         .filter((m) => m.role !== "system")
-        .map((m) => ({ id: m.id, role: m.role as UiMessage["role"], content: m.content, error: m.error })),
+        .map((m) => ({ id: m.id, role: m.role as UiMessage["role"], content: m.content, error: m.error, model: m.modelId ?? undefined })),
     );
     if (existing.data.modelId) setModelId(existing.data.modelId);
   }, [existing.data]);
@@ -97,23 +120,14 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
 
   const model = models.data?.find((m) => m.id === modelId) ?? models.data?.find((m) => m.isDefault) ?? models.data?.[0];
 
-  // Auto-scroll while streaming, unless the user scrolled up.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
-    textareaRef.current?.focus();
+    composerRef.current?.focus();
   }, [initialId]);
-
-  const autosize = () => {
-    const t = textareaRef.current;
-    if (!t) return;
-    t.style.height = "0px";
-    t.style.height = `${Math.min(t.scrollHeight, 240)}px`;
-  };
-  useEffect(autosize, [input]);
 
   const send = useCallback(
     async (text: string) => {
@@ -137,7 +151,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
       }
 
       const tempUser: UiMessage = { id: `u-${Date.now()}`, role: "user", content };
-      const tempAsst: UiMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", streaming: true };
+      const tempAsst: UiMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", streaming: true, model: model?.id };
       setMessages((m) => [...m, tempUser, tempAsst]);
       setStreaming(true);
       const ctrl = new AbortController();
@@ -159,8 +173,10 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
           throw new ApiError(res.status, body.error ?? "Request failed", body.code, body.details);
         }
         for await (const ev of readSse(res)) {
-          if (ev.event === "start" && ev.data.title) qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
-          else if (ev.event === "delta") patchAsst((m) => ({ ...m, content: m.content + ev.data.text }));
+          if (ev.event === "start") {
+            if (ev.data.title) qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+            patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model }));
+          } else if (ev.event === "delta") patchAsst((m) => ({ ...m, content: m.content + ev.data.text }));
           else if (ev.event === "done") {
             patchAsst((m) => ({ ...m, id: ev.data.messageId, streaming: false }));
             if (ev.data.quota) qc.setQueryData(["quota", workspaceId], ev.data.quota);
@@ -192,166 +208,237 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
     if (lastUser) send(lastUser.content);
   };
 
-  const empty = messages.length === 0 && !existing.isLoading;
+  const isHome = !initialId && messages.length === 0;
   const firstName = me.user.name.split(" ")[0];
   const noModels = models.data && models.data.length === 0;
+  const title = isHome ? "New chat" : (chats.data?.find((c) => c.id === chatId)?.title ?? existing.data?.title ?? "Chat");
+  const recent = (chats.data ?? []).slice(0, 4);
+
+  const composer = (size: "home" | "thread") => (
+    <Composer
+      ref={composerRef}
+      size={size}
+      value={input}
+      onChange={setInput}
+      onSubmit={() => send(input)}
+      onStop={() => abortRef.current?.abort()}
+      streaming={streaming}
+      disabled={quotaBlocked || !!noModels}
+      placeholder={
+        quotaBlocked
+          ? "You've reached your token allowance"
+          : size === "home"
+            ? "Example: Summarize this contract and list every renewal date…"
+            : "Reply to Aatmiq…"
+      }
+      models={models.data}
+      model={model}
+      onModelChange={(m) => setModelId(m.id)}
+    />
+  );
+
+  const notices = (
+    <>
+      {quotaBlocked && quota.data && <QuotaBanner quota={quota.data} onRequest={() => setRequestOpen(true)} />}
+      {noModels && (
+        <div className="mb-3 rounded-xl border border-border bg-surface px-4 py-3 text-[13px] text-fg-muted">
+          No models are enabled in this workspace yet. Ask your admin to add one.
+        </div>
+      )}
+    </>
+  );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
+      <TopBar
+        icon={isHome ? <SquarePen /> : <MessageSquare />}
+        title={<span className={cn(isHome && "text-fg-muted")}>{title}</span>}
+        actions={
+          <>
+            <Tooltip content="Conversations stay on your organization's servers">
+              <span className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-fg-subtle">
+                <Lock className="size-3.5" /> Private
+              </span>
+            </Tooltip>
+            {!isHome && (
+              <TopBarButton onClick={() => router.push("/app/chat")}>
+                <SquarePen /> New
+              </TopBarButton>
+            )}
+          </>
+        }
+      />
       {me.org.promptLogging && (
-        <div className="flex items-center justify-center gap-2 border-b border-border bg-warning-soft px-4 py-1.5 text-center text-xs text-warning">
+        <div className="flex items-center justify-center gap-2 border-b border-border px-4 py-1.5 text-center text-xs text-warning">
           <TriangleAlert className="size-3.5 shrink-0" /> Your organization records chat conversations for compliance.
         </div>
       )}
 
-      <div
-        ref={scrollRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        }}
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        {existing.isLoading ? (
-          <div className="mx-auto max-w-3xl space-y-6 px-4 pt-16 sm:px-6">
-            <Skeleton className="ml-auto h-10 w-2/3 rounded-2xl" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
-            <Skeleton className="h-4 w-3/5" />
-          </div>
-        ) : empty ? (
-          <div className="flex h-full flex-col items-center justify-center px-4 pb-10">
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} className="text-center">
-              <LogoMark className="mx-auto mb-5 size-10" />
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+      {isHome ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-[760px] flex-col px-4 pt-[12vh] pb-10 sm:px-6">
+            <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} className="text-center">
+              <h1 className="font-serif text-[38px] leading-tight tracking-[-0.02em] text-fg">
                 {greeting()}, {firstName}
               </h1>
-              <p className="mt-2 text-fg-muted">How can I help today?</p>
+              <p className="mt-2 text-[13px] text-fg-subtle">I&apos;m {me.org.productName}, where should we start today?</p>
             </motion.div>
-          </div>
-        ) : (
-          <div className="mx-auto max-w-3xl px-4 pt-8 pb-10 sm:px-6">
-            <AnimatePresence initial={false}>
-              {messages.map((m, i) => (
-                <MessageBubble
-                  key={m.id}
-                  message={m}
-                  isLast={i === messages.length - 1}
-                  onRegenerate={!streaming ? regenerate : undefined}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-      </div>
-
-      {/* Composer */}
-      <div className="px-4 pb-4 sm:px-6">
-        <div className="mx-auto max-w-3xl">
-          {quotaBlocked && quota.data && (
-            <QuotaBanner quota={quota.data} onRequest={() => setRequestOpen(true)} />
-          )}
-          {noModels && (
-            <div className="mb-3 flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg-muted">
-              <Cpu className="size-4 shrink-0" /> No models are enabled in this workspace yet. Ask your admin to add one.
-            </div>
-          )}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(input);
-            }}
-            className={cn(
-              "rounded-2xl border border-border bg-surface shadow-soft transition-[border-color,box-shadow] duration-200 focus-within:border-border-strong focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]",
-              quotaBlocked && "opacity-60",
-            )}
-          >
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={input}
-              disabled={quotaBlocked || noModels}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              placeholder={quotaBlocked ? "You've reached your token allowance" : "Message privately…"}
-              className="block max-h-60 min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-relaxed outline-none placeholder:text-fg-subtle"
-            />
-            <div className="flex items-center gap-2 px-2.5 pt-1 pb-2.5">
-              <ModelPicker models={models.data} value={model} onChange={(m) => setModelId(m.id)} />
-              <span className="flex-1" />
-              {streaming ? (
-                <Tooltip content="Stop generating">
-                  <Button type="button" variant="secondary" size="icon" onClick={() => abortRef.current?.abort()} aria-label="Stop" className="rounded-xl">
-                    <Square className="size-3.5 fill-current" />
-                  </Button>
-                </Tooltip>
-              ) : (
-                <Button type="submit" variant="primary" size="icon" disabled={!input.trim() || quotaBlocked || noModels} aria-label="Send" className="rounded-xl">
-                  <ArrowUp className="size-4" />
-                </Button>
-              )}
-            </div>
-          </form>
-          {empty && !quotaBlocked && (
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              {SUGGESTIONS.map((s, i) => (
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08, duration: 0.45 }} className="mt-8">
+              {notices}
+              {composer("home")}
+            </motion.div>
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              {QUICK_ACTIONS.map((a, i) => (
                 <motion.button
-                  key={s.text}
-                  initial={{ opacity: 0, y: 6 }}
+                  key={a.label}
+                  initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + i * 0.05, duration: 0.3 }}
-                  onClick={() => send(s.text)}
-                  className="flex items-start gap-3 rounded-xl border border-border bg-surface/50 px-3.5 py-3 text-left text-[13px] leading-snug text-fg-muted transition-colors hover:border-border-strong hover:bg-surface hover:text-fg"
+                  transition={{ delay: 0.15 + i * 0.04 }}
+                  onClick={() => {
+                    setInput(a.prompt);
+                    composerRef.current?.focus();
+                  }}
+                  className="inline-flex h-8 items-center gap-2 rounded-lg border border-border bg-bg px-3 text-[13px] text-fg-muted transition-colors hover:border-border-strong hover:bg-surface hover:text-fg"
                 >
-                  <s.icon className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
-                  {s.text}
+                  <a.icon className="size-3.5" />
+                  {a.label}
                 </motion.button>
               ))}
             </div>
-          )}
-          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11.5px] text-fg-subtle">
-            <span className="inline-flex items-center gap-1 whitespace-nowrap">
-              <ShieldCheck className="size-3" /> Private to {me.org.name || "your organization"}
-            </span>
-            {quota.data && quota.data.result.usedFraction !== null && !quotaBlocked && (
-              <UsageHint quota={quota.data} onRequest={() => setRequestOpen(true)} />
+          </div>
+
+          <div className="mx-auto w-full max-w-5xl space-y-10 px-4 pb-12 sm:px-6">
+            {recent.length > 0 && (
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-[13px] text-fg">
+                    Previous chats <span className="text-fg-subtle">({chats.data?.length})</span>
+                  </h2>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {recent.map((c) => (
+                    <Link
+                      key={c.id}
+                      href={`/app/chat/${c.id}`}
+                      className="group flex h-[88px] min-w-0 flex-col justify-between rounded-xl border border-border bg-surface p-3.5 transition-colors hover:border-border-strong"
+                    >
+                      <MessageSquare className="size-3.5 text-fg-subtle" />
+                      <div>
+                        <div className="truncate text-[13px] text-fg">{c.title}</div>
+                        <div className="mt-0.5 text-[11.5px] text-fg-subtle">{timeAgo(c.updatedAt)}</div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </section>
             )}
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-[13px] text-fg">Connect your tools</h2>
+                <span className="text-[12px] text-fg-subtle">Arrives with Work AI</span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {APPS.map((a) => (
+                  <div key={a.name} className="min-w-0 rounded-xl border border-border bg-surface p-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="flex size-6 items-center justify-center rounded-md text-white"
+                        style={{ background: `oklch(0.6 0.15 ${a.hue})` }}
+                      >
+                        <a.icon className="size-3.5" />
+                      </span>
+                      <span className="flex-1 text-[13px] text-fg">{a.name}</span>
+                      <span className="rounded border border-border px-1.5 py-px text-[10.5px] text-fg-subtle">Soon</span>
+                    </div>
+                    <p className="mt-2.5 line-clamp-2 text-[12px] leading-relaxed text-fg-subtle">{a.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
         </div>
-      </div>
+      ) : (
+        <>
+          <div
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            }}
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
+            {existing.isLoading ? (
+              <div className="mx-auto max-w-[760px] space-y-5 px-4 pt-10 sm:px-6">
+                <Skeleton className="h-14 w-full rounded-xl" />
+                <Skeleton className="h-3.5 w-full" />
+                <Skeleton className="h-3.5 w-5/6" />
+                <Skeleton className="h-3.5 w-3/5" />
+              </div>
+            ) : (
+              <div className="mx-auto max-w-[760px] px-4 pt-8 pb-10 sm:px-6">
+                <AnimatePresence initial={false}>
+                  {messages.map((m, i) => (
+                    <MessageBlock
+                      key={m.id}
+                      message={m}
+                      modelLabel={modelName(m.model) ?? model?.displayName ?? "Aatmiq"}
+                      isLast={i === messages.length - 1}
+                      onRegenerate={!streaming ? regenerate : undefined}
+                    />
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+          <div className="px-4 pb-3 sm:px-6">
+            <div className="mx-auto max-w-[760px]">
+              {notices}
+              {composer("thread")}
+              <FooterHint quota={quota.data} blocked={quotaBlocked} orgName={me.org.name} onRequest={() => setRequestOpen(true)} />
+            </div>
+          </div>
+        </>
+      )}
       <RequestTokensDialog open={requestOpen} onOpenChange={setRequestOpen} workspaceId={workspaceId} />
     </div>
   );
 }
 
-function MessageBubble({ message: m, isLast, onRegenerate }: { message: UiMessage; isLast: boolean; onRegenerate?: () => void }) {
+function MessageBlock({
+  message: m,
+  modelLabel,
+  isLast,
+  onRegenerate,
+}: {
+  message: UiMessage;
+  modelLabel: string;
+  isLast: boolean;
+  onRegenerate?: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   if (m.role === "user") {
     return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="mb-8 flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-surface-2 px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{m.content}</div>
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="mb-6">
+        <div className="rounded-xl border border-border bg-surface-2 px-4 py-3 text-[14px] leading-relaxed whitespace-pre-wrap text-fg">
+          {m.content}
+        </div>
       </motion.div>
     );
   }
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }} className="group mb-8 flex gap-4">
-      <LogoMark className={cn("mt-0.5 size-7 shrink-0", m.streaming && "animate-pulse")} />
-      <div className="min-w-0 flex-1 pt-0.5">
-        {m.content ? (
-          <Markdown content={m.content} />
-        ) : m.streaming ? (
-          <div className="flex h-7 items-center gap-1">
-            {[0, 1, 2].map((i) => (
-              <span key={i} className="size-1.5 animate-bounce rounded-full bg-fg-subtle" style={{ animationDelay: `${i * 120}ms` }} />
-            ))}
-          </div>
-        ) : null}
-        {m.streaming && m.content && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-[2px] animate-caret bg-accent" />}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }} className="group mb-8">
+      <div className="mb-2 flex items-center gap-2 text-[12.5px] text-fg-subtle">
+        <LogoMark className="size-4" />
+        <span>{modelLabel}</span>
+        {m.streaming && (
+          <span className="bg-[linear-gradient(90deg,var(--fg-subtle)_0%,var(--fg)_50%,var(--fg-subtle)_100%)] bg-[length:200%_100%] bg-clip-text text-transparent animate-shimmer">
+            {m.content ? "Writing…" : "Thinking…"}
+          </span>
+        )}
+      </div>
+      <div className="pl-6">
+        {m.content ? <Markdown content={m.content} /> : null}
+        {m.streaming && m.content && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-[2px] animate-caret bg-fg" />}
         {m.error && (
           <div className="mt-2 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-[13px] text-danger">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
@@ -359,7 +446,7 @@ function MessageBubble({ message: m, isLast, onRegenerate }: { message: UiMessag
           </div>
         )}
         {!m.streaming && (
-          <div className={cn("mt-2 flex gap-0.5 transition-opacity", isLast ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
+          <div className={cn("mt-2 -ml-1.5 flex gap-0.5 transition-opacity", isLast ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
             <Tooltip content={copied ? "Copied" : "Copy"}>
               <Button
                 variant="ghost"
@@ -371,7 +458,7 @@ function MessageBubble({ message: m, isLast, onRegenerate }: { message: UiMessag
                   setTimeout(() => setCopied(false), 1500);
                 }}
               >
-                {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
               </Button>
             </Tooltip>
             {isLast && onRegenerate && (
@@ -388,56 +475,36 @@ function MessageBubble({ message: m, isLast, onRegenerate }: { message: UiMessag
   );
 }
 
-function ModelPicker({ models, value, onChange }: { models?: AvailableModel[]; value?: AvailableModel; onChange: (m: AvailableModel) => void }) {
-  if (!models || models.length === 0) return <span className="px-2 text-xs text-fg-subtle">No model</span>;
-  return (
-    <Menu>
-      <MenuTrigger asChild>
-        <button type="button" className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg">
-          <Cpu className="size-3.5" />
-          <span className="max-w-40 truncate">{value?.displayName}</span>
-          <ChevronDown className="size-3.5 text-fg-subtle" />
-        </button>
-      </MenuTrigger>
-      <MenuContent side="top" className="w-72">
-        <MenuLabel>Models available in this workspace</MenuLabel>
-        {models.map((m) => (
-          <MenuItem key={m.id} onSelect={() => onChange(m)} shortcut={m.id === value?.id ? <Check className="size-3.5 text-accent" /> : null}>
-            <span className="block truncate">{m.displayName}</span>
-            <span className="block truncate text-[11px] text-fg-subtle">
-              {m.providerName}
-              {m.contextLength ? ` · ${formatTokens(m.contextLength)} context` : ""}
-            </span>
-          </MenuItem>
-        ))}
-      </MenuContent>
-    </Menu>
-  );
-}
-
 function QuotaBanner({ quota, onRequest }: { quota: QuotaStatus; onRequest: () => void }) {
   const who = quota.result.blockedBy === "workspace" ? "This workspace has" : "You've";
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-      <div className="flex size-8 items-center justify-center rounded-lg bg-warning-soft text-warning">
-        <TriangleAlert className="size-4" />
-      </div>
+      <TriangleAlert className="size-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">{who} used this {quota.period}&apos;s token allowance</div>
-        <div className="text-xs text-fg-muted">Resets {new Date(quota.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}. You can ask your admin for more now.</div>
+        <div className="text-[13px] text-fg">{who} used this {quota.period}&apos;s token allowance</div>
+        <div className="text-xs text-fg-subtle">
+          Resets {new Date(quota.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}. You can ask your admin for more now.
+        </div>
       </div>
-      <Button variant="primary" size="sm" onClick={onRequest}>Request more</Button>
+      <Button variant="primary" size="sm" onClick={onRequest}>
+        Request more
+      </Button>
     </motion.div>
   );
 }
 
-function UsageHint({ quota, onRequest }: { quota: QuotaStatus; onRequest: () => void }) {
-  const f = quota.result.usedFraction ?? 0;
-  if (f < 0.5) return null;
+function FooterHint({ quota, blocked, orgName, onRequest }: { quota?: QuotaStatus; blocked: boolean; orgName: string; onRequest: () => void }) {
+  const f = quota?.result.usedFraction ?? null;
   return (
-    <button onClick={onRequest} className="inline-flex items-center gap-2 whitespace-nowrap transition-colors hover:text-fg">
-      <Meter value={f} className="w-14" />
-      {Math.round(f * 100)}% of your {PERIOD_ADJ[quota.period]} allowance
-    </button>
+    <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11.5px] text-fg-subtle">
+      <span className="whitespace-nowrap">Private to {orgName || "your organization"}. AI can make mistakes.</span>
+      {quota && f !== null && f >= 0.5 && !blocked && (
+        <button onClick={onRequest} className="inline-flex items-center gap-2 whitespace-nowrap transition-colors hover:text-fg">
+          <Meter value={f} className="w-12" />
+          {Math.round(f * 100)}% of your {PERIOD_ADJ[quota.period]} allowance
+          <ArrowUpRight className="size-3" />
+        </button>
+      )}
+    </div>
   );
 }

@@ -22,3 +22,4 @@
 | D18 | 2026-09-28 | Only Org Admins/Owners invite new people to the org; Workspace Admins add existing users | WS Admins invite | Seat and license control stays with org |
 | D19 | 2026-09-28 | Default user quota = workspace budget ÷ members, auto-recalculated unless manually overridden | Fixed default | Fair by default, adjustable |
 | D20 | 2026-09-28 | Prompt/response logging off by default; visible notice + acknowledgement when enabled | Always on; never | Compliance option without surprising users |
+| D21 | 2026-09-28 | UI direction = **native pro-tool look** (references: Rune agent workspace, Google Antigravity, VS Code-style IDEs): framed window, neutral charcoal palette, white primary actions, serif display type (Newsreader) + Inter UI, cyan only as a small accent | Cyan-heavy glow style (first version, rejected by owner) | Owner feedback; calmer, more premium, fits enterprise buyers |

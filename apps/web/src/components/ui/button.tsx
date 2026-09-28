@@ -7,19 +7,18 @@ type Variant = "primary" | "secondary" | "ghost" | "outline" | "danger";
 type Size = "sm" | "md" | "lg" | "icon" | "icon-sm";
 
 const variants: Record<Variant, string> = {
-  primary:
-    "bg-accent text-accent-fg hover:brightness-110 active:brightness-95 shadow-[0_0_0_1px_var(--color-accent-line),0_6px_20px_-8px_var(--accent)]",
-  secondary: "bg-fg text-bg hover:opacity-90",
+  primary: "bg-primary text-primary-fg hover:opacity-90 active:opacity-100",
+  secondary: "bg-surface-2 text-fg hover:bg-surface-3",
   outline: "border border-border bg-surface text-fg hover:bg-surface-2 hover:border-border-strong",
   ghost: "text-fg-muted hover:text-fg hover:bg-surface-2",
-  danger: "bg-danger text-white hover:brightness-110",
+  danger: "bg-danger text-white hover:opacity-90",
 };
 
 const sizes: Record<Size, string> = {
-  sm: "h-8 px-3 text-[13px] gap-1.5 rounded-lg",
-  md: "h-9 px-3.5 text-sm gap-2 rounded-lg",
-  lg: "h-11 px-5 text-[15px] gap-2 rounded-xl",
-  icon: "size-9 rounded-lg",
+  sm: "h-7 px-2.5 text-[13px] gap-1.5 rounded-md",
+  md: "h-8 px-3 text-[13px] gap-2 rounded-lg",
+  lg: "h-10 px-4 text-sm gap-2 rounded-lg",
+  icon: "size-8 rounded-lg",
   "icon-sm": "size-7 rounded-md",
 };
 
@@ -41,7 +40,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || loading}
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap select-none",
-        "transition-[background-color,border-color,color,opacity,filter,transform] duration-150 ease-out active:scale-[0.98]",
+        "transition-[background-color,border-color,color,opacity,transform] duration-150 ease-out active:scale-[0.98]",
         "disabled:pointer-events-none disabled:opacity-50",
         variants[variant],
         sizes[size],

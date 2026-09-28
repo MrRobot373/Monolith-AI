@@ -70,7 +70,7 @@ export function RequestTokensDialog({
                 }}
                 className={cn(
                   "h-9 rounded-lg border text-sm transition-colors",
-                  !custom && amount === p ? "border-accent bg-accent-soft text-fg" : "border-border text-fg-muted hover:border-border-strong",
+                  !custom && amount === p ? "border-fg-subtle bg-surface-2 text-fg" : "border-border text-fg-muted hover:border-border-strong",
                 )}
               >
                 +{formatTokens(p)}
@@ -94,7 +94,7 @@ export function RequestTokensDialog({
                 onClick={() => setDuration(d)}
                 className={cn(
                   "h-9 rounded-lg border text-sm transition-colors",
-                  duration === d ? "border-accent bg-accent-soft text-fg" : "border-border text-fg-muted hover:border-border-strong",
+                  duration === d ? "border-fg-subtle bg-surface-2 text-fg" : "border-border text-fg-muted hover:border-border-strong",
                 )}
               >
                 {d === "period" ? "This period only" : "Raise my limit"}

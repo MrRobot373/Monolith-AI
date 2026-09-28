@@ -138,8 +138,8 @@ export function BarList({
 export function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="text-[12.5px] text-fg-muted">{label}</div>
-      <div className="mt-1.5 text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="text-[12.5px] text-fg-subtle">{label}</div>
+      <div className="mt-2 text-[26px] leading-none font-medium tracking-tight text-fg">{value}</div>
       {hint && <div className="mt-1 text-xs text-fg-subtle">{hint}</div>}
     </div>
   );
