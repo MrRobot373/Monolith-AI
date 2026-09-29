@@ -12,7 +12,8 @@ import { createLocalStorage, type Storage } from "./services/storage";
 import { adminOrgRoutes } from "./routes/admin-org";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
-import { chatRoutes } from "./routes/chat";
+import { chatRoutes, purgeTemporaryChats } from "./routes/chat";
+import { stopOcr } from "./services/ocr";
 import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
 import { requestRoutes } from "./routes/requests";
@@ -63,5 +64,18 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; st
   await requestRoutes(app, ctx);
   await adminOrgRoutes(app, ctx);
   await adminSystemRoutes(app, ctx);
+
+  // Housekeeping: temporary chats older than a day are deleted.
+  const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));
+  let timer: NodeJS.Timeout | undefined;
+  app.addHook("onReady", async () => {
+    purge();
+    timer = setInterval(purge, 60 * 60 * 1000);
+    timer.unref();
+  });
+  app.addHook("onClose", async () => {
+    clearInterval(timer);
+    await stopOcr();
+  });
   return app;
 }

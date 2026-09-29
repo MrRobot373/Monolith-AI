@@ -342,7 +342,7 @@ d("Documents", () => {
   });
 
   it("rejects unsupported file types", async () => {
-    const r = await upload(owner, "photo.png", "not really a png");
+    const r = await upload(owner, "movie.mp4", "not really a video");
     expect(r.status).toBe(415);
   });
 
@@ -575,5 +575,163 @@ d("Projects", () => {
     expect((await call(member, "GET", `/api/documents/${note.id}`)).status).toBe(404);
     expect((await call(member, "GET", `/api/documents/${libraryDoc}`)).status).toBe(200);
     expect((await call(member, "GET", `/api/chats/${firstChat}`)).status).toBe(200);
+  });
+});
+
+/* ───────────── Phase B: branches, temporary chats, labels, versions, spreadsheets, export ───────────── */
+
+d("Phase B", () => {
+  const owner = jar();
+  let workspaceId = "";
+  let chatId = "";
+  const ids: Record<string, string> = {};
+
+  const startOf = (body: string) => JSON.parse(body.split("event: start\ndata: ")[1]!.split("\n")[0]!);
+  const doneOf = (body: string) => JSON.parse(body.split("event: done\ndata: ")[1]!.split("\n")[0]!);
+  async function say(content: string | undefined, extra: Record<string, unknown> = {}) {
+    const r = await call(owner, "POST", `/api/chats/${chatId}/messages`, { content, ...extra });
+    expect(r.status).toBe(200);
+    return { start: startOf(r.body), done: doneOf(r.body), body: r.body };
+  }
+  async function upload(path: string, name: string, content: Buffer | string, fields: Record<string, string> = {}) {
+    const { body, contentType } = multipart(fields, { name, content });
+    const res = await app.inject({ method: "POST", url: path, headers: { origin: APP_URL, cookie: owner.cookie, "content-type": contentType }, payload: body });
+    return res.json();
+  }
+  async function waitDoc(id: string) {
+    for (let i = 0; i < 100; i++) {
+      const r = await call(owner, "GET", `/api/documents/${id}`);
+      if (r.json.status !== "processing") return r.json;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("still processing");
+  }
+
+  beforeAll(async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const storageDir = await mkdtemp(`${tmpdir()}/aatmiq-b-`);
+    await app?.close();
+    ({ db, close } = createDb(url));
+    await db.execute(sql`
+      do $$ declare r record; begin
+        for r in (select tablename from pg_tables where schemaname = 'public' and tablename not like '%drizzle%') loop
+          execute 'truncate table "' || r.tablename || '" cascade';
+        end loop;
+      end $$;`);
+    app = await buildApp(db, { ...cfg, storageDir });
+    await call(owner, "POST", "/api/setup", { orgName: "Bee Co", name: "Owner", email: "o@b.test", password: "correct-horse-battery" });
+    workspaceId = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+  });
+
+  it("editing a message starts a new branch; the old one stays", async () => {
+    chatId = (await call(owner, "POST", "/api/chats", { workspaceId })).json.id;
+    const a = await say("First question");
+    ids.a = a.done.messageId;
+    const b = await say("Second question");
+    ids.bUser = b.start.userMessageId;
+    ids.b = b.done.messageId;
+    expect(b.start.parentId).toBe(ids.a);
+    // Edit "Second question": continue from the first answer instead.
+    const b2 = await say("Second question, reworded", { parentId: ids.a });
+    ids.b2User = b2.start.userMessageId;
+    ids.b2 = b2.done.messageId;
+    const full = await call(owner, "GET", `/api/chats/${chatId}`);
+    expect(full.json.messages).toHaveLength(6);
+    expect(full.json.leafMessageId).toBe(ids.b2);
+    const parent = (id?: string) => full.json.messages.find((m: { id: string }) => m.id === id).parentId;
+    expect(parent(ids.bUser)).toBe(ids.a);
+    expect(parent(ids.b2User)).toBe(ids.a);
+  });
+
+  it("regenerating adds a sibling answer without repeating the question", async () => {
+    const r = await say(undefined, { regenerateOf: ids.b2User });
+    expect(r.start.userMessageId).toBe(ids.b2User);
+    const full = await call(owner, "GET", `/api/chats/${chatId}`);
+    expect(full.json.messages).toHaveLength(7);
+    expect(full.json.messages.filter((m: { parentId: string }) => m.parentId === ids.b2User)).toHaveLength(2);
+    expect(full.json.leafMessageId).toBe(r.done.messageId);
+    expect((await call(owner, "POST", `/api/chats/${chatId}/messages`, { regenerateOf: ids.a })).status).toBe(400);
+    expect((await call(owner, "POST", `/api/chats/${chatId}/messages`, {})).status).toBe(400);
+  });
+
+  it("switches branches and exports the branch being shown", async () => {
+    expect((await call(owner, "PATCH", `/api/chats/${chatId}`, { leafMessageId: ids.b })).status).toBe(200);
+    const md = await call(owner, "GET", `/api/chats/${chatId}/export?format=md`);
+    expect(md.status).toBe(200);
+    expect(md.body).toContain("Second question");
+    expect(md.body).not.toContain("reworded");
+    const res = await app.inject({ method: "GET", url: `/api/chats/${chatId}/export?format=docx`, headers: { origin: APP_URL, cookie: owner.cookie } });
+    expect(res.headers["content-type"]).toContain("wordprocessingml");
+    expect(res.headers["content-disposition"]).toContain("First question.docx");
+    expect(res.rawPayload.subarray(0, 2).toString()).toBe("PK");
+    const one = await call(owner, "GET", `/api/chats/${chatId}/export?format=md&messageId=${ids.a}`);
+    expect(one.body).toContain("Answer from");
+    expect(one.body).not.toContain("Second question");
+    expect((await call(owner, "PATCH", `/api/chats/${chatId}`, { leafMessageId: "nope" })).status).toBe(400);
+  });
+
+  it("temporary chats stay out of lists and search, and are purged after a day", async () => {
+    const t = await call(owner, "POST", "/api/chats", { workspaceId, temporary: true });
+    chatId = t.json.id;
+    await say("Temporary thought about zebras");
+    expect((await call(owner, "GET", `/api/chats?workspaceId=${workspaceId}`)).json.map((c: { id: string }) => c.id)).not.toContain(chatId);
+    expect((await call(owner, "GET", `/api/search?workspaceId=${workspaceId}&q=zebras`)).json.chats).toHaveLength(0);
+    const { purgeTemporaryChats } = await import("./routes/chat");
+    await purgeTemporaryChats(db);
+    expect((await call(owner, "GET", `/api/chats/${chatId}`)).status).toBe(200);
+    await db.execute(sql`update chat set updated_at = now() - interval '2 days' where id = ${chatId}`);
+    await purgeTemporaryChats(db);
+    expect((await call(owner, "GET", `/api/chats/${chatId}`)).status).toBe(404);
+  });
+
+  it("keeping a temporary chat saves it", async () => {
+    chatId = (await call(owner, "POST", "/api/chats", { workspaceId, temporary: true })).json.id;
+    await say("Keep me");
+    expect((await call(owner, "PATCH", `/api/chats/${chatId}`, { temporary: false })).status).toBe(200);
+    expect((await call(owner, "GET", `/api/chats?workspaceId=${workspaceId}`)).json.map((c: { id: string }) => c.id)).toContain(chatId);
+  });
+
+  it("new versions replace old ones in answers; labels travel with citations", async () => {
+    const p = (await call(owner, "POST", "/api/projects", { workspaceId, name: "Pricing" })).json;
+    const v1 = await upload(`/api/projects/${p.id}/sources/upload`, "prices.md", "The standard seat price is 900 rupees per month.");
+    await waitDoc(v1.id);
+    await call(owner, "PATCH", `/api/projects/${p.id}/sources/${v1.id}`, { label: "assumption" });
+    const v2 = await upload(`/api/projects/${p.id}/sources/upload`, "prices-v2.md", "The standard seat price is 1100 rupees per month.", { replaces: v1.id });
+    await waitDoc(v2.id);
+    const proj = (await call(owner, "GET", `/api/projects/${p.id}`)).json;
+    const byId = (id: string) => proj.sources.find((s: { id: string }) => s.id === id);
+    expect(byId(v1.id).supersededById).toBe(v2.id);
+    expect(byId(v2.id).label).toBe("assumption"); // carried over from the version it replaces
+
+    chatId = (await call(owner, "POST", "/api/chats", { workspaceId, projectId: p.id })).json.id;
+    const r = await say("What is the seat price?");
+    expect(r.start.citations.map((c: { name: string }) => c.name)).toEqual(["prices-v2.md"]);
+    expect(r.start.citations[0].label).toBe("assumption");
+
+    await call(owner, "PATCH", `/api/projects/${p.id}/sources/${v2.id}`, { label: "confirmed" });
+    await call(owner, "PATCH", `/api/projects/${p.id}/sources/${v1.id}`, { supersededById: null });
+    const again = await say("And the seat price now?");
+    expect(again.start.citations.map((c: { name: string }) => c.name).sort()).toEqual(["prices-v2.md", "prices.md"]);
+    expect((await call(owner, "PATCH", `/api/projects/${p.id}/sources/${v1.id}`, { supersededById: v1.id })).status).toBe(400);
+  });
+
+  it("a broken image fails with a clear error instead of crashing", async () => {
+    const doc = await upload("/api/documents", "fake.png", "definitely not an image", { workspaceId, scope: "private" });
+    const r = await waitDoc(doc.id);
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("couldn't be read");
+  });
+
+  it("answers from an Excel workbook", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const xlsx = await readFile(new URL("../test/fixtures/budget.xlsx", import.meta.url));
+    const doc = await upload("/api/documents", "budget.xlsx", xlsx, { workspaceId, scope: "private" });
+    const ready = await waitDoc(doc.id);
+    expect(ready.status).toBe("ready");
+    chatId = (await call(owner, "POST", "/api/chats", { workspaceId })).json.id;
+    const r = await say("What do servers cost?", { documentIds: [doc.id] });
+    expect(r.start.citations[0]).toMatchObject({ name: "budget.xlsx" });
+    expect(r.body).toContain("Servers | 12000");
   });
 });

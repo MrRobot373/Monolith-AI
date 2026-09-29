@@ -1,10 +1,11 @@
-import { and, asc, chat, chatDocument, desc, document, eq, inArray, isNotNull, isNull, message, organization, project, projectSource, usageEvent, user, type DB } from "@aatmiq/db";
+import { and, asc, chat, chatDocument, desc, document, eq, inArray, isNotNull, isNull, message, organization, project, projectSource, sql, usageEvent, user, type DB } from "@aatmiq/db";
 import { streamChat, type ChatMessage } from "@aatmiq/model-gateway";
 import { chatCreateSchema, chatUpdateSchema, isOrgAdmin, PRODUCT_NAME, sendMessageSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
-import { parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
+import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
 import { accessibleDocs, buildContext, recallProjectChats, retrieve } from "../services/documents";
+import { chatToDocx, chatToMarkdown, fileNameFor, type ExportMessage } from "../services/export";
 import { getProjectAccess } from "../services/projects";
 import { resolveModel } from "../services/models";
 import { getQuotaStatus } from "../services/quota";
@@ -45,6 +46,27 @@ async function waitForProcessing(db: DB, ids: string[]) {
   }
 }
 
+/** Messages on the branch ending at `leafId`, oldest first. */
+async function branchPath(db: DB, leafId: string | null) {
+  if (!leafId) return [];
+  const rows = (await db.execute(sql`
+    with recursive path as (
+      select id, parent_id, 0 as depth from message where id = ${leafId}
+      union all
+      select m.id, m.parent_id, p.depth + 1 from message m join path p on m.id = p.parent_id where p.depth < 5000
+    )
+    select id from path order by depth desc`)) as unknown as { id: string }[];
+  if (!rows.length) return [];
+  const msgs = await db.select().from(message).where(inArray(message.id, rows.map((r) => r.id)));
+  const byId = new Map(msgs.map((m) => [m.id, m]));
+  return rows.map((r) => byId.get(r.id)!).filter(Boolean);
+}
+
+/** Delete temporary chats nobody has touched for a day. */
+export async function purgeTemporaryChats(db: DB) {
+  await db.execute(sql`delete from chat where temporary and updated_at < now() - interval '24 hours'`);
+}
+
 function titleFrom(text: string): string {
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > 60 ? `${oneLine.slice(0, 57).trimEnd()}…` : oneLine || "New chat";
@@ -78,7 +100,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       })
       .from(chat)
       .leftJoin(project, eq(project.id, chat.projectId))
-      .where(and(eq(chat.workspaceId, req.query.workspaceId), eq(chat.userId, u.id), scope))
+      .where(and(eq(chat.workspaceId, req.query.workspaceId), eq(chat.userId, u.id), eq(chat.temporary, false), scope))
       .orderBy(...(archived ? [desc(chat.archivedAt)] : [desc(chat.pinned), desc(chat.updatedAt)]))
       .limit(200);
   });
@@ -93,7 +115,14 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     }
     const [c] = await db
       .insert(chat)
-      .values({ workspaceId: body.workspaceId, userId: u.id, title: body.title ?? "New chat", modelId: body.modelId, projectId: body.projectId })
+      .values({
+        workspaceId: body.workspaceId,
+        userId: u.id,
+        title: body.title ?? "New chat",
+        modelId: body.modelId,
+        projectId: body.projectId,
+        temporary: body.temporary ?? false,
+      })
       .returning();
     return c;
   });
@@ -118,11 +147,50 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ...c, messages, documents, readOnly, project: proj ?? null, authorName: author?.name ?? null };
   });
 
+  /** Download the branch being shown (or one message) as Word or Markdown. */
+  app.get<{ Params: { id: string }; Querystring: { format?: string; messageId?: string } }>("/api/chats/:id/export", async (req, reply) => {
+    const u = await requireUser(ctx, req);
+    const { chat: c } = await loadReadableChat(ctx, u, req.params.id);
+    const format = req.query.format === "md" ? "md" : "docx";
+    const path = await branchPath(db, c.leafMessageId);
+    let picked = path.filter((m) => m.role !== "system" && !m.error);
+    if (req.query.messageId) {
+      const [one] = await db.select().from(message).where(and(eq(message.id, req.query.messageId), eq(message.chatId, c.id)));
+      if (!one) throw notFound("Message not found");
+      picked = [one];
+    }
+    const [[author], [org]] = await Promise.all([
+      db.select({ name: user.name }).from(user).where(eq(user.id, c.userId)),
+      db.select({ productName: organization.productName }).from(organization).limit(1),
+    ]);
+    const assistant = org?.productName ?? PRODUCT_NAME;
+    const messages: ExportMessage[] = picked.map((m) => ({
+      role: m.role as "user" | "assistant",
+      author: m.role === "user" ? (author?.name ?? "User") : assistant,
+      content: m.content,
+      citations: m.citations,
+    }));
+    const subtitle = `${req.query.messageId ? "Answer from" : "Chat with"} ${assistant} · exported ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`;
+    const title = c.title;
+    await audit(ctx, { actor: u, action: "chat.exported", workspaceId: c.workspaceId, targetType: "chat", targetId: c.id, meta: { format, messageId: req.query.messageId } });
+    const name = fileNameFor(title, format);
+    reply.header("content-disposition", `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    if (format === "md") return reply.type("text/markdown; charset=utf-8").send(chatToMarkdown({ title, subtitle, messages }));
+    return reply
+      .type("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+      .send(await chatToDocx({ title, subtitle, messages }));
+  });
+
   app.patch<{ Params: { id: string } }>("/api/chats/:id", async (req) => {
     const u = await requireUser(ctx, req);
     const c = await loadOwnChat(db, u, req.params.id);
-    const { archived, projectId, sharedToProject, ...rest } = parse(chatUpdateSchema, req.body);
+    const { archived, projectId, sharedToProject, leafMessageId, ...rest } = parse(chatUpdateSchema, req.body);
     const set: Partial<typeof chat.$inferInsert> = { ...rest };
+    if (leafMessageId !== undefined) {
+      const [m] = await db.select({ id: message.id }).from(message).where(and(eq(message.id, leafMessageId), eq(message.chatId, c.id)));
+      if (!m) throw badRequest("That message isn't in this chat.");
+      set.leafMessageId = m.id;
+    }
     if (archived !== undefined) set.archivedAt = archived ? new Date() : null;
     if (projectId !== undefined) {
       if (projectId) {
@@ -134,6 +202,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       if (projectId !== c.projectId) set.sharedToProject = false;
     }
     if (sharedToProject !== undefined) {
+      if (sharedToProject && c.temporary && set.temporary !== false) throw badRequest("Keep this temporary chat before sharing it.");
       if (sharedToProject && !(set.projectId ?? c.projectId)) throw badRequest("Only chats inside a project can be shared to it.");
       set.sharedToProject = sharedToProject;
     }
@@ -168,9 +237,24 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
 
     const { model: m, provider } = await resolveModel(db, box, c.workspaceId, "chat", body.modelId ?? c.modelId);
 
+    // Where the new messages go. Default: after the branch being shown. An earlier parent edits and branches.
+    const inChat = async (id: string) =>
+      (await db.select({ id: message.id, parentId: message.parentId, role: message.role, content: message.content }).from(message).where(and(eq(message.id, id), eq(message.chatId, c.id))))[0];
+    let regenerateOf: Awaited<ReturnType<typeof inChat>> | undefined;
+    let parentId: string | null;
+    if (body.regenerateOf) {
+      regenerateOf = await inChat(body.regenerateOf);
+      if (!regenerateOf || regenerateOf.role !== "user") throw badRequest("Pick one of your messages to answer again.");
+      parentId = regenerateOf.parentId;
+    } else {
+      parentId = body.parentId !== undefined ? body.parentId : c.leafMessageId;
+      if (parentId && !(await inChat(parentId))) throw badRequest("That message isn't in this chat.");
+    }
+    const content = regenerateOf ? regenerateOf.content : body.content!;
+
     // Attach any newly referenced documents to the chat (only ones this user may read).
     let attachments: { id: string; name: string }[] = [];
-    if (body.documentIds?.length) {
+    if (body.documentIds?.length && !regenerateOf) {
       attachments = await db
         .select({ id: document.id, name: document.name })
         .from(document)
@@ -192,17 +276,26 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       : [];
     await waitForProcessing(db, [...chatDocIds, ...projectDocIds]);
 
-    const history = await db
-      .select({ role: message.role, content: message.content, error: message.error })
-      .from(message)
-      .where(eq(message.chatId, c.id))
-      .orderBy(desc(message.createdAt))
-      .limit(MAX_HISTORY);
+    // The branch so far, walking up from the parent.
+    const history = parentId
+      ? ((await db.execute(sql`
+          with recursive path as (
+            select id, parent_id, role, content, error, 0 as depth from message where id = ${parentId}
+            union all
+            select m.id, m.parent_id, m.role, m.content, m.error, p.depth + 1
+            from message m join path p on m.id = p.parent_id where p.depth < 500
+          )
+          select role, content, error from path order by depth asc limit ${MAX_HISTORY}`)) as unknown as { role: "system" | "user" | "assistant"; content: string; error: string | null }[])
+      : [];
 
-    const [userMsg] = await db
-      .insert(message)
-      .values({ chatId: c.id, role: "user", content: body.content, attachments: attachments.length ? attachments : null })
-      .returning({ id: message.id });
+    const userMsgId = regenerateOf
+      ? regenerateOf.id
+      : (
+          await db
+            .insert(message)
+            .values({ chatId: c.id, parentId, role: "user", content, attachments: attachments.length ? attachments : null })
+            .returning({ id: message.id })
+        )[0]!.id;
 
     const [[org], [profile]] = await Promise.all([
       db.select({ productName: organization.productName, promptLogging: organization.promptLogging }).from(organization).limit(1),
@@ -227,9 +320,9 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         workspaceId: c.workspaceId,
         userId: u.id,
         documentIds: [...new Set([...chatDocIds, ...projectDocIds])],
-        query: body.content,
+        query: content,
       }),
-      proj ? recallProjectChats(db, { projectId: proj.id, chatId: c.id, userId: u.id, query: body.content }) : [],
+      proj ? recallProjectChats(db, { projectId: proj.id, chatId: c.id, userId: u.id, query: content }) : [],
     ]);
     const docContext = buildContext(retrieval.chunks, recollections);
     if (retrieval.embedTokens > 0) {
@@ -249,12 +342,15 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         .reverse()
         .filter((h) => !h.error && h.role !== "system")
         .map((h) => ({ role: h.role, content: h.content })),
-      { role: "user", content: body.content },
+      { role: "user", content },
     ];
 
-    const titleUpdate = c.title === "New chat" ? { title: titleFrom(body.content) } : {};
+    const titleUpdate = c.title === "New chat" ? { title: titleFrom(content) } : {};
     // Replying to an archived chat brings it back.
-    await db.update(chat).set({ ...titleUpdate, modelId: m.id, updatedAt: new Date(), archivedAt: null }).where(eq(chat.id, c.id));
+    await db
+      .update(chat)
+      .set({ ...titleUpdate, modelId: m.id, updatedAt: new Date(), archivedAt: null, leafMessageId: userMsgId })
+      .where(eq(chat.id, c.id));
     if (proj) await db.update(project).set({ updatedAt: new Date() }).where(eq(project.id, proj.id));
 
     // Stream.
@@ -271,7 +367,8 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     res.on("close", () => abort.abort());
 
     send("start", {
-      userMessageId: userMsg!.id,
+      userMessageId: userMsgId,
+      parentId,
       model: { id: m.id, displayName: m.displayName },
       citations: docContext.citations,
       ...titleUpdate,
@@ -301,6 +398,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       .insert(message)
       .values({
         chatId: c.id,
+        parentId: userMsgId,
         role: "assistant",
         content: text,
         modelId: m.id,
@@ -310,6 +408,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         citations: docContext.citations.length ? docContext.citations : null,
       })
       .returning({ id: message.id });
+    await db.update(chat).set({ leafMessageId: assistant!.id }).where(eq(chat.id, c.id));
     await db.insert(usageEvent).values({
       workspaceId: c.workspaceId,
       userId: u.id,

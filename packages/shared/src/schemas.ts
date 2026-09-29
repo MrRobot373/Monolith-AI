@@ -117,6 +117,8 @@ export const chatCreateSchema = z.object({
   modelId: z.string().optional(),
   title: z.string().max(120).optional(),
   projectId: z.string().optional(),
+  /** Not saved in history, search or memory; deleted after a day. */
+  temporary: z.boolean().optional(),
 });
 
 export const chatUpdateSchema = z.object({
@@ -127,13 +129,23 @@ export const chatUpdateSchema = z.object({
   projectId: z.string().nullable().optional(),
   archived: z.boolean().optional(),
   sharedToProject: z.boolean().optional(),
+  /** Show another branch: the last message of that branch. */
+  leafMessageId: z.string().optional(),
+  /** Keep a temporary chat (it can't be made temporary again). */
+  temporary: z.literal(false).optional(),
 });
 
-export const sendMessageSchema = z.object({
-  content: z.string().min(1).max(200_000),
-  modelId: z.string().optional(),
-  documentIds: z.array(z.string()).max(20).optional(),
-});
+export const sendMessageSchema = z
+  .object({
+    content: z.string().min(1).max(200_000).optional(),
+    modelId: z.string().optional(),
+    documentIds: z.array(z.string()).max(20).optional(),
+    /** Message to continue from. Omitted: the end of the branch being shown. An earlier id (or null) edits and branches. */
+    parentId: z.string().nullable().optional(),
+    /** Answer this user message again, as a new branch next to the earlier answer. */
+    regenerateOf: z.string().optional(),
+  })
+  .refine((b) => b.content || b.regenerateOf, { message: "Write a message first" });
 
 export const profileSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),

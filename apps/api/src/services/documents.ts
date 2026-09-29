@@ -150,6 +150,7 @@ export async function recallProjectChats(
         eq(chat.projectId, opts.projectId),
         ne(chat.id, opts.chatId),
         isNull(chat.archivedAt),
+        eq(chat.temporary, false),
         or(eq(chat.userId, opts.userId), eq(chat.sharedToProject, true)),
         isNull(message.error),
         sql`to_tsvector('simple', ${message.content}) @@ ${tsq}`,
@@ -183,7 +184,10 @@ export interface RetrievedChunk {
   page: number | null;
   content: string;
   ordinal: number;
+  label?: "confirmed" | "assumption" | "tbd" | null;
 }
+
+const LABEL_TEXT = { confirmed: "Confirmed", assumption: "Assumption, not confirmed", tbd: "To be decided" } as const;
 
 /**
  * Find the most relevant chunks. Small attached documents are returned whole (in order),
@@ -200,6 +204,8 @@ export async function retrieve(
     accessibleDocs(opts.workspaceId, opts.userId),
     eq(document.status, "ready"),
     inArray(document.id, opts.documentIds),
+    // Older versions that were replaced by a newer upload are left out.
+    isNull(document.supersededById),
   );
   const cols = {
     id: documentChunk.id,
@@ -208,6 +214,7 @@ export async function retrieve(
     page: documentChunk.page,
     content: documentChunk.content,
     ordinal: documentChunk.ordinal,
+    label: document.label,
   };
 
   const docs = await db.select({ id: document.id, chars: document.charCount }).from(document).where(access);
@@ -302,6 +309,7 @@ export function buildContext(chunks: RetrievedChunk[], recollections: Recollecti
       name: c.name,
       page: c.page,
       snippet: c.content.slice(0, 700),
+      label: c.label ?? null,
     })),
     ...recollections.map((r, i) => ({
       n: chunks.length + i + 1,
@@ -314,13 +322,16 @@ export function buildContext(chunks: RetrievedChunk[], recollections: Recollecti
     })),
   ];
   const blocks = [
-    ...chunks.map((c, i) => `[${i + 1}] ${c.name}${c.page ? `, page ${c.page}` : ""}\n${c.content}`),
+    ...chunks.map((c, i) => `[${i + 1}] ${c.name}${c.page ? `, page ${c.page}` : ""}${c.label ? ` (${LABEL_TEXT[c.label]})` : ""}\n${c.content}`),
     ...recollections.map((r, i) => `[${chunks.length + i + 1}] Earlier chat in this project: "${r.title}"\n${r.content}`),
   ].join("\n\n---\n\n");
   const system = [
     "Relevant sources are below, numbered: excerpts from documents and, where marked, from earlier chats in this project.",
     "Answer using these excerpts. Cite sources inline with their number in square brackets, like [1] or [2][3], right after the claim they support.",
     "If the excerpts don't contain the answer, say so plainly instead of guessing.",
+    ...(chunks.some((c) => c.label === "assumption" || c.label === "tbd")
+      ? ["Some sources are marked as an assumption or still to be decided. When you rely on one, say that it isn't confirmed yet."]
+      : []),
     "",
     "<sources>",
     blocks,

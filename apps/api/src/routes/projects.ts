@@ -41,6 +41,11 @@ const updateSchema = z.object({
   visibility: z.enum(["private", "workspace"]).optional(),
 });
 const memberSchema = z.object({ userId: z.string(), role: z.enum(["chat", "edit"]).default("chat") });
+const sourceUpdateSchema = z.object({
+  label: z.enum(["confirmed", "assumption", "tbd"]).nullable().optional(),
+  /** Mark this source as replaced by a newer one (another source of the project), or null to make it current again. */
+  supersededById: z.string().nullable().optional(),
+});
 const noteSchema = z.object({
   title: z.string().trim().min(1).max(160),
   content: z.string().trim().min(1).max(200_000),
@@ -74,7 +79,7 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
         visibility: project.visibility,
         ownerId: project.ownerId,
         updatedAt: project.updatedAt,
-        chatCount: sql<number>`(select count(*) from chat c where c.project_id = "project"."id" and c.user_id = ${u.id} and c.archived_at is null)::int`,
+        chatCount: sql<number>`(select count(*) from chat c where c.project_id = "project"."id" and c.user_id = ${u.id} and c.archived_at is null and not c.temporary)::int`,
         sourceCount: sql<number>`(select count(*) from project_source s where s.project_id = "project"."id")::int`,
         memberCount: sql<number>`(select count(*) from project_member m where m.project_id = "project"."id")::int`,
       })
@@ -106,6 +111,8 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
           error: document.error,
           sizeBytes: document.sizeBytes,
           pageCount: document.pageCount,
+          label: document.label,
+          supersededById: document.supersededById,
           projectOnly: sql<boolean>`${document.projectId} is not null`,
           addedAt: projectSource.createdAt,
         })
@@ -131,7 +138,9 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
         })
         .from(chat)
         .innerJoin(user, eq(user.id, chat.userId))
-        .where(and(eq(chat.projectId, p.id), isNull(chat.archivedAt), or(eq(chat.userId, u.id), eq(chat.sharedToProject, true))))
+        .where(
+          and(eq(chat.projectId, p.id), isNull(chat.archivedAt), eq(chat.temporary, false), or(eq(chat.userId, u.id), eq(chat.sharedToProject, true))),
+        )
         .orderBy(desc(chat.pinned), desc(chat.updatedAt))
         .limit(200),
       p.ownerId
@@ -214,15 +223,29 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
     const data = await file.toBuffer();
     if (file.file.truncated) throw new HttpError(413, "Files can be up to 25 MB.", "too_large");
     const name = file.filename.replace(/[\\/]/g, "_").slice(0, 200) || "Untitled";
+    // "Upload a new version": the old source stays for reference but is left out of answers.
+    const replacesField = file.fields.replaces as { value?: string } | undefined;
+    const replaces = typeof replacesField?.value === "string" && replacesField.value ? replacesField.value : null;
+    let oldLabel: "confirmed" | "assumption" | "tbd" | null = null;
+    if (replaces) {
+      const [old] = await db
+        .select({ id: document.id, label: document.label })
+        .from(projectSource)
+        .innerJoin(document, eq(document.id, projectSource.documentId))
+        .where(and(eq(projectSource.projectId, p.id), eq(projectSource.documentId, replaces)));
+      if (!old) throw badRequest("The source to replace isn't in this project.");
+      oldLabel = old.label;
+    }
     if (!isSupported(name)) throw new HttpError(415, `This file type isn't supported yet. Upload ${SUPPORTED_HINT}.`, "unsupported");
     if (data.length === 0) throw badRequest("The file is empty");
     const storageKey = `${p.workspaceId}/${randomToken(18)}`;
     await storage.put(storageKey, data);
     const [doc] = await db
       .insert(document)
-      .values({ workspaceId: p.workspaceId, projectId: p.id, ownerId: u.id, name, mimeType: file.mimetype || "application/octet-stream", sizeBytes: data.length, storageKey })
+      .values({ workspaceId: p.workspaceId, projectId: p.id, ownerId: u.id, name, mimeType: file.mimetype || "application/octet-stream", sizeBytes: data.length, storageKey, label: oldLabel })
       .returning();
     await addSource(p.id, doc!.id, u.id);
+    if (replaces) await db.update(document).set({ supersededById: doc!.id }).where(eq(document.id, replaces));
     await audit(ctx, { actor: u, action: "project.source_added", workspaceId: p.workspaceId, targetType: "document", targetId: doc!.id, meta: { projectId: p.id, name } });
     setImmediate(() => void processDocument(db, box, storage, doc!.id));
     return doc;
@@ -262,6 +285,28 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
+  /** Label a source (Confirmed / Assumption / TBD) or mark it superseded by a newer source. */
+  app.patch<{ Params: { id: string; documentId: string } }>("/api/projects/:id/sources/:documentId", async (req) => {
+    const u = await requireUser(ctx, req);
+    const { project: p } = await requireProjectEdit(ctx, u, req.params.id);
+    const body = parse(sourceUpdateSchema, req.body);
+    const inProject = async (docId: string) =>
+      (await db.select({ id: projectSource.documentId }).from(projectSource).where(and(eq(projectSource.projectId, p.id), eq(projectSource.documentId, docId))))
+        .length > 0;
+    if (!(await inProject(req.params.documentId))) throw notFound("Source not found");
+    if (body.supersededById) {
+      if (body.supersededById === req.params.documentId) throw badRequest("A source can't replace itself.");
+      if (!(await inProject(body.supersededById))) throw badRequest("The newer version must be a source of this project.");
+    }
+    const [updated] = await db
+      .update(document)
+      .set(body)
+      .where(eq(document.id, req.params.documentId))
+      .returning({ id: document.id, label: document.label, supersededById: document.supersededById });
+    await audit(ctx, { actor: u, action: "project.source_updated", workspaceId: p.workspaceId, targetType: "document", targetId: updated!.id, meta: { projectId: p.id, ...body } });
+    return updated;
+  });
+
   /** Remove a source. Project-only sources are deleted; library documents are just unlinked. */
   app.delete<{ Params: { id: string; documentId: string } }>("/api/projects/:id/sources/:documentId", async (req) => {
     const u = await requireUser(ctx, req);
@@ -291,6 +336,7 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
 
     const readableChat = and(
       eq(chat.workspaceId, req.query.workspaceId),
+      eq(chat.temporary, false),
       or(
         eq(chat.userId, u.id),
         and(

@@ -40,8 +40,9 @@ describe("extractText", () => {
   });
 
   it("rejects unsupported files", async () => {
-    expect(isSupported("photo.png")).toBe(false);
-    await expect(extractText("photo.png", Buffer.from(""))).rejects.toBeInstanceOf(UnsupportedFileError);
+    expect(isSupported("movie.mp4")).toBe(false);
+    expect(isSupported("photo.png")).toBe(true);
+    await expect(extractText("archive.zip", Buffer.from(""))).rejects.toBeInstanceOf(UnsupportedFileError);
   });
 });
 
@@ -62,4 +63,25 @@ describe("real file formats", () => {
     const pages = await extractText("policy.docx", await fixture("policy.docx"));
     expect(pages[0]!.text).toContain("Economy class is required");
   });
+
+  it("reads every sheet of an Excel workbook, including formula results", async () => {
+    const pages = await extractText("budget.xlsx", await fixture("budget.xlsx"));
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.text).toContain("Sheet: Budget");
+    expect(pages[0]!.text).toContain("Servers | 12000 | 13500");
+    expect(pages[0]!.text).toContain("Total | 16000 | 17500");
+    expect(pages[1]!.text).toContain("Northwind Hosting | ops@northwind.test");
+  });
+
+  it("reads text from an image with OCR", async () => {
+    const pages = await extractText("receipt.png", await fixture("receipt.png"));
+    expect(pages[0]!.text).toMatch(/Invoice number 58213/);
+    expect(pages[0]!.text).toMatch(/4,750/);
+  }, 60_000);
+
+  it("reads scanned PDF pages with OCR", async () => {
+    const pages = await extractText("scanned.pdf", await fixture("scanned.pdf"));
+    expect(pages[0]!.page).toBe(1);
+    expect(pages[0]!.text).toMatch(/Notice period is ninety days/i);
+  }, 60_000);
 });

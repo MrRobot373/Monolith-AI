@@ -15,13 +15,20 @@ export interface Chunk {
 
 export class UnsupportedFileError extends Error {}
 
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "tif", "tiff", "bmp"]);
+const SHEET_EXTENSIONS = new Set(["xlsx", "xlsm"]);
+/** Pages with less text than this are treated as scanned and read with OCR. */
+const SCANNED_PAGE_CHARS = 25;
+const MAX_OCR_PAGES = 60;
+const MAX_SHEET_ROWS = 20_000;
+
 const TEXT_EXTENSIONS = new Set([
   "txt", "md", "markdown", "csv", "tsv", "json", "yaml", "yml", "xml", "html", "htm", "log", "ini", "toml",
   "js", "jsx", "ts", "tsx", "py", "java", "go", "rs", "rb", "php", "c", "h", "cpp", "hpp", "cs", "kt", "swift",
   "sql", "sh", "css", "scss", "vue", "svelte",
 ]);
 
-export const SUPPORTED_HINT = "PDF, Word (.docx), text, Markdown, CSV and code files";
+export const SUPPORTED_HINT = "PDF, Word (.docx), Excel (.xlsx), images, text, Markdown, CSV and code files";
 
 export function extensionOf(name: string): string {
   const i = name.lastIndexOf(".");
@@ -30,7 +37,7 @@ export function extensionOf(name: string): string {
 
 export function isSupported(name: string): boolean {
   const ext = extensionOf(name);
-  return ext === "pdf" || ext === "docx" || TEXT_EXTENSIONS.has(ext);
+  return ext === "pdf" || ext === "docx" || TEXT_EXTENSIONS.has(ext) || SHEET_EXTENSIONS.has(ext) || IMAGE_EXTENSIONS.has(ext);
 }
 
 function stripHtml(html: string): string {
@@ -44,13 +51,67 @@ function stripHtml(html: string): string {
     .replace(/&gt;/g, ">");
 }
 
+function cellText(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "object") {
+    const o = v as { result?: unknown; text?: string; richText?: { text: string }[]; hyperlink?: string; error?: string };
+    if (o.richText) return o.richText.map((r) => r.text).join("");
+    if (o.result !== undefined) return cellText(o.result);
+    if (o.text !== undefined) return String(o.text);
+    if (o.error) return o.error;
+    return "";
+  }
+  return String(v).replace(/\s+/g, " ").trim();
+}
+
+/** Each sheet becomes one "page": a header line with the sheet name, then one line per row, cells separated by " | ". */
+async function extractSheets(data: Buffer): Promise<PageText[]> {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(data as unknown as ArrayBuffer);
+  const pages: PageText[] = [];
+  wb.eachSheet((ws, i) => {
+    const lines: string[] = [];
+    let rows = 0;
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      if (rows++ >= MAX_SHEET_ROWS) return;
+      const cells = (row.values as unknown[]).slice(1).map(cellText);
+      while (cells.length && !cells[cells.length - 1]) cells.pop();
+      if (cells.some(Boolean)) lines.push(cells.join(" | "));
+    });
+    // Blank lines every 25 rows let the chunker split big sheets on row boundaries.
+    const body = lines.map((l, n) => (n > 0 && n % 25 === 0 ? `\n${l}` : l)).join("\n");
+    pages.push({ page: i, text: `Sheet: ${ws.name}\n\n${body}` });
+  });
+  return pages;
+}
+
+async function extractPdf(data: Buffer): Promise<PageText[]> {
+  const { extractText: pdfText, getDocumentProxy, renderPageAsImage } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(data));
+  const { text } = await pdfText(pdf, { mergePages: false });
+  const pages = (text as string[]).map((t, i) => ({ page: i + 1, text: t }));
+  const { ocrEnabled, ocrImage } = await import("./ocr");
+  if (!ocrEnabled()) return pages;
+  let ocrd = 0;
+  for (const p of pages) {
+    if (p.text.replace(/\s/g, "").length >= SCANNED_PAGE_CHARS || ocrd >= MAX_OCR_PAGES) continue;
+    const png = await renderPageAsImage(pdf, p.page, { canvasImport: () => import("@napi-rs/canvas"), scale: 2 });
+    p.text = await ocrImage(Buffer.from(png));
+    ocrd++;
+  }
+  return pages;
+}
+
 export async function extractText(name: string, data: Buffer): Promise<PageText[]> {
   const ext = extensionOf(name);
-  if (ext === "pdf") {
-    const { extractText: pdfText, getDocumentProxy } = await import("unpdf");
-    const pdf = await getDocumentProxy(new Uint8Array(data));
-    const { text } = await pdfText(pdf, { mergePages: false });
-    return (text as string[]).map((t, i) => ({ page: i + 1, text: t }));
+  if (ext === "pdf") return extractPdf(data);
+  if (SHEET_EXTENSIONS.has(ext)) return extractSheets(data);
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    const { ocrEnabled, ocrImage } = await import("./ocr");
+    if (!ocrEnabled()) throw new UnsupportedFileError("Reading text from images (OCR) is turned off on this server.");
+    return [{ page: null, text: await ocrImage(data) }];
   }
   if (ext === "docx") {
     const mammoth = await import("mammoth");

@@ -45,6 +45,8 @@ export const documentStatusEnum = pgEnum("document_status", ["processing", "read
 export const documentKindEnum = pgEnum("document_kind", ["file", "note", "answer"]);
 export const projectVisibilityEnum = pgEnum("project_visibility", ["private", "workspace"]);
 export const projectRoleEnum = pgEnum("project_role", ["chat", "edit"]);
+/** How far a source can be trusted: the model is told, and answers say so. */
+export const sourceLabelEnum = pgEnum("source_label", ["confirmed", "assumption", "tbd"]);
 
 /** pgvector column without fixed dimensions (models differ: 384, 768, 1024…). */
 const vector = customType<{ data: number[]; driverData: string }>({
@@ -299,6 +301,10 @@ export const chat = pgTable(
     /** Visible (read-only) to other project members when true. Private to its owner otherwise. */
     sharedToProject: boolean("shared_to_project").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /** Temporary chats never appear in lists, search or memory, and are deleted after a day. */
+    temporary: boolean("temporary").notNull().default(false),
+    /** Last message of the branch being shown. Editing a message starts a new branch. */
+    leafMessageId: text("leaf_message_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -316,6 +322,8 @@ export const message = pgTable(
     chatId: text("chat_id")
       .notNull()
       .references(() => chat.id, { onDelete: "cascade" }),
+    /** Previous message in this branch (null for the first). Siblings share a parent. */
+    parentId: text("parent_id").references((): AnyPgColumn => message.id, { onDelete: "cascade" }),
     role: messageRoleEnum("role").notNull(),
     content: text("content").notNull(),
     modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
@@ -330,6 +338,7 @@ export const message = pgTable(
   },
   (t) => [
     index("message_chat_idx").on(t.chatId, t.createdAt),
+    index("message_parent_idx").on(t.parentId),
     index("message_fts_idx").using("gin", sql`to_tsvector('simple', ${t.content})`),
   ],
 );
@@ -381,6 +390,7 @@ export interface Citation {
   name: string;
   page: number | null;
   snippet: string;
+  label?: "confirmed" | "assumption" | "tbd" | null;
 }
 
 export const document = pgTable(
@@ -405,6 +415,9 @@ export const document = pgTable(
     chunkCount: integer("chunk_count"),
     charCount: integer("char_count"),
     embeddingModelId: text("embedding_model_id"),
+    label: sourceLabelEnum("label"),
+    /** The newer version that replaces this one. Superseded documents are left out of answers. */
+    supersededById: text("superseded_by_id").references((): AnyPgColumn => document.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

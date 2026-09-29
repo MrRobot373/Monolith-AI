@@ -13,6 +13,7 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   scope: z.enum(["private", "workspace"]).optional(),
+  label: z.enum(["confirmed", "assumption", "tbd"]).nullable().optional(),
 });
 
 export async function loadReadable(ctx: AppContext, u: SessionUser, id: string) {
