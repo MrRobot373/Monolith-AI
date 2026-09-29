@@ -46,6 +46,7 @@ export function listDocuments(db: DB, workspaceId: string, userId: string) {
       error: document.error,
       pageCount: document.pageCount,
       chunkCount: document.chunkCount,
+      label: document.label,
       ownerId: document.ownerId,
       ownerName: user.name,
       createdAt: document.createdAt,

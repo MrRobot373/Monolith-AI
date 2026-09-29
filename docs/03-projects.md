@@ -33,7 +33,18 @@ A project keeps the chats, files and instructions for one piece of work together
 
 Retrieval is the same as for Documents: full-text search first, plus vectors when the workspace has an embedding model. Small source sets (≤14k characters) are passed whole. Project memory only uses full-text search.
 
+## Phase B (done)
+
+| Feature | Behaviour |
+|---|---|
+| **Source labels** | Any document or project source can be marked **Confirmed**, **Assumption** or **TBD**. Citations show the label. When an answer relies on an Assumption or TBD source, the model is told to say it isn't confirmed. |
+| **Versions** | **Upload new version** on a project source, or mark a source as **replaced by** another. The old version stays for reference, but answers leave it out. It keeps its label, and **Make current again** undoes the replacement. |
+| **Edit and branch** | Editing a message starts a new branch and keeps the old one. Regenerating adds another version of the answer. **‹ 1/2 ›** switches between versions, and the chat remembers the branch being shown (`chat.leaf_message_id`, `message.parent_id`). |
+| **Temporary chat** | Toggled on a new chat. It stays out of Recents, search and project memory, and is deleted 24 hours after its last message. **Keep chat** saves it. |
+| **Excel** | `.xlsx` and `.xlsm` files: every sheet is read, formula results included. Each sheet counts as one "page" in citations. |
+| **OCR** | Images (PNG, JPEG, WebP, TIFF, BMP) and scanned PDF pages are read locally with Tesseract. The English model is bundled, so nothing is downloaded at runtime. `OCR_ENABLED=false` turns it off. |
+| **Export** | A whole chat (the branch being shown) or one answer can be downloaded as **Word** (.docx, built on the server) or **Markdown**. **PDF** uses a print view and the browser's "Save as PDF". |
+
 ## Later
 
-- **Phase B:** source labels (Confirmed / Assumption / TBD), current and superseded versions, edit message and branch, temporary chat, XLSX sources, OCR, export to Word/PDF.
 - **Phase C:** project tasks and connectors, with Work AI.

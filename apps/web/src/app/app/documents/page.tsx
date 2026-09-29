@@ -2,7 +2,9 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Check,
   CircleAlert,
+  Tag,
   Download,
   FileText,
   Loader2,
@@ -22,12 +24,13 @@ import { TopBar } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
 import { ACCEPT, FileIcon, useDocuments } from "@/components/documents/use-documents";
 import { Button } from "@/components/ui/button";
-import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
+import { LabelBadge, LABELS } from "@/components/chat/citations";
+import { Dialog, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
 import { Skeleton } from "@/components/ui/spinner";
 import { del, formatBytes, patch, post, uploadDocument } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/format";
-import type { DocumentRow } from "@/lib/types";
+import type { DocumentRow, SourceLabel } from "@/lib/types";
 
 const FILTERS = [
   { v: "all", l: "All" },
@@ -65,10 +68,10 @@ export default function DocumentsPage() {
   }
 
   const update = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; scope?: "private" | "workspace" }) => patch(`/api/documents/${id}`, body),
+    mutationFn: ({ id, ...body }: { id: string; scope?: "private" | "workspace"; label?: SourceLabel | null }) => patch(`/api/documents/${id}`, body),
     onSuccess: (_d, v) => {
       refresh();
-      toast.success(v.scope === "workspace" ? "Shared with the workspace" : "Made private");
+      if (v.scope) toast.success(v.scope === "workspace" ? "Shared with the workspace" : "Made private");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -178,7 +181,7 @@ export default function DocumentsPage() {
                   <Upload className="size-4" />
                 </span>
                 <span className="text-[14px] text-fg">{q || filter !== "all" ? "No documents match" : "Drop files here or click to upload"}</span>
-                <span className="text-[12.5px] text-fg-subtle">PDF, Word, text, Markdown, CSV and code · up to 25 MB</span>
+                <span className="text-[12.5px] text-fg-subtle">PDF (scans too), Word, Excel, images, text, CSV and code · up to 25 MB</span>
               </button>
             ) : (
               rows.map((d) => {
@@ -187,7 +190,10 @@ export default function DocumentsPage() {
                   <div key={d.id} className="group flex items-center gap-3 border-b border-border px-4 py-3 last:border-0 hover:bg-surface-2/40">
                     <FileIcon name={d.name} />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13.5px] text-fg">{d.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-[13.5px] text-fg">{d.name}</span>
+                        <LabelBadge label={d.label} />
+                      </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-fg-subtle">
                         <span>{formatBytes(d.sizeBytes)}</span>
                         {d.pageCount ? <span>· {d.pageCount} pages</span> : null}
@@ -230,6 +236,18 @@ export default function DocumentsPage() {
                             >
                               {d.scope === "workspace" ? "Make private" : "Share with workspace"}
                             </MenuItem>
+                            <MenuSeparator />
+                            <MenuLabel>Label</MenuLabel>
+                            {(["confirmed", "assumption", "tbd"] as const).map((l) => (
+                              <MenuItem
+                                key={l}
+                                icon={<Tag />}
+                                shortcut={d.label === l ? <Check className="size-3.5" /> : undefined}
+                                onSelect={() => update.mutate({ id: d.id, label: d.label === l ? null : l })}
+                              >
+                                {LABELS[l].text}
+                              </MenuItem>
+                            ))}
                             {d.status === "failed" && (
                               <MenuItem icon={<RotateCcw />} onSelect={() => reprocess.mutate(d.id)}>
                                 Try again

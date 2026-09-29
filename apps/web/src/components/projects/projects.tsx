@@ -38,8 +38,10 @@ export function ProjectIcon({ color, className }: { color?: string | null; class
   return <Folder className={cn("size-4 shrink-0", className)} style={{ color: `oklch(0.72 0.13 ${color ?? "190"})` }} aria-hidden />;
 }
 
-export async function uploadProjectSource(projectId: string, file: File) {
+/** Upload a project source. With `replaces`, it becomes the new version of that source. */
+export async function uploadProjectSource(projectId: string, file: File, replaces?: string) {
   const form = new FormData();
+  if (replaces) form.append("replaces", replaces);
   form.append("file", file);
   const res = await fetch(`/api/projects/${projectId}/sources/upload`, { method: "POST", credentials: "include", body: form });
   const data = await res.json().catch(() => ({}));

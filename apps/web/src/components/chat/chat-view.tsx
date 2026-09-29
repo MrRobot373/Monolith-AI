@@ -6,8 +6,13 @@ import {
   ArrowUpRight,
   BookmarkPlus,
   Check,
+  ChevronLeft,
   ChevronRight,
   Eye,
+  FileDown,
+  Ghost,
+  Pencil,
+  Printer,
   FolderInput,
   MoreHorizontal,
   Share2,
@@ -31,7 +36,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Popover } from "radix-ui";
 import { FileIcon, useDocuments } from "@/components/documents/use-documents";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { latestLeaf, pathTo, siblingsOf } from "@/lib/branches";
 import { toast } from "sonner";
 import { TopBar, TopBarButton } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
@@ -53,6 +59,7 @@ import { RequestTokensDialog } from "./request-tokens";
 
 interface UiMessage {
   id: string;
+  parentId: string | null;
   role: "user" | "assistant";
   content: string;
   streaming?: boolean;
@@ -96,7 +103,13 @@ export function ChatView({
   const router = useRouter();
   const qc = useQueryClient();
   const [chatId, setChatId] = useState<string | undefined>(initialId);
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  // Every message of the chat (a tree), and the end of the branch being shown.
+  const [tree, setTree] = useState<UiMessage[]>([]);
+  const [leafId, setLeafId] = useState<string | null>(null);
+  /** New chats can be temporary: not kept in history, search or memory. */
+  const [temporary, setTemporary] = useState(false);
+  const [kept, setKept] = useState(false);
+  const messages = useMemo(() => pathTo(tree, leafId), [tree, leafId]);
   const [input, setInput] = useState("");
   const [modelId, setModelId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -143,11 +156,13 @@ export function ChatView({
 
   useEffect(() => {
     if (!existing.data) return;
-    setMessages(
-      existing.data.messages
-        .filter((m) => m.role !== "system")
+    const rows = existing.data.messages.filter((m) => m.role !== "system");
+    setLeafId(existing.data.leafMessageId ?? rows.at(-1)?.id ?? null);
+    setTree(
+      rows
         .map((m) => ({
           id: m.id,
+          parentId: m.parentId ?? null,
           role: m.role as UiMessage["role"],
           content: m.content,
           error: m.error,
@@ -220,19 +235,31 @@ export function ChatView({
     composerRef.current?.focus();
   }, [initialId]);
 
+  /** Give a temporary id its real one from the server (children and the leaf follow). */
+  const renameNode = useCallback((from: string, to: string) => {
+    setTree((all) => all.map((m) => (m.id === from ? { ...m, id: to } : m.parentId === from ? { ...m, parentId: to } : m)));
+    setLeafId((l) => (l === from ? to : l));
+  }, []);
+
+  /**
+   * Send a message. `parentId` continues from an earlier message (editing makes a new branch);
+   * `regenerateOf` answers one of the user's messages again, next to the earlier answer.
+   */
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, opts: { parentId?: string | null; regenerateOf?: string } = {}) => {
       const content = text.trim();
-      if (!content || streaming || !workspaceId) return;
-      const sending = attachments.filter((a) => a.id && a.status !== "failed") as (Attachment & { id: string })[];
-      setInput("");
-      setAttachments([]);
+      if ((!content && !opts.regenerateOf) || streaming || !workspaceId) return;
+      const sending = opts.regenerateOf ? [] : (attachments.filter((a) => a.id && a.status !== "failed") as (Attachment & { id: string })[]);
+      if (!opts.regenerateOf && opts.parentId === undefined) {
+        setInput("");
+        setAttachments([]);
+      }
       stickRef.current = true;
 
       let id = chatId;
       try {
         if (!id) {
-          const created = await post<{ id: string }>("/api/chats", { workspaceId, modelId: model?.id, projectId: project?.id });
+          const created = await post<{ id: string }>("/api/chats", { workspaceId, modelId: model?.id, projectId: project?.id, temporary: temporary || undefined });
           id = created.id;
           setChatId(id);
           onCreated?.(id);
@@ -243,25 +270,46 @@ export function ChatView({
         return;
       }
 
+      const prevLeaf = leafId;
+      const parentId = opts.regenerateOf ? null : opts.parentId !== undefined ? opts.parentId : leafId;
       const newAttachments = sending.map((a) => ({ id: a.id, name: a.name }));
-      const tempUser: UiMessage = { id: `u-${Date.now()}`, role: "user", content, attachments: newAttachments };
+      const stamp = Date.now();
+      const tempUser: UiMessage | null = opts.regenerateOf
+        ? null
+        : { id: `u-${stamp}`, parentId, role: "user", content, attachments: newAttachments };
       if (newAttachments.length)
         setChatDocs((l) => [...l, ...newAttachments.filter((a) => !l.some((x) => x.id === a.id))]);
-      const tempAsst: UiMessage = { id: `a-${Date.now()}`, role: "assistant", content: "", streaming: true, model: model?.id };
-      setMessages((m) => [...m, tempUser, tempAsst]);
+      const tempAsst: UiMessage = {
+        id: `a-${stamp}`,
+        parentId: opts.regenerateOf ?? tempUser!.id,
+        role: "assistant",
+        content: "",
+        streaming: true,
+        model: model?.id,
+      };
+      setTree((all) => [...all, ...(tempUser ? [tempUser] : []), tempAsst]);
+      setLeafId(tempAsst.id);
       setStreaming(true);
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      const patchAsst = (fn: (m: UiMessage) => UiMessage) =>
-        setMessages((all) => all.map((m) => (m.id === tempAsst.id ? fn(m) : m)));
+      let asstId = tempAsst.id;
+      // Capture the id now: React runs the updater later, after `asstId` may have changed.
+      const patchAsst = (fn: (m: UiMessage) => UiMessage) => {
+        const target = asstId;
+        setTree((all) => all.map((m) => (m.id === target ? fn(m) : m)));
+      };
 
       try {
         const res = await fetch(`/api/chats/${id}/messages`, {
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ content, modelId: model?.id, documentIds: sending.length ? sending.map((a) => a.id) : undefined }),
+          body: JSON.stringify(
+            opts.regenerateOf
+              ? { regenerateOf: opts.regenerateOf, modelId: model?.id }
+              : { content, parentId, modelId: model?.id, documentIds: sending.length ? sending.map((a) => a.id) : undefined },
+          ),
           signal: ctrl.signal,
         });
         if (!res.ok) {
@@ -270,6 +318,7 @@ export function ChatView({
         }
         for await (const ev of readSse(res)) {
           if (ev.event === "start") {
+            if (tempUser && ev.data.userMessageId) renameNode(tempUser.id, ev.data.userMessageId);
             if (ev.data.title) {
               setLiveTitle(ev.data.title);
               qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
@@ -277,16 +326,25 @@ export function ChatView({
             patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model, citations: ev.data.citations?.length ? ev.data.citations : null }));
           } else if (ev.event === "delta") patchAsst((m) => ({ ...m, content: m.content + ev.data.text }));
           else if (ev.event === "done") {
-            patchAsst((m) => ({ ...m, id: ev.data.messageId, streaming: false }));
+            patchAsst((m) => ({ ...m, streaming: false }));
+            renameNode(asstId, ev.data.messageId);
+            asstId = ev.data.messageId;
             if (ev.data.quota) qc.setQueryData(["quota", workspaceId], ev.data.quota);
-          } else if (ev.event === "error") patchAsst((m) => ({ ...m, streaming: false, error: ev.data.message }));
+          } else if (ev.event === "error") {
+            patchAsst((m) => ({ ...m, streaming: false, error: ev.data.message }));
+            if (ev.data.messageId) {
+              renameNode(asstId, ev.data.messageId);
+              asstId = ev.data.messageId;
+            }
+          }
         }
       } catch (e) {
         if (ctrl.signal.aborted) {
           patchAsst((m) => ({ ...m, streaming: false }));
         } else if (e instanceof ApiError && e.code === "quota_exceeded") {
-          setMessages((all) => all.filter((m) => m.id !== tempAsst.id && m.id !== tempUser.id));
-          setInput(content);
+          setTree((all) => all.filter((m) => m.id !== tempAsst.id && m.id !== tempUser?.id));
+          setLeafId(prevLeaf);
+          if (!opts.regenerateOf) setInput(content);
           setQuotaBlocked(true);
           if (e.details) qc.setQueryData(["quota", workspaceId], e.details);
         } else {
@@ -303,7 +361,17 @@ export function ChatView({
         }
       }
     },
-    [attachments, chatId, model?.id, onCreated, project, qc, streaming, workspaceId],
+    [attachments, chatId, leafId, model?.id, onCreated, project, qc, renameNode, streaming, temporary, workspaceId],
+  );
+
+  /** Show another version of a message (and the newest branch under it). */
+  const showBranch = useCallback(
+    (sibling: UiMessage) => {
+      const leaf = latestLeaf(tree, sibling.id);
+      setLeafId(leaf);
+      if (chatId && !/^[ua]-\d+$/.test(leaf)) void patch(`/api/chats/${chatId}`, { leafMessageId: leaf }).catch(() => {});
+    },
+    [chatId, tree],
   );
 
   const toggleShare = async () => {
@@ -346,9 +414,30 @@ export function ChatView({
     }
   };
 
+  const exportChat = (format: "docx" | "md" | "pdf", messageId?: string) => {
+    if (!chatId) return;
+    const q = messageId ? `messageId=${messageId}` : "";
+    if (format === "pdf") window.open(`/print/chat/${chatId}${q ? `?${q}` : ""}`, "_blank", "noopener");
+    else window.location.href = `/api/chats/${chatId}/export?format=${format}${q ? `&${q}` : ""}`;
+  };
+  const isTemporary = kept ? false : (existing.data?.temporary ?? temporary);
+  const keepChat = async () => {
+    if (!chatId) return;
+    try {
+      await patch(`/api/chats/${chatId}`, { temporary: false });
+      setKept(true);
+      qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+      if (project) qc.invalidateQueries({ queryKey: ["project", project.id] });
+      toast("Chat saved to your history");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
   const regenerate = () => {
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    if (lastUser) send(lastUser.content);
+    const last = messages.at(-1);
+    const question = last?.role === "assistant" ? last.parentId : [...messages].reverse().find((m) => m.role === "user")?.id;
+    if (question) send("", { regenerateOf: question });
   };
 
   const isHome = !initialId && messages.length === 0;
@@ -396,6 +485,12 @@ export function ChatView({
           No models are enabled in this workspace yet. Ask your admin to add one.
         </div>
       )}
+      {isTemporary && (
+        <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-dashed border-border-strong px-4 py-2.5 text-[13px] text-fg-muted" data-testid="temporary-notice">
+          <Ghost className="size-4 shrink-0 text-fg-subtle" />
+          <span>Temporary chat: it won&apos;t appear in your history, search or project memory, and is deleted after 24 hours.</span>
+        </div>
+      )}
     </>
   );
 
@@ -419,7 +514,19 @@ export function ChatView({
         actions={
           <>
             {!isHome && chatDocs.length > 0 && <ChatDocsButton docs={chatDocs} />}
-            {project && !isHome && !readOnly && chatId && (
+            {isHome && !project && (
+              <Tooltip content={temporary ? "This chat won't be saved" : "Start a chat that isn't saved to history"}>
+                <TopBarButton onClick={() => setTemporary((t) => !t)} aria-pressed={temporary} className={cn(temporary && "bg-surface-2 text-fg")} data-testid="temporary-toggle">
+                  <Ghost /> Temporary
+                </TopBarButton>
+              </Tooltip>
+            )}
+            {!isHome && isTemporary && !readOnly && (
+              <TopBarButton onClick={keepChat} data-testid="keep-chat">
+                <Ghost /> Keep chat
+              </TopBarButton>
+            )}
+            {project && !isHome && !readOnly && chatId && !isTemporary && (
               <TopBarButton onClick={toggleShare} data-testid="share-to-project" className={cn(shared && "text-fg")}>
                 <Share2 /> {shared ? "Shared to project" : "Share to project"}
               </TopBarButton>
@@ -442,9 +549,14 @@ export function ChatView({
                   </TopBarButton>
                 </MenuTrigger>
                 <MenuContent align="end" className="min-w-44">
-                  <MenuItem icon={<FolderInput />} onSelect={() => setMoving(true)}>
-                    {project ? "Move to another project" : "Move to project"}
-                  </MenuItem>
+                  {!isTemporary && (
+                    <MenuItem icon={<FolderInput />} onSelect={() => setMoving(true)}>
+                      {project ? "Move to another project" : "Move to project"}
+                    </MenuItem>
+                  )}
+                  <MenuItem icon={<FileText />} onSelect={() => exportChat("docx")}>Download as Word</MenuItem>
+                  <MenuItem icon={<Printer />} onSelect={() => exportChat("pdf")}>Download as PDF</MenuItem>
+                  <MenuItem icon={<Code2 />} onSelect={() => exportChat("md")}>Download as Markdown</MenuItem>
                   <MenuSeparator />
                   <MenuItem icon={<Archive />} onSelect={archive}>Archive</MenuItem>
                 </MenuContent>
@@ -564,17 +676,33 @@ export function ChatView({
             ) : (
               <div className="mx-auto max-w-[760px] px-4 pt-8 pb-10 sm:px-6">
                 <AnimatePresence initial={false}>
-                  {messages.map((m, i) => (
+                  {messages.map((m, i) => {
+                    const sibs = siblingsOf(tree, m).filter((x) => x.role === m.role);
+                    const at = sibs.findIndex((x) => x.id === m.id);
+                    return (
                     <MessageBlock
                       key={m.id}
                       message={m}
+                      branch={
+                        sibs.length > 1
+                          ? {
+                              index: at,
+                              total: sibs.length,
+                              onPrev: at > 0 && !streaming ? () => showBranch(sibs[at - 1]!) : undefined,
+                              onNext: at < sibs.length - 1 && !streaming ? () => showBranch(sibs[at + 1]!) : undefined,
+                            }
+                          : undefined
+                      }
+                      onEdit={!readOnly && !streaming && m.role === "user" ? (text) => send(text, { parentId: m.parentId }) : undefined}
+                      onExport={chatId && !/^[ua]-\d+$/.test(m.id) && m.role === "assistant" ? (format) => exportChat(format, m.id) : undefined}
                       modelLabel={modelName(m.model) ?? model?.displayName ?? "Aatmiq"}
                       isLast={i === messages.length - 1}
                       onRegenerate={!streaming && !readOnly ? regenerate : undefined}
                       onCite={openSource}
                       onSave={project?.canEdit && !readOnly ? saveAnswer : undefined}
                     />
-                  ))}
+                    );
+                  })}
                 </AnimatePresence>
               </div>
             )}
@@ -616,6 +744,24 @@ export function ChatView({
   );
 }
 
+function BranchNav({ branch }: { branch: NonNullable<BranchInfo> }) {
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[12px] text-fg-subtle" data-testid="branch-nav">
+      <Button variant="ghost" size="icon-sm" aria-label="Previous version" disabled={!branch.onPrev} onClick={branch.onPrev}>
+        <ChevronLeft className="size-3.5" />
+      </Button>
+      <span className="min-w-8 text-center tabular-nums">
+        {branch.index + 1}/{branch.total}
+      </span>
+      <Button variant="ghost" size="icon-sm" aria-label="Next version" disabled={!branch.onNext} onClick={branch.onNext}>
+        <ChevronRight className="size-3.5" />
+      </Button>
+    </span>
+  );
+}
+
+type BranchInfo = { index: number; total: number; onPrev?: () => void; onNext?: () => void } | undefined;
+
 function MessageBlock({
   message: m,
   modelLabel,
@@ -623,6 +769,9 @@ function MessageBlock({
   onRegenerate,
   onCite,
   onSave,
+  onEdit,
+  onExport,
+  branch,
 }: {
   message: UiMessage;
   modelLabel: string;
@@ -630,11 +779,45 @@ function MessageBlock({
   onRegenerate?: () => void;
   onCite: (c: Citation) => void;
   onSave?: (content: string) => void;
+  onEdit?: (content: string) => void;
+  onExport?: (format: "docx" | "md" | "pdf") => void;
+  branch?: BranchInfo;
 }) {
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(m.content);
   if (m.role === "user") {
+    if (editing) {
+      const submit = () => {
+        if (!draft.trim()) return;
+        setEditing(false);
+        onEdit?.(draft);
+      };
+      return (
+        <div className="mb-6 rounded-xl border border-border-strong bg-surface-2 p-3" data-testid="edit-message">
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              } else if (e.key === "Escape") setEditing(false);
+            }}
+            rows={Math.min(10, Math.max(2, draft.split("\n").length))}
+            className="block w-full resize-none bg-transparent px-1 text-[14px] leading-relaxed text-fg outline-none"
+          />
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <span className="mr-auto text-[12px] text-fg-subtle">Sending starts a new version of this conversation. The old one stays.</span>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" disabled={!draft.trim()} onClick={submit}>Send</Button>
+          </div>
+        </div>
+      );
+    }
     return (
-      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="mb-6">
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="group/user mb-6">
         <div className="rounded-xl border border-border bg-surface-2 px-4 py-3 text-[14px] leading-relaxed whitespace-pre-wrap text-fg">
           {m.attachments && m.attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5 whitespace-normal">
@@ -648,6 +831,26 @@ function MessageBlock({
           )}
           {m.content}
         </div>
+        {(onEdit || branch) && (
+          <div className={cn("mt-1 flex items-center justify-end gap-0.5 transition-opacity", branch ? "opacity-100" : "opacity-0 group-hover/user:opacity-100 focus-within:opacity-100")}>
+            {branch && <BranchNav branch={branch} />}
+            {onEdit && (
+              <Tooltip content="Edit">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Edit message"
+                  onClick={() => {
+                    setDraft(m.content);
+                    setEditing(true);
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+        )}
       </motion.div>
     );
   }
@@ -673,7 +876,8 @@ function MessageBlock({
           </div>
         )}
         {!m.streaming && (
-          <div className={cn("mt-2 -ml-1.5 flex gap-0.5 transition-opacity", isLast ? "opacity-100" : "opacity-0 group-hover:opacity-100")}>
+          <div className={cn("mt-2 -ml-1.5 flex items-center gap-0.5 transition-opacity", isLast || branch ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
+            {branch && <BranchNav branch={branch} />}
             <Tooltip content={copied ? "Copied" : "Copy"}>
               <Button
                 variant="ghost"
@@ -694,6 +898,22 @@ function MessageBlock({
                   <BookmarkPlus className="size-3.5" />
                 </Button>
               </Tooltip>
+            )}
+            {onExport && m.content && !m.error && (
+              <Menu>
+                <Tooltip content="Download">
+                  <MenuTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" aria-label="Download answer">
+                      <FileDown className="size-3.5" />
+                    </Button>
+                  </MenuTrigger>
+                </Tooltip>
+                <MenuContent align="start" className="min-w-44">
+                  <MenuItem icon={<FileText />} onSelect={() => onExport("docx")}>Word document</MenuItem>
+                  <MenuItem icon={<Printer />} onSelect={() => onExport("pdf")}>PDF (print)</MenuItem>
+                  <MenuItem icon={<Code2 />} onSelect={() => onExport("md")}>Markdown</MenuItem>
+                </MenuContent>
+              </Menu>
             )}
             {isLast && onRegenerate && (
               <Tooltip content="Regenerate">

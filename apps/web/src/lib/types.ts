@@ -62,6 +62,8 @@ export interface ChatDetail {
   projectId: string | null;
   sharedToProject: boolean;
   archivedAt: string | null;
+  temporary: boolean;
+  leafMessageId: string | null;
   messages: ChatMessageRow[];
   documents: { id: string; name: string }[];
   readOnly: boolean;
@@ -90,6 +92,8 @@ export interface ProjectSource {
   error: string | null;
   sizeBytes: number;
   pageCount: number | null;
+  label: SourceLabel | null;
+  supersededById: string | null;
   projectOnly: boolean;
   addedAt: string;
 }
@@ -126,6 +130,7 @@ export interface SearchResults {
 
 export interface ChatMessageRow {
   id: string;
+  parentId?: string | null;
   role: "user" | "assistant" | "system";
   content: string;
   modelId: string | null;
@@ -188,6 +193,7 @@ export interface DocumentRow {
   error: string | null;
   pageCount: number | null;
   chunkCount: number | null;
+  label?: SourceLabel | null;
   ownerId: string | null;
   ownerName: string | null;
   createdAt: string;
@@ -201,4 +207,7 @@ export interface Citation {
   name: string;
   page: number | null;
   snippet: string;
+  label?: SourceLabel | null;
 }
+
+export type SourceLabel = "confirmed" | "assumption" | "tbd";

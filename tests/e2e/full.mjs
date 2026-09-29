@@ -159,16 +159,18 @@ await step("Chat", "Code block copy button works", owner, async () => {
   await owner.locator("button:has-text('Copy')").last().click();
   await owner.getByText("Copied").first().waitFor();
 });
-await step("Chat", "Regenerate adds a new reply", owner, async () => {
+await step("Chat", "Regenerate adds a new version of the reply", owner, async () => {
   await owner.click('button[aria-label="Regenerate"]');
-  await waitReply(owner, 2);
-  expect((await assistantCount(owner)) === 3, `expected 3 replies, got ${await assistantCount(owner)}`);
+  await owner.getByTestId("branch-nav").filter({ hasText: "2/2" }).waitFor();
+  await owner.waitForFunction(() => !document.querySelector('button[aria-label="Stop"]'), null, { timeout: 20000 });
+  expect((await assistantCount(owner)) === 2, `expected 2 replies shown, got ${await assistantCount(owner)}`);
 });
 let firstChatUrl = owner.url();
 await step("Chat", "Reloading a chat URL restores the conversation", owner, async () => {
   firstChatUrl = owner.url();
   await owner.reload();
-  await owner.locator(".prose-chat").nth(2).waitFor();
+  await owner.locator(".prose-chat").nth(1).waitFor();
+  await owner.getByTestId("branch-nav").filter({ hasText: "2/2" }).waitFor();
 });
 await step("Chat", "New chat button opens an empty chat", owner, async () => {
   await owner.click("aside >> text=New chat");
@@ -179,7 +181,7 @@ await step("Chat", "New chat button opens an empty chat", owner, async () => {
 await step("Chat", "Clicking a chat in the sidebar opens it", owner, async () => {
   await owner.locator("aside a", { hasText: "Draft a polite email to Acme" }).click();
   await owner.waitForURL(firstChatUrl);
-  await owner.locator(".prose-chat").nth(2).waitFor();
+  await owner.locator(".prose-chat").nth(1).waitFor();
 });
 await step("Chat", "Rename a chat", owner, async () => {
   const row = owner.locator("aside div.group", { hasText: "Second conversation" });
@@ -337,7 +339,7 @@ await step("Documents", "Upload a PDF on the Documents page; it becomes ready", 
   await docRow(owner, "report.pdf").getByText("2 pages").waitFor();
 });
 await step("Documents", "Unsupported files are rejected with a clear message", owner, async () => {
-  await owner.locator('[data-testid="doc-upload"]').setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: Buffer.from("x") });
+  await owner.locator('[data-testid="doc-upload"]').setInputFiles({ name: "movie.mp4", mimeType: "video/mp4", buffer: Buffer.from("x") });
   await toast(owner, "isn't supported");
 });
 await step("Documents", "Ask about a document: cited answer and source preview", owner, async () => {
@@ -655,6 +657,112 @@ await step("Projects", "Projects page lists projects; delete one after confirmin
   await owner.click('[role="dialog"] >> button:has-text("Delete project")');
   await owner.waitForURL("**/app/projects");
   await owner.locator("aside a", { hasText: "Scratch" }).waitFor({ state: "detached" });
+});
+/* ═════════════ H3. Phase B: versions, temporary chats, labels, export, Excel/OCR ═════════════ */
+let branchChatUrl = "";
+await step("Phase B", "Editing a message creates a new version; switch between them", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  await owner.getByText("where should we start today?").waitFor();
+  await send(owner, "Alpha question");
+  await send(owner, "Beta question");
+  branchChatUrl = owner.url();
+  const beta = owner.locator(".group\\/user", { hasText: "Beta question" });
+  await beta.hover();
+  await beta.locator('button[aria-label="Edit message"]').click();
+  await owner.getByTestId("edit-message").locator("textarea").fill("Gamma question");
+  const before = await assistantCount(owner);
+  await owner.getByTestId("edit-message").locator("button", { hasText: "Send" }).click();
+  await owner.locator(".prose-chat", { hasText: "Gamma question" }).waitFor();
+  await waitReply(owner, before - 1);
+  expect((await owner.getByText("Beta question").count()) === 0, "old version still shown");
+  await owner.getByTestId("branch-nav").filter({ hasText: "2/2" }).first().waitFor();
+  await owner.click('button[aria-label="Previous version"]');
+  await owner.locator(".prose-chat", { hasText: "Beta question" }).waitFor();
+  await wait(600);
+  await owner.reload();
+  await owner.locator(".prose-chat", { hasText: "Beta question" }).waitFor();
+  await owner.getByTestId("branch-nav").filter({ hasText: "1/2" }).first().waitFor();
+});
+await step("Phase B", "Regenerate keeps both answers as versions", owner, async () => {
+  const before = await assistantCount(owner);
+  await owner.click('button[aria-label="Regenerate"]');
+  await owner.waitForFunction(() => !document.querySelector('button[aria-label="Stop"]'), null, { timeout: 20000 });
+  await wait(500);
+  expect((await assistantCount(owner)) === before, "regenerate should replace the shown answer, not append");
+  expect((await owner.getByText("Beta question").count()) >= 1, "question repeated or lost");
+  await owner.getByTestId("branch-nav").filter({ hasText: "2/2" }).first().waitFor();
+});
+await step("Phase B", "Download the chat as Word and Markdown, and open the PDF view", owner, async () => {
+  await owner.click('header button[aria-label="Chat options"]');
+  const [docx] = await Promise.all([owner.waitForEvent("download"), owner.getByRole("menuitem", { name: "Download as Word" }).click()]);
+  expect(docx.suggestedFilename().endsWith(".docx"), `bad name ${docx.suggestedFilename()}`);
+  const docxPath = await docx.path();
+  const { readFileSync } = await import("node:fs");
+  expect(readFileSync(docxPath).subarray(0, 2).toString() === "PK", "not a docx");
+  await owner.click('header button[aria-label="Chat options"]');
+  const [md] = await Promise.all([owner.waitForEvent("download"), owner.getByRole("menuitem", { name: "Download as Markdown" }).click()]);
+  const text = readFileSync(await md.path(), "utf8");
+  expect(text.includes("Beta question") && !text.includes("Gamma question"), "markdown is not the branch shown");
+  await owner.click('header button[aria-label="Chat options"]');
+  const [popup] = await Promise.all([owner.context().waitForEvent("page"), owner.getByRole("menuitem", { name: "Download as PDF" }).click()]);
+  await popup.locator("article h1").waitFor();
+  await popup.locator("article", { hasText: "Beta question" }).waitFor();
+  await popup.screenshot({ path: `${OUT}print-view.png` });
+  await popup.close();
+});
+await step("Phase B", "Download one answer as Word", owner, async () => {
+  await owner.locator('button[aria-label="Download answer"]').last().click();
+  const [one] = await Promise.all([owner.waitForEvent("download"), owner.getByRole("menuitem", { name: "Word document" }).click()]);
+  expect(one.suggestedFilename().endsWith(".docx"), "no docx");
+});
+await step("Phase B", "Temporary chats stay out of history until kept", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  await owner.getByTestId("temporary-toggle").click();
+  await owner.getByTestId("temporary-notice").waitFor();
+  await send(owner, "Temporary zebra note");
+  await owner.getByTestId("temporary-notice").waitFor();
+  await wait(500);
+  expect((await owner.locator("aside a", { hasText: "Temporary zebra note" }).count()) === 0, "temporary chat listed");
+  await owner.keyboard.press("Control+k");
+  await owner.getByTestId("search-input").fill("zebra");
+  await wait(900);
+  expect((await owner.locator('[role="dialog"] button', { hasText: "zebra" }).count()) === 0, "temporary chat searchable");
+  await owner.keyboard.press("Escape");
+  await owner.getByTestId("keep-chat").click();
+  await toast(owner, "Chat saved to your history");
+  await owner.locator("aside a", { hasText: "Temporary zebra note" }).waitFor();
+});
+await step("Phase B", "Label a project source; answers show the label", owner, async () => {
+  await owner.goto(projectUrl);
+  const row = owner.getByTestId("source-row").filter({ hasText: "Launch facts.md" });
+  await row.hover();
+  await row.locator('button[aria-label="Options for Launch facts.md"]').click();
+  await owner.getByRole("menuitem", { name: "Assumption" }).click();
+  await row.getByText("Assumption").waitFor();
+  await send(owner, "Remind me of the launch date");
+  await owner.locator("button", { hasText: "Launch facts.md" }).filter({ hasText: "Assumption" }).first().waitFor();
+});
+await step("Phase B", "Upload a new version of a source; the old one is set aside", owner, async () => {
+  await owner.goto(projectUrl);
+  const row = owner.getByTestId("source-row").filter({ hasText: "policy.docx" });
+  await row.hover();
+  await row.locator('button[aria-label="Options for policy.docx"]').click();
+  await owner.getByRole("menuitem", { name: "Upload new version" }).click();
+  await owner.getByTestId("version-upload").setInputFiles(fixture("report.pdf"));
+  await toast(owner, "New version added");
+  await owner.getByTestId("source-row").filter({ hasText: "report.pdf" }).waitFor();
+  await owner.getByTestId("source-row").filter({ hasText: "policy.docx" }).getByText("Old version").waitFor();
+});
+await step("Phase B", "Excel and image files become searchable (OCR)", owner, async () => {
+  await owner.goto(`${BASE}/app/documents`);
+  await owner.getByTestId("doc-upload").setInputFiles([fixture("budget.xlsx"), fixture("receipt.png")]);
+  for (const n of ["budget.xlsx", "receipt.png"]) await docRow(owner, n).waitFor();
+  await owner.waitForFunction(() => !document.body.innerText.includes("Processing"), null, { timeout: 30000 });
+  expect((await docRow(owner, "receipt.png").getByText("Failed").count()) === 0, "OCR failed");
+  await docRow(owner, "receipt.png").locator("button", { hasText: "Ask" }).click();
+  await owner.waitForURL(/\?doc=/);
+  await send(owner, "What is the invoice number?");
+  await owner.locator(".prose-chat", { hasText: "58213" }).waitFor();
 });
 await step("Member", "Owner disabling Code hides it from the member", owner, async () => {
   await owner.goto(`${BASE}/admin/workspaces/${generalId}`);

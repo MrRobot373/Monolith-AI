@@ -21,6 +21,7 @@
 | Chat: streaming, Markdown/code, history, rename/pin/delete, model picker | ✅ |
 | Documents: library per workspace (private/shared), PDF/Word/text/code upload, attach in chat (+ upload, @ library), answers with numbered sources and passage preview, keyword + optional vector search (pgvector) | ✅ |
 | Projects: instructions, sources (files, pasted text, saved answers, library links), project memory across chats, sharing (private/workspace, chat/edit roles, chats private unless shared), move/archive chats, ⌘K search over messages ([spec](docs/03-projects.md)) | ✅ |
+| Chat Phase B: edit & branch (versions), temporary chats, source labels (Confirmed/Assumption/TBD) and versions, Excel and OCR (images, scanned PDFs), export to Word/PDF/Markdown | ✅ |
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
 | Compliance recording notice, accent-color branding, dark/light themes | ✅ |
 | Docker images + Compose stack | ✅ |

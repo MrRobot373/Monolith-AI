@@ -28,7 +28,7 @@ function CodeBlock({ children, className }: { children?: ReactNode; className?: 
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
           }}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg"
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg print:hidden"
         >
           {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy"}

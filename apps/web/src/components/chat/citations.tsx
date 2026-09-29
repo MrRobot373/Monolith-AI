@@ -7,7 +7,24 @@ import { FileIcon } from "@/components/documents/use-documents";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlay";
-import type { Citation } from "@/lib/types";
+import { cn } from "@/lib/cn";
+import type { Citation, SourceLabel } from "@/lib/types";
+
+export const LABELS: Record<SourceLabel, { text: string; hint: string; cls: string }> = {
+  confirmed: { text: "Confirmed", hint: "Checked and agreed", cls: "text-success border-success/30" },
+  assumption: { text: "Assumption", hint: "Believed true, not confirmed yet", cls: "text-warning border-warning/30" },
+  tbd: { text: "TBD", hint: "Still to be decided", cls: "text-fg-muted border-border-strong" },
+};
+
+export function LabelBadge({ label, className }: { label: SourceLabel | null | undefined; className?: string }) {
+  if (!label) return null;
+  const l = LABELS[label];
+  return (
+    <span title={l.hint} className={cn("inline-flex h-[18px] shrink-0 items-center rounded border px-1 text-[10.5px] leading-none", l.cls, className)}>
+      {l.text}
+    </span>
+  );
+}
 
 /** Turn "[2]" markers that match real sources into links the Markdown renderer shows as chips. */
 export function linkCitations(text: string, citations: Citation[] | null | undefined): string {
@@ -54,6 +71,7 @@ export function SourcesRow({ citations, onOpen }: { citations: Citation[]; onOpe
             {c.kind === "chat" ? <MessageSquare className="size-3.5 shrink-0 text-fg-subtle" /> : <FileIcon name={c.name} className="size-3.5" />}
             <span className="truncate">{c.name}</span>
             {c.page && <span className="shrink-0 text-fg-subtle">p.{c.page}</span>}
+            <LabelBadge label={c.label} />
           </button>
         ))}
       </div>
@@ -72,6 +90,7 @@ export function useSourceDialog() {
         <span className="flex items-center gap-2">
           {open?.kind === "chat" ? <MessageSquare className="size-4 text-fg-subtle" /> : <FileText className="size-4 text-fg-subtle" />}
           {open?.name}
+          <LabelBadge label={open?.label} />
         </span>
       }
       description={

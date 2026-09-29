@@ -3,6 +3,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   BookmarkCheck,
+  Check,
+  FileUp,
+  History,
+  RotateCcw,
+  Tag,
   CircleAlert,
   FileText,
   Globe,
@@ -37,12 +42,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { Avatar } from "@/components/ui/misc";
-import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
+import { LabelBadge, LABELS } from "@/components/chat/citations";
+import { Dialog, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
 import { Skeleton } from "@/components/ui/spinner";
-import { del, formatBytes, post } from "@/lib/api";
+import { del, formatBytes, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/format";
-import type { ProjectDetail, ProjectSource } from "@/lib/types";
+import type { ProjectDetail, ProjectSource, SourceLabel } from "@/lib/types";
 
 /** /app/projects/:id (project home + new chat) and /app/projects/:id/:chatId (a chat in the project). */
 export default function ProjectPage() {
@@ -286,6 +292,9 @@ function SourcesCard({ project: p }: { project: ProjectDetail }) {
   const [uploading, setUploading] = useState<string[]>([]);
   const [noteOpen, setNoteOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [superseding, setSuperseding] = useState<ProjectSource | null>(null);
+  const versionRef = useRef<HTMLInputElement>(null);
+  const replacing = useRef<string | null>(null);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const library = useDocuments(libraryOpen ? workspaceId : "");
@@ -322,6 +331,27 @@ function SourcesCard({ project: p }: { project: ProjectDetail }) {
     onSuccess: () => refresh(),
     onError: (e) => toast.error((e as Error).message),
   });
+  const updateSource = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; label?: SourceLabel | null; supersededById?: string | null }) =>
+      patch(`/api/projects/${p.id}/sources/${id}`, body),
+    onSuccess: () => refresh(),
+    onError: (e) => toast.error((e as Error).message),
+  });
+  async function uploadVersion(file: File) {
+    const old = replacing.current;
+    replacing.current = null;
+    if (!old) return;
+    setUploading((u) => [...u, file.name]);
+    try {
+      await uploadProjectSource(p.id, file, old);
+      refresh();
+      toast("New version added. The old one is kept but no longer used in answers.");
+    } catch (e) {
+      toast.error(`${file.name}: ${(e as Error).message}`);
+    } finally {
+      setUploading((u) => u.filter((n) => n !== file.name));
+    }
+  }
   const remove = useMutation({
     mutationFn: (documentId: string) => del(`/api/projects/${p.id}/sources/${documentId}`),
     onSuccess: () => refresh(),
@@ -365,6 +395,18 @@ function SourcesCard({ project: p }: { project: ProjectDetail }) {
           e.target.value = "";
         }}
       />
+      <input
+        ref={versionRef}
+        type="file"
+        accept={ACCEPT}
+        className="hidden"
+        data-testid="version-upload"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void uploadVersion(f);
+          e.target.value = "";
+        }}
+      />
       <div className="-mx-1.5 space-y-px" data-testid="project-sources">
         {uploading.map((n) => (
           <div key={n} className="flex h-8 items-center gap-2 px-1.5 text-[12.5px] text-fg-muted">
@@ -372,33 +414,90 @@ function SourcesCard({ project: p }: { project: ProjectDetail }) {
             <span className="min-w-0 flex-1 truncate">{n}</span>
           </div>
         ))}
-        {p.sources.map((s) => (
-          <div key={s.id} className="group flex h-8 items-center gap-2 rounded-md px-1.5 hover:bg-surface-2/60">
-            <SourceIcon s={s} />
-            <a href={`/api/documents/${s.id}/file`} className="min-w-0 flex-1 truncate text-[12.5px] text-fg-muted hover:text-fg" title={s.name}>
-              {s.name}
-            </a>
-            {s.status === "processing" ? (
-              <Loader2 className="size-3.5 shrink-0 animate-spin text-fg-subtle" aria-label="Processing" />
-            ) : s.status === "failed" ? (
-              <CircleAlert className="size-3.5 shrink-0 text-danger" aria-label={s.error ?? "Failed"} />
-            ) : (
-              <span className="shrink-0 text-[11px] text-fg-subtle group-hover:hidden">
-                {!s.projectOnly ? "Library" : s.kind === "file" ? formatBytes(s.sizeBytes) : s.kind === "answer" ? "Answer" : "Text"}
-              </span>
-            )}
-            {p.canEdit && (
-              <button
-                type="button"
-                aria-label={`Remove ${s.name}`}
-                onClick={() => remove.mutate(s.id)}
-                className="hidden shrink-0 rounded p-0.5 text-fg-subtle hover:text-danger group-hover:block"
+        {p.sources.map((s) => {
+          const newer = s.supersededById ? p.sources.find((x) => x.id === s.supersededById) : undefined;
+          return (
+            <div
+              key={s.id}
+              className={cn("group flex h-8 items-center gap-2 rounded-md px-1.5 hover:bg-surface-2/60", s.supersededById && "opacity-60")}
+              data-testid="source-row"
+            >
+              <SourceIcon s={s} />
+              <a
+                href={`/api/documents/${s.id}/file`}
+                className={cn("min-w-0 flex-1 truncate text-[12.5px] text-fg-muted hover:text-fg", s.supersededById && "line-through")}
+                title={newer ? `${s.name}, replaced by ${newer.name}` : s.name}
               >
-                <Trash2 className="size-3.5" />
-              </button>
-            )}
-          </div>
-        ))}
+                {s.name}
+              </a>
+              {s.supersededById && <span className="shrink-0 text-[10.5px] text-fg-subtle">Old version</span>}
+              <LabelBadge label={s.label} />
+              {s.status === "processing" ? (
+                <Loader2 className="size-3.5 shrink-0 animate-spin text-fg-subtle" aria-label="Processing" />
+              ) : s.status === "failed" ? (
+                <CircleAlert className="size-3.5 shrink-0 text-danger" aria-label={s.error ?? "Failed"} />
+              ) : (
+                !s.label &&
+                !s.supersededById && (
+                  <span className={cn("shrink-0 text-[11px] text-fg-subtle", p.canEdit && "group-hover:hidden")}>
+                    {!s.projectOnly ? "Library" : s.kind === "file" ? formatBytes(s.sizeBytes) : s.kind === "answer" ? "Answer" : "Text"}
+                  </span>
+                )
+              )}
+              {p.canEdit && (
+                <Menu>
+                  <MenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`Options for ${s.name}`}
+                      className="hidden shrink-0 rounded p-0.5 text-fg-subtle group-hover:block hover:text-fg data-[state=open]:block"
+                    >
+                      <MoreHorizontal className="size-3.5" />
+                    </button>
+                  </MenuTrigger>
+                  <MenuContent align="end" className="min-w-52">
+                    <MenuLabel>Label</MenuLabel>
+                    {(["confirmed", "assumption", "tbd"] as const).map((l) => (
+                      <MenuItem
+                        key={l}
+                        icon={<Tag />}
+                        shortcut={s.label === l ? <Check className="size-3.5" /> : undefined}
+                        onSelect={() => updateSource.mutate({ id: s.id, label: s.label === l ? null : l })}
+                      >
+                        {LABELS[l].text}
+                      </MenuItem>
+                    ))}
+                    <MenuSeparator />
+                    {s.kind === "file" && s.projectOnly && (
+                      <MenuItem
+                        icon={<FileUp />}
+                        onSelect={() => {
+                          replacing.current = s.id;
+                          versionRef.current?.click();
+                        }}
+                      >
+                        Upload new version
+                      </MenuItem>
+                    )}
+                    {s.supersededById ? (
+                      <MenuItem icon={<RotateCcw />} onSelect={() => updateSource.mutate({ id: s.id, supersededById: null })}>
+                        Make current again
+                      </MenuItem>
+                    ) : (
+                      <MenuItem icon={<History />} disabled={p.sources.length < 2} onSelect={() => setSuperseding(s)}>
+                        Replaced by another source…
+                      </MenuItem>
+                    )}
+                    <MenuSeparator />
+                    <MenuItem icon={<Trash2 />} danger onSelect={() => remove.mutate(s.id)}>
+                      {s.projectOnly ? "Delete" : "Remove from project"}
+                    </MenuItem>
+                  </MenuContent>
+                </Menu>
+              )}
+            </div>
+          );
+        })}
         {p.sources.length === 0 && uploading.length === 0 && (
           <p className="px-1.5 text-[12.5px] leading-relaxed text-fg-subtle">
             {p.canEdit
@@ -430,6 +529,32 @@ function SourcesCard({ project: p }: { project: ProjectDetail }) {
           <Field label="Text">
             <Textarea value={noteBody} onChange={(e) => setNoteBody(e.target.value)} className="min-h-48" data-testid="note-body" />
           </Field>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={!!superseding}
+        onOpenChange={(o) => !o && setSuperseding(null)}
+        title="Replaced by which source?"
+        description={superseding ? `“${superseding.name}” will be kept for reference but left out of answers.` : undefined}
+      >
+        <div className="-mx-1 max-h-72 space-y-px overflow-y-auto">
+          {p.sources
+            .filter((x) => x.id !== superseding?.id && !x.supersededById)
+            .map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                onClick={() => {
+                  updateSource.mutate({ id: superseding!.id, supersededById: x.id });
+                  setSuperseding(null);
+                }}
+                className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-left text-[13px] text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+              >
+                <SourceIcon s={x} />
+                <span className="min-w-0 flex-1 truncate">{x.name}</span>
+              </button>
+            ))}
         </div>
       </Dialog>
 
