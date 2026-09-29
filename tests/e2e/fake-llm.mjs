@@ -17,11 +17,13 @@ createServer(async (req, res) => {
     const slow = last.includes("slow");
     const sys = j.messages.find((m) => m.role === "system")?.content ?? "";
     const src = /<sources>\n\[1\] ([^\n]+)\n([^\n]+)/.exec(sys);
-    const text = src
+    const instr = /personal ones\):\n([^\n]+)/.exec(sys);
+    const pre = instr ? `Following the project instructions ("${instr[1].slice(0, 60)}"). ` : "";
+    const text = pre + (src
       ? `From **${src[1]}**: ${src[2].slice(0, 120)} [1]`
       : slow
       ? Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ")
-      : `**${j.model}** here. You asked: "${last}". Here is a list:\n\n- one\n- two\n\n\`\`\`python\nprint("hello")\n\`\`\``;
+      : `**${j.model}** here. You asked: "${last}". Here is a list:\n\n- one\n- two\n\n\`\`\`python\nprint("hello")\n\`\`\``);
     res.writeHead(200, { "content-type": "text/event-stream" });
     for (const w of text.match(/\S+\s*/g)) {
       if (res.destroyed) return;

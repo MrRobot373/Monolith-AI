@@ -197,12 +197,18 @@ await step("Chat", "Pin a chat moves it under Pinned", owner, async () => {
   await owner.getByRole("menuitem", { name: "Pin" }).click();
   await owner.locator("aside >> text=Pinned").waitFor();
 });
-await step("Chat", "Search filters the chat list", owner, async () => {
-  await owner.fill('input[placeholder="Search chats"]', "budget");
-  await wait(300);
-  expect((await owner.locator("aside a", { hasText: "Draft a polite email" }).count()) === 0, "filter did not hide");
-  expect((await owner.locator("aside a", { hasText: "Budget planning" }).count()) === 1, "filter hid match");
-  await owner.fill('input[placeholder="Search chats"]', "");
+await step("Chat", "⌘K search finds chats by title and message text", owner, async () => {
+  await owner.keyboard.press("Control+k");
+  await owner.getByTestId("search-input").fill("budget");
+  await owner.locator('[role="dialog"] button', { hasText: "Budget planning" }).waitFor();
+  // Matches inside messages, with a snippet.
+  await owner.getByTestId("search-input").fill("polite");
+  await owner.locator('[role="dialog"] button', { hasText: "Draft a polite email" }).first().waitFor();
+  await owner.getByTestId("search-input").fill("budget");
+  await wait(400);
+  await owner.keyboard.press("Enter");
+  await owner.waitForURL(/\/app\/chat\/.+/);
+  await owner.locator(".prose-chat").first().waitFor();
 });
 await step("Chat", "Delete a chat", owner, async () => {
   const row = owner.locator("aside div.group", { hasText: "Budget planning" });
@@ -506,6 +512,150 @@ await step("Member", "Member sees shared documents but not private ones", dev, a
   expect((await dev.getByRole("menuitem", { name: "Delete" }).count()) === 0, "member can delete owner's doc");
   await dev.keyboard.press("Escape");
 });
+/* ═════════════ H2. Projects ═════════════ */
+let projectUrl = "";
+let projectChatUrl = "";
+await step("Projects", "Create a project with instructions from the sidebar", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  await owner.click('aside button[aria-label="New project"]');
+  await owner.fill('[role="dialog"] input', "Launch plan");
+  await owner.fill('[role="dialog"] textarea', "Reply in one short paragraph.");
+  await owner.click('[role="dialog"] >> text=Create project');
+  await owner.waitForURL(/\/app\/projects\/[^/]+$/);
+  projectUrl = owner.url();
+  await owner.getByTestId("project-title").filter({ hasText: "Launch plan" }).waitFor();
+  await owner.getByTestId("instructions-preview").filter({ hasText: "one short paragraph" }).waitFor();
+  await owner.locator("aside a", { hasText: "Launch plan" }).waitFor();
+});
+await step("Projects", "Add pasted text as a source; it becomes ready", owner, async () => {
+  await owner.click('button[aria-label="Add source"]');
+  await owner.getByRole("menuitem", { name: "Add text" }).click();
+  await owner.fill('[role="dialog"] input', "Launch facts");
+  await owner.getByTestId("note-body").fill("The launch date is 12 November. The venue is Hall B in Pune.");
+  await owner.click('[role="dialog"] >> text=Add source');
+  await owner.getByTestId("project-sources").getByText("Launch facts.md").waitFor();
+  await owner.waitForFunction(() => !document.querySelector('[data-testid="project-sources"] [aria-label="Processing"]'), null, { timeout: 15000 });
+});
+await step("Projects", "Upload a file as a project source", owner, async () => {
+  await owner.getByTestId("project-upload").setInputFiles(fixture("policy.docx"));
+  await owner.getByTestId("project-sources").getByText("policy.docx").waitFor();
+  await owner.waitForFunction(() => !document.querySelector('[data-testid="project-sources"] [aria-label="Processing"]'), null, { timeout: 15000 });
+  // Project files don't clutter the Documents library.
+  await owner.goto(`${BASE}/app/documents`);
+  await owner.locator("h1", { hasText: "Documents" }).waitFor();
+  await wait(800);
+  expect((await owner.getByText("Launch facts.md").count()) === 0, "project note appears in library");
+  await owner.goto(projectUrl);
+});
+await step("Projects", "Project chat uses sources and instructions without attaching", owner, async () => {
+  await owner.getByTestId("project-title").waitFor();
+  await send(owner, "When is the launch?");
+  await owner.waitForURL(/\/app\/projects\/[^/]+\/[^/]+$/);
+  projectChatUrl = owner.url();
+  await owner.locator(".prose-chat", { hasText: "Following the project instructions" }).waitFor();
+  await owner.locator("button", { hasText: "Launch facts.md" }).first().waitFor();
+  await owner.locator("header a", { hasText: "Launch plan" }).waitFor();
+  expect((await owner.locator("aside a", { hasText: "When is the launch?" }).count()) === 0, "project chat in Recents");
+});
+await step("Projects", "Save an answer to the project's sources", owner, async () => {
+  await owner.click('button[aria-label="Save to project"]');
+  await toast(owner, "Saved to Launch plan sources");
+  await owner.locator("header a", { hasText: "Launch plan" }).click();
+  await owner.getByTestId("project-sources").getByText(/When is the launch\? \(answer/).waitFor();
+});
+await step("Projects", "Chats in a project remember each other", owner, async () => {
+  await owner.getByTestId("project-title").waitFor();
+  await send(owner, "Note for later: the sponsor code is ZETA-7781");
+  await owner.locator("header").getByRole("button", { name: "New", exact: true }).click();
+  await owner.getByTestId("project-title").waitFor();
+  await send(owner, "What was the sponsor code ZETA-7781 about?");
+  await owner.locator("button", { hasText: "Note for later: the sponsor code" }).first().waitFor();
+  await owner.locator("button", { hasText: "Note for later: the sponsor code" }).first().click();
+  await owner.locator('[role="dialog"]', { hasText: "earlier chat in this project" }).waitFor();
+  await owner.keyboard.press("Escape");
+});
+await step("Projects", "Share the project with a member who can chat", owner, async () => {
+  await owner.goto(projectUrl);
+  await owner.click("button:has-text('Share')");
+  await owner.locator('[role="dialog"] select[aria-label="Person to add"]').selectOption({ label: "Dev Kumar · dev@acme.test" });
+  await owner.click('[role="dialog"] >> button:has-text("Add")');
+  await owner.locator('[role="dialog"]', { hasText: "dev@acme.test" }).locator('select[aria-label="Role for Dev Kumar"]').waitFor();
+  await owner.keyboard.press("Escape");
+});
+await step("Projects", "Member sees instructions and sources, not private chats", dev, async () => {
+  await dev.goto(`${BASE}/app/chat`);
+  await dev.locator("aside a", { hasText: "Launch plan" }).click();
+  await dev.getByTestId("project-title").waitFor();
+  await dev.getByTestId("instructions-preview").waitFor();
+  await dev.getByTestId("project-sources").getByText("Launch facts.md").waitFor();
+  expect((await dev.locator('button[aria-label="Add source"]').count()) === 0, "chat-role member can add sources");
+  // Asha's chats are private until shared (her saved answer, a source, is visible though).
+  expect((await dev.getByTestId("project-chats").count()) === 0, "member sees owner's private chat");
+});
+await step("Projects", "Owner shares a chat; member reads it read-only", owner, async () => {
+  await owner.goto(projectChatUrl);
+  await owner.getByTestId("share-to-project").click();
+  await toast(owner, "Shared with everyone in Launch plan");
+  await dev.reload();
+  await dev.getByTestId("project-chats").getByText("Shared by Asha Rao").waitFor();
+  await dev.getByTestId("project-chats").locator("a", { hasText: "When is the launch?" }).click();
+  await dev.getByTestId("read-only").waitFor();
+  expect((await dev.locator("textarea").count()) === 0, "composer shown on read-only chat");
+});
+await step("Projects", "Member chats inside the shared project", dev, async () => {
+  await dev.click("text=Start your own chat");
+  await dev.getByTestId("project-title").waitFor();
+  await send(dev, "Where is the venue?");
+  await dev.locator(".prose-chat", { hasText: "Following the project instructions" }).waitFor();
+});
+await step("Projects", "Move a chat into a project from the sidebar", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  const row = owner.locator("aside div.group", { hasText: "Which model are you?" });
+  await row.hover();
+  await row.locator('button[aria-label="Chat options"]').click();
+  await owner.getByRole("menuitem", { name: "Move to project" }).click();
+  await owner.locator('[role="dialog"] button', { hasText: "Launch plan" }).click();
+  await toast(owner, "Moved to Launch plan");
+  await owner.locator("aside a", { hasText: "Which model are you?" }).waitFor({ state: "detached" });
+  await owner.goto(projectUrl);
+  await owner.getByTestId("project-chats").getByText("Which model are you?").waitFor();
+});
+await step("Projects", "Archive a chat and restore it from Settings", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  const row = owner.locator("aside div.group", { hasText: "Draft a polite email" });
+  await row.hover();
+  await row.locator('button[aria-label="Chat options"]').click();
+  await owner.getByRole("menuitem", { name: "Archive" }).click();
+  await toast(owner, "Chat archived");
+  await owner.locator("aside a", { hasText: "Draft a polite email" }).waitFor({ state: "detached" });
+  await owner.goto(`${BASE}/app/settings#archived`);
+  await owner.getByText("Draft a polite email").waitFor();
+  await owner.click("button:has-text('Restore')");
+  await toast(owner, "Chat restored");
+  await owner.locator("aside a", { hasText: "Draft a polite email" }).waitFor();
+});
+await step("Projects", "⌘K finds projects and project chats", owner, async () => {
+  await owner.keyboard.press("Control+k");
+  await owner.getByTestId("search-input").fill("launch");
+  await owner.locator('[role="dialog"] button', { hasText: "Launch plan" }).first().waitFor();
+  await owner.getByTestId("search-input").fill("Hall B");
+  await owner.locator('[role="dialog"] button', { hasText: "Hall B" }).first().click();
+  await owner.waitForURL(/\/app\/projects\/[^/]+\/[^/]+$/);
+});
+await step("Projects", "Projects page lists projects; delete one after confirming", owner, async () => {
+  await owner.goto(`${BASE}/app/projects`);
+  await owner.locator("main a, a", { hasText: "Launch plan" }).first().waitFor();
+  await owner.click("button:has-text('New project')");
+  await owner.fill('[role="dialog"] input', "Scratch");
+  await owner.click('[role="dialog"] >> text=Create project');
+  await owner.getByTestId("project-title").filter({ hasText: "Scratch" }).waitFor();
+  await owner.screenshot({ path: `${OUT}project-home.png` });
+  await owner.click('button[aria-label="Project options"]');
+  await owner.getByRole("menuitem", { name: "Delete project" }).click();
+  await owner.click('[role="dialog"] >> button:has-text("Delete project")');
+  await owner.waitForURL("**/app/projects");
+  await owner.locator("aside a", { hasText: "Scratch" }).waitFor({ state: "detached" });
+});
 await step("Member", "Owner disabling Code hides it from the member", owner, async () => {
   await owner.goto(`${BASE}/admin/workspaces/${generalId}`);
   const row = owner.locator("tbody tr", { hasText: "dev@acme.test" });
@@ -529,7 +679,9 @@ await step("Quota", "Set a small workspace budget; allowance split evenly", owne
 });
 await step("Quota", "Member runs out: banner shown, composer disabled", dev, async () => {
   await dev.goto(`${BASE}/app/chat`);
-  for (let i = 0; i < 4 && !(await dev.getByText("Request more").count()); i++) {
+  await dev.locator("textarea").waitFor();
+  await wait(1000); // quota loads after the page
+  for (let i = 0; i < 4 && !(await dev.locator("textarea").isDisabled()); i++) {
     await dev.locator("textarea").fill(`message ${i}`);
     await dev.keyboard.press("Enter");
     await wait(1500);
@@ -626,7 +778,7 @@ await step("WS admin", "Workspace admin declines a request", wanda, async () => 
 });
 await step("WS admin", "Workspace admin usage page works", wanda, async () => {
   await wanda.goto(`${BASE}/admin/usage`);
-  await wanda.getByText("Tokens per day").waitFor();
+  await wanda.getByRole("heading", { name: "Tokens per day" }).waitFor();
   expect((await wanda.getByText("Export CSV").count()) === 0, "export visible to ws admin");
 });
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, MessageSquare } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { FileIcon } from "@/components/documents/use-documents";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ export function CitationChip({ citation, onOpen }: { citation: Citation; onOpen:
     <Tooltip
       content={
         <span className="block max-w-64">
-          <span className="block text-fg">{citation.name}</span>
+          <span className="block text-fg">{citation.kind === "chat" ? `Earlier chat: ${citation.name}` : citation.name}</span>
           {citation.page && <span className="text-fg-subtle">Page {citation.page}</span>}
         </span>
       }
@@ -50,7 +51,7 @@ export function SourcesRow({ citations, onOpen }: { citations: Citation[]; onOpe
             className="inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-[12.5px] text-fg-muted transition-colors hover:border-border-strong hover:text-fg"
           >
             <span className="text-[11px] text-fg-subtle">{c.n}</span>
-            <FileIcon name={c.name} className="size-3.5" />
+            {c.kind === "chat" ? <MessageSquare className="size-3.5 shrink-0 text-fg-subtle" /> : <FileIcon name={c.name} className="size-3.5" />}
             <span className="truncate">{c.name}</span>
             {c.page && <span className="shrink-0 text-fg-subtle">p.{c.page}</span>}
           </button>
@@ -69,15 +70,25 @@ export function useSourceDialog() {
       className="max-w-xl"
       title={
         <span className="flex items-center gap-2">
-          <FileText className="size-4 text-fg-subtle" />
+          {open?.kind === "chat" ? <MessageSquare className="size-4 text-fg-subtle" /> : <FileText className="size-4 text-fg-subtle" />}
           {open?.name}
         </span>
       }
-      description={open ? `Source ${open.n}${open.page ? ` · page ${open.page}` : ""}` : undefined}
+      description={
+        open ? (open.kind === "chat" ? `Source ${open.n} · earlier chat in this project` : `Source ${open.n}${open.page ? ` · page ${open.page}` : ""}`) : undefined
+      }
       footer={
-        <Button variant="outline" onClick={() => open && (window.location.href = `/api/documents/${open.documentId}/file`)}>
-          <Download className="size-3.5" /> Download document
-        </Button>
+        open?.kind === "chat" ? (
+          <Button variant="outline" asChild>
+            <Link href={`/app/chat/${open.chatId}`} onClick={() => setOpen(null)}>
+              <MessageSquare className="size-3.5" /> Open chat
+            </Link>
+          </Button>
+        ) : (
+          <Button variant="outline" onClick={() => open && (window.location.href = `/api/documents/${open.documentId}/file`)}>
+            <Download className="size-3.5" /> Download document
+          </Button>
+        )
       }
     >
       <blockquote className="max-h-80 overflow-y-auto rounded-lg border border-border bg-bg px-4 py-3 text-[13px] leading-relaxed whitespace-pre-wrap text-fg-muted">

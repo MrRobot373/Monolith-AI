@@ -2,7 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
   Check,
+  FolderInput,
+  FolderOpen,
+  Plus,
   ChevronDown,
   ChevronsUpDown,
   Code2,
@@ -23,7 +27,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
@@ -32,7 +36,9 @@ import { Dialog, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrig
 import { del, get, patch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { ChatSummary } from "@/lib/types";
+import { MoveToProjectDialog, NewProjectDialog, ProjectIcon, useProjects } from "@/components/projects/projects";
 import { NotificationsButton } from "./notifications";
+import { SearchPalette } from "./search-palette";
 import { useSession } from "./session";
 
 export function useChats(workspaceId: string) {
@@ -92,16 +98,19 @@ function NavItem({
   );
 }
 
-function SectionLabel({ children, open, onToggle }: { children: ReactNode; open?: boolean; onToggle?: () => void }) {
+function SectionLabel({ children, open, onToggle, action }: { children: ReactNode; open?: boolean; onToggle?: () => void; action?: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex h-7 w-full items-center gap-1 px-2 text-[12px] text-fg-subtle transition-colors hover:text-fg-muted"
-    >
-      {children}
-      {onToggle && <ChevronDown className={cn("size-3 transition-transform", !open && "-rotate-90")} />}
-    </button>
+    <div className="group/label flex h-7 items-center">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex h-7 flex-1 items-center gap-1 px-2 text-[12px] text-fg-subtle transition-colors hover:text-fg-muted"
+      >
+        {children}
+        {onToggle && <ChevronDown className={cn("size-3 transition-transform", !open && "-rotate-90")} />}
+      </button>
+      {action}
+    </div>
   );
 }
 
@@ -111,34 +120,41 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
   const router = useRouter();
   const qc = useQueryClient();
   const chats = useChats(workspaceId);
-  const [query, setQuery] = useState("");
+  const projects = useProjects(workspaceId);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [recentsOpen, setRecentsOpen] = useState(true);
+  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [newProject, setNewProject] = useState(false);
+  const [moving, setMoving] = useState<ChatSummary | null>(null);
   const [renaming, setRenaming] = useState<ChatSummary | null>(null);
   const [newTitle, setNewTitle] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
 
-  // ⌘K / Ctrl+K focuses search.
+  // ⌘K / Ctrl+K opens search.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        searchRef.current?.focus();
+        setSearchOpen((o) => !o);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const filtered = useMemo(
-    () => (chats.data ?? []).filter((c) => c.title.toLowerCase().includes(query.trim().toLowerCase())),
-    [chats.data, query],
-  );
-  const pinned = filtered.filter((c) => c.pinned);
-  const recent = filtered.filter((c) => !c.pinned);
+  const all = chats.data ?? [];
+  const pinned = all.filter((c) => c.pinned);
+  const recent = all.filter((c) => !c.pinned);
 
   const update = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; title?: string; pinned?: boolean }) => patch(`/api/chats/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["chats", workspaceId] }),
+    mutationFn: ({ id, ...body }: { id: string; title?: string; pinned?: boolean; archived?: boolean }) => patch(`/api/chats/${id}`, body),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+      if (v.archived !== undefined) qc.invalidateQueries({ queryKey: ["archived", workspaceId] });
+      if (v.archived) {
+        if (pathname === `/app/chat/${v.id}`) router.push("/app/chat");
+        toast("Chat archived", { action: { label: "Undo", onClick: () => update.mutate({ id: v.id, archived: false }) } });
+      }
+    },
   });
   const remove = useMutation({
     mutationFn: (id: string) => del(`/api/chats/${id}`),
@@ -179,6 +195,8 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
             <MenuItem icon={c.pinned ? <PinOff /> : <Pin />} onSelect={() => update.mutate({ id: c.id, pinned: !c.pinned })}>
               {c.pinned ? "Unpin" : "Pin"}
             </MenuItem>
+            <MenuItem icon={<FolderInput />} onSelect={() => setMoving(c)}>Move to project</MenuItem>
+            <MenuItem icon={<Archive />} onSelect={() => update.mutate({ id: c.id, archived: true })}>Archive</MenuItem>
             <MenuSeparator />
             <MenuItem icon={<Trash2 />} danger onSelect={() => remove.mutate(c.id)}>Delete</MenuItem>
           </MenuContent>
@@ -226,20 +244,19 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
 
       {/* Search */}
       <div className="px-2 pt-2">
-        <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2 transition-colors focus-within:border-border-strong">
+        <button
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          className="flex h-8 w-full items-center gap-2 rounded-md border border-border bg-surface px-2 text-left transition-colors hover:border-border-strong"
+          data-testid="open-search"
+        >
           <Search className="size-3.5 shrink-0 text-fg-subtle" />
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search chats"
-            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-fg-subtle"
-          />
+          <span className="min-w-0 flex-1 text-[13px] text-fg-subtle">Search</span>
           <span className="flex gap-0.5">
             <Kbd>⌘</Kbd>
             <Kbd>K</Kbd>
           </span>
-        </label>
+        </button>
       </div>
 
       {/* Primary nav */}
@@ -250,6 +267,11 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
         {can("chat") && (
           <NavItem href="/app/chat" icon={<MessageSquare />} active={pathname.startsWith("/app/chat/")}>
             Chat
+          </NavItem>
+        )}
+        {can("chat") && (
+          <NavItem href="/app/projects" icon={<FolderOpen />} active={pathname === "/app/projects"}>
+            Projects
           </NavItem>
         )}
         {can("chat") && (
@@ -271,6 +293,62 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
 
       {/* Chats */}
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {can("chat") && (
+          <div className="mb-3">
+            <SectionLabel
+              open={projectsOpen}
+              onToggle={() => setProjectsOpen((o) => !o)}
+              action={
+                <Tooltip content="New project">
+                  <button
+                    type="button"
+                    aria-label="New project"
+                    onClick={() => setNewProject(true)}
+                    className="mr-1 rounded p-0.5 text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </Tooltip>
+              }
+            >
+              Projects
+            </SectionLabel>
+            {projectsOpen && (
+              <div className="space-y-px">
+                {(projects.data ?? []).slice(0, 8).map((p) => {
+                  const active = pathname.startsWith(`/app/projects/${p.id}`);
+                  return (
+                    <Link
+                      key={p.id}
+                      href={`/app/projects/${p.id}`}
+                      className={cn(
+                        "flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors",
+                        active ? "bg-surface-2 text-fg" : "text-fg-muted hover:bg-surface-2/70 hover:text-fg",
+                      )}
+                    >
+                      <ProjectIcon color={p.color} />
+                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                    </Link>
+                  );
+                })}
+                {(projects.data?.length ?? 0) > 8 && (
+                  <Link href="/app/projects" className="flex h-8 items-center px-2 text-[12.5px] text-fg-subtle hover:text-fg">
+                    See all {projects.data!.length}
+                  </Link>
+                )}
+                {projects.data?.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setNewProject(true)}
+                    className="flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-left text-[13px] text-fg-subtle transition-colors hover:bg-surface-2/70 hover:text-fg"
+                  >
+                    <Plus className="size-4" /> New project
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {pinned.length > 0 && (
           <div className="mb-3">
             <SectionLabel>Pinned</SectionLabel>
@@ -287,8 +365,8 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
                 <div key={w} className="mx-2 my-2.5 h-2.5 animate-pulse rounded bg-surface-2" style={{ width: `${w}%` }} />
               ))}
             {recent.map(chatRow)}
-            {chats.data && filtered.length === 0 && (
-              <p className="px-2 py-2 text-[12.5px] text-fg-subtle">{query ? "No chats match." : "Your conversations will appear here."}</p>
+            {chats.data && all.length === 0 && (
+              <p className="px-2 py-2 text-[12.5px] text-fg-subtle">Your conversations will appear here.</p>
             )}
           </div>
         )}
@@ -324,6 +402,9 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
         </div>
       </div>
 
+      <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} recents={all} />
+      <NewProjectDialog open={newProject} onOpenChange={setNewProject} />
+      <MoveToProjectDialog chat={moving} onOpenChange={(o) => !o && setMoving(null)} />
       <Dialog
         open={!!renaming}
         onOpenChange={(o) => !o && setRenaming(null)}

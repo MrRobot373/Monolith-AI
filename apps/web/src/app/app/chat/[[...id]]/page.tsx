@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { ChatView } from "@/components/chat/chat-view";
 
@@ -9,8 +9,8 @@ import { ChatView } from "@/components/chat/chat-view";
  * without remounting, so the streaming reply isn't interrupted.
  */
 export default function ChatPage() {
-  const params = useParams<{ id?: string[] }>();
-  const paramId = params.id?.[0];
+  // Read the id from the pathname: it follows history.replaceState, while route params don't.
+  const paramId = usePathname().split("/")[3] || undefined;
   const [localId, setLocalId] = useState<string | null>(null);
   const [fresh, setFresh] = useState(0);
   const prevParam = useRef(paramId);

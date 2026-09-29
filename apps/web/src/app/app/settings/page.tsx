@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Monitor, Moon, Settings, Sun } from "lucide-react";
+import { ArchiveRestore, Monitor, Moon, Settings, Sun, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { TopBar } from "@/components/app/frame";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -11,25 +12,26 @@ import { RequestTokensDialog } from "@/components/chat/request-tokens";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { Avatar, Badge, Card, Meter } from "@/components/ui/misc";
-import { get, patch } from "@/lib/api";
+import { del, get, patch } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatTokens, timeAgo } from "@/lib/format";
 import { applyTheme, readTheme, type ThemePref } from "@/lib/theme";
-import type { QuotaStatus, TokenRequestRow } from "@/lib/types";
+import type { ChatSummary, QuotaStatus, TokenRequestRow } from "@/lib/types";
 
-const TABS = ["Profile", "Appearance", "Usage"] as const;
+const TABS = ["Profile", "Appearance", "Usage", "Archived chats"] as const;
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Profile");
   useEffect(() => {
     if (window.location.hash === "#usage") setTab("Usage");
+    if (window.location.hash === "#archived") setTab("Archived chats");
   }, []);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar icon={<Settings />} title="Settings" />
       <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-2xl px-4 pt-10 pb-16 sm:px-6">
-        <PageHeader title="Settings" description="Manage your profile, appearance and usage." />
+        <PageHeader title="Settings" description="Manage your profile, appearance, usage and archived chats." />
         <div className="mt-6 flex gap-1 border-b border-border">
           {TABS.map((t) => (
             <button
@@ -49,6 +51,7 @@ export default function SettingsPage() {
           {tab === "Profile" && <Profile />}
           {tab === "Appearance" && <Appearance />}
           {tab === "Usage" && <Usage />}
+          {tab === "Archived chats" && <ArchivedChats />}
         </div>
       </div>
       </div>
@@ -196,6 +199,62 @@ function WorkspaceUsage({ id, name, onRequest }: { id: string; name: string; onR
       </div>
       <Meter className="mt-2" value={limit === null ? 0 : (d?.user.used ?? 0) / Math.max(1, limit)} />
       {d && d.user.bonus > 0 && <div className="mt-2 text-xs text-fg-subtle">Includes +{formatTokens(d.user.bonus)} approved this period.</div>}
+    </Card>
+  );
+}
+
+function ArchivedChats() {
+  const { workspaceId, workspace } = useSession();
+  const qc = useQueryClient();
+  const archived = useQuery({
+    queryKey: ["archived", workspaceId],
+    queryFn: () => get<ChatSummary[]>(`/api/chats?workspaceId=${workspaceId}&archived=1`),
+    enabled: !!workspaceId,
+  });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["archived", workspaceId] });
+    qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+    qc.invalidateQueries({ queryKey: ["project"] });
+  };
+  const restore = useMutation({
+    mutationFn: (id: string) => patch(`/api/chats/${id}`, { archived: false }),
+    onSuccess: () => {
+      refresh();
+      toast("Chat restored");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => del(`/api/chats/${id}`),
+    onSuccess: () => {
+      refresh();
+      toast("Chat deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  if (archived.isLoading) return null;
+  if (!archived.data?.length)
+    return <p className="text-sm text-fg-subtle">No archived chats in {workspace?.name ?? "this workspace"}. Archive a chat from its menu to tidy your sidebar without deleting it.</p>;
+  return (
+    <Card className="divide-y divide-border">
+      {archived.data.map((c) => (
+        <div key={c.id} className="flex items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <Link href={c.projectId ? `/app/projects/${c.projectId}/${c.id}` : `/app/chat/${c.id}`} className="block truncate text-[13.5px] text-fg hover:underline">
+              {c.title}
+            </Link>
+            <div className="text-xs text-fg-subtle">
+              {c.projectName ? `${c.projectName} · ` : ""}archived {timeAgo(c.archivedAt ?? c.updatedAt)}
+            </div>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => restore.mutate(c.id)}>
+            <ArchiveRestore className="size-3.5" /> Restore
+          </Button>
+          <Button size="icon-sm" variant="ghost" aria-label={`Delete ${c.title}`} onClick={() => remove.mutate(c.id)}>
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      ))}
     </Card>
   );
 }

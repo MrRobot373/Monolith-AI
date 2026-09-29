@@ -47,7 +47,81 @@ export interface ChatSummary {
   title: string;
   pinned: boolean;
   modelId: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+  sharedToProject?: boolean;
+  archivedAt?: string | null;
   updatedAt: string;
+}
+
+export interface ChatDetail {
+  id: string;
+  userId: string;
+  modelId: string | null;
+  title: string;
+  projectId: string | null;
+  sharedToProject: boolean;
+  archivedAt: string | null;
+  messages: ChatMessageRow[];
+  documents: { id: string; name: string }[];
+  readOnly: boolean;
+  authorName: string | null;
+  project: { id: string; name: string; color: string; canEdit: boolean } | null;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  color: string;
+  description: string | null;
+  visibility: "private" | "workspace";
+  ownerId: string | null;
+  updatedAt: string;
+  chatCount: number;
+  sourceCount: number;
+  memberCount: number;
+}
+
+export interface ProjectSource {
+  id: string;
+  name: string;
+  kind: "file" | "note" | "answer";
+  status: "processing" | "ready" | "failed";
+  error: string | null;
+  sizeBytes: number;
+  pageCount: number | null;
+  projectOnly: boolean;
+  addedAt: string;
+}
+
+export interface ProjectDetail {
+  id: string;
+  workspaceId: string;
+  name: string;
+  color: string;
+  description: string | null;
+  instructions: string | null;
+  visibility: "private" | "workspace";
+  ownerId: string | null;
+  role: "owner" | "edit" | "chat";
+  canEdit: boolean;
+  owner: { id: string; name: string; email: string } | null;
+  sources: ProjectSource[];
+  members: { userId: string; name: string; email: string; image: string | null; role: "chat" | "edit" }[];
+  chats: { id: string; title: string; updatedAt: string; userId: string; userName: string; sharedToProject: boolean; pinned: boolean }[];
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  email: string;
+  image: string | null;
+}
+
+export interface SearchResults {
+  chats: { id: string; title: string; projectId: string | null; projectName: string | null; archived: boolean; updatedAt: string; snippet: string | null }[];
+  documents: { id: string; name: string; projectId: string | null }[];
+  projects: { id: string; name: string; color: string }[];
 }
 
 export interface ChatMessageRow {
@@ -121,7 +195,9 @@ export interface DocumentRow {
 
 export interface Citation {
   n: number;
-  documentId: string;
+  kind?: "document" | "chat";
+  documentId: string | null;
+  chatId?: string;
   name: string;
   page: number | null;
   snippet: string;

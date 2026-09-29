@@ -112,9 +112,8 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       .innerJoin(document, eq(document.id, chatDocument.documentId))
       .where(eq(chatDocument.chatId, c.id))
       .orderBy(asc(chatDocument.createdAt));
-    const [proj] = c.projectId
-      ? await db.select({ id: project.id, name: project.name, color: project.color }).from(project).where(eq(project.id, c.projectId))
-      : [];
+    const access = c.projectId ? await getProjectAccess(ctx, u, c.projectId).catch(() => null) : null;
+    const proj = access && { id: access.project.id, name: access.project.name, color: access.project.color, canEdit: access.canEdit };
     const [author] = readOnly ? await db.select({ name: user.name }).from(user).where(eq(user.id, c.userId)) : [];
     return { ...c, messages, documents, readOnly, project: proj ?? null, authorName: author?.name ?? null };
   });
@@ -254,7 +253,8 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     ];
 
     const titleUpdate = c.title === "New chat" ? { title: titleFrom(body.content) } : {};
-    await db.update(chat).set({ ...titleUpdate, modelId: m.id, updatedAt: new Date() }).where(eq(chat.id, c.id));
+    // Replying to an archived chat brings it back.
+    await db.update(chat).set({ ...titleUpdate, modelId: m.id, updatedAt: new Date(), archivedAt: null }).where(eq(chat.id, c.id));
     if (proj) await db.update(project).set({ updatedAt: new Date() }).where(eq(project.id, proj.id));
 
     // Stream.

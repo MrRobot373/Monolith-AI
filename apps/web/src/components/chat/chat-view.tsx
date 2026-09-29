@@ -2,8 +2,15 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
   ArrowUpRight,
+  BookmarkPlus,
   Check,
+  ChevronRight,
+  Eye,
+  FolderInput,
+  MoreHorizontal,
+  Share2,
   Code2,
   Copy,
   FileText,
@@ -24,7 +31,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Popover } from "radix-ui";
 import { FileIcon, useDocuments } from "@/components/documents/use-documents";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { TopBar, TopBarButton } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
@@ -33,10 +40,12 @@ import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/ui/logo";
 import { Meter, Tooltip } from "@/components/ui/misc";
 import { Skeleton } from "@/components/ui/spinner";
-import { ApiError, get, post, readSse, uploadDocument } from "@/lib/api";
+import { MoveToProjectDialog, ProjectIcon } from "@/components/projects/projects";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
+import { ApiError, get, patch, post, readSse, uploadDocument } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { greeting, timeAgo } from "@/lib/format";
-import type { AvailableModel, ChatMessageRow, Citation, DocumentRow, QuotaStatus } from "@/lib/types";
+import type { AvailableModel, ChatDetail, Citation, DocumentRow, QuotaStatus } from "@/lib/types";
 import { SourcesRow, useSourceDialog } from "./citations";
 import { Composer, type Attachment, type ComposerHandle } from "./composer";
 import { Markdown } from "./markdown";
@@ -70,7 +79,19 @@ const APPS = [
   { name: "GitHub", icon: Github, hue: 260, desc: "Review pull requests, open issues and work in repositories." },
 ];
 
-export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; onCreated?: (id: string) => void }) {
+export function ChatView({
+  chatId: initialId,
+  onCreated,
+  project: newChatProject,
+  renderHome,
+}: {
+  chatId?: string;
+  onCreated?: (id: string) => void;
+  /** Start new chats inside this project. */
+  project?: { id: string; name: string; color: string; canEdit: boolean };
+  /** Replace the default home screen (used by project pages). */
+  renderHome?: (parts: { composer: ReactNode; notices: ReactNode }) => ReactNode;
+}) {
   const { me, workspaceId } = useSession();
   const router = useRouter();
   const qc = useQueryClient();
@@ -103,14 +124,17 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
   });
   const existing = useQuery({
     queryKey: ["chat", initialId],
-    queryFn: () =>
-      get<{ id: string; modelId: string | null; title: string; messages: ChatMessageRow[]; documents: { id: string; name: string }[] }>(
-        `/api/chats/${initialId}`,
-      ),
+    queryFn: () => get<ChatDetail>(`/api/chats/${initialId}`),
     enabled: !!initialId,
     staleTime: Infinity,
   });
   const chats = useChats(workspaceId);
+  const project = existing.data ? existing.data.project : newChatProject;
+  const readOnly = !!existing.data?.readOnly;
+  const [moving, setMoving] = useState(false);
+  const [liveTitle, setLiveTitle] = useState<string | null>(null);
+  const [shared, setShared] = useState(false);
+  useEffect(() => setShared(!!existing.data?.sharedToProject), [existing.data?.sharedToProject]);
 
   const modelName = useCallback(
     (id: string | null | undefined) => models.data?.find((m) => m.id === id)?.displayName,
@@ -208,7 +232,7 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
       let id = chatId;
       try {
         if (!id) {
-          const created = await post<{ id: string }>("/api/chats", { workspaceId, modelId: model?.id });
+          const created = await post<{ id: string }>("/api/chats", { workspaceId, modelId: model?.id, projectId: project?.id });
           id = created.id;
           setChatId(id);
           onCreated?.(id);
@@ -246,7 +270,10 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         }
         for await (const ev of readSse(res)) {
           if (ev.event === "start") {
-            if (ev.data.title) qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+            if (ev.data.title) {
+              setLiveTitle(ev.data.title);
+              qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+            }
             patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model, citations: ev.data.citations?.length ? ev.data.citations : null }));
           } else if (ev.event === "delta") patchAsst((m) => ({ ...m, content: m.content + ev.data.text }));
           else if (ev.event === "done") {
@@ -270,10 +297,54 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         abortRef.current = null;
         qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
         qc.invalidateQueries({ queryKey: ["quota", workspaceId] });
+        if (project) {
+          qc.invalidateQueries({ queryKey: ["project", project.id] });
+          qc.invalidateQueries({ queryKey: ["projects", workspaceId] });
+        }
       }
     },
-    [attachments, chatId, model?.id, onCreated, qc, streaming, workspaceId],
+    [attachments, chatId, model?.id, onCreated, project, qc, streaming, workspaceId],
   );
+
+  const toggleShare = async () => {
+    if (!chatId) return;
+    try {
+      await patch(`/api/chats/${chatId}`, { sharedToProject: !shared });
+      setShared(!shared);
+      toast(shared ? "Chat is private again" : `Shared with everyone in ${project?.name}`);
+      if (project) qc.invalidateQueries({ queryKey: ["project", project.id] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+  const archive = async () => {
+    if (!chatId) return;
+    try {
+      await patch(`/api/chats/${chatId}`, { archived: true });
+      qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
+      qc.invalidateQueries({ queryKey: ["archived", workspaceId] });
+      if (project) qc.invalidateQueries({ queryKey: ["project", project.id] });
+      toast("Chat archived");
+      router.push(project ? `/app/projects/${project.id}` : "/app/chat");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+  const saveAnswer = async (content: string) => {
+    if (!project) return;
+    try {
+      const base = title === "New chat" ? "Saved answer" : title;
+      await post(`/api/projects/${project.id}/sources/note`, {
+        title: `${base.slice(0, 100)} (answer ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })})`,
+        content,
+        kind: "answer",
+      });
+      qc.invalidateQueries({ queryKey: ["project", project.id] });
+      toast(`Saved to ${project.name} sources`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
 
   const regenerate = () => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
@@ -283,7 +354,10 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
   const isHome = !initialId && messages.length === 0;
   const firstName = me.user.name.split(" ")[0];
   const noModels = models.data && models.data.length === 0;
-  const title = isHome ? "New chat" : (chats.data?.find((c) => c.id === chatId)?.title ?? existing.data?.title ?? "Chat");
+  const title = isHome
+    ? "New chat"
+    : (chats.data?.find((c) => c.id === chatId)?.title ?? liveTitle ?? existing.data?.title ?? "New chat");
+  const newChatHref = project ? `/app/projects/${project.id}` : "/app/chat";
   const recent = (chats.data ?? []).slice(0, 4);
 
   const composer = (size: "home" | "thread") => (
@@ -328,20 +402,53 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar
-        icon={isHome ? <SquarePen /> : <MessageSquare />}
-        title={<span className={cn(isHome && "text-fg-muted")}>{title}</span>}
+        icon={project ? <ProjectIcon color={project.color} /> : isHome ? <SquarePen /> : <MessageSquare />}
+        title={
+          project ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Link href={`/app/projects/${project.id}`} className="shrink-0 text-fg-muted transition-colors hover:text-fg">
+                {project.name}
+              </Link>
+              <ChevronRight className="size-3.5 shrink-0 text-fg-subtle" />
+              <span className={cn("truncate", isHome && "text-fg-muted")}>{title}</span>
+            </span>
+          ) : (
+            <span className={cn(isHome && "text-fg-muted")}>{title}</span>
+          )
+        }
         actions={
           <>
             {!isHome && chatDocs.length > 0 && <ChatDocsButton docs={chatDocs} />}
+            {project && !isHome && !readOnly && chatId && (
+              <TopBarButton onClick={toggleShare} data-testid="share-to-project" className={cn(shared && "text-fg")}>
+                <Share2 /> {shared ? "Shared to project" : "Share to project"}
+              </TopBarButton>
+            )}
             <Tooltip content="Conversations stay on your organization's servers">
               <span className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-fg-subtle">
                 <Lock className="size-3.5" /> Private
               </span>
             </Tooltip>
             {!isHome && (
-              <TopBarButton onClick={() => router.push("/app/chat")}>
+              <TopBarButton onClick={() => router.push(newChatHref)}>
                 <SquarePen /> New
               </TopBarButton>
+            )}
+            {!isHome && !readOnly && chatId && (
+              <Menu>
+                <MenuTrigger asChild>
+                  <TopBarButton aria-label="Chat options">
+                    <MoreHorizontal />
+                  </TopBarButton>
+                </MenuTrigger>
+                <MenuContent align="end" className="min-w-44">
+                  <MenuItem icon={<FolderInput />} onSelect={() => setMoving(true)}>
+                    {project ? "Move to another project" : "Move to project"}
+                  </MenuItem>
+                  <MenuSeparator />
+                  <MenuItem icon={<Archive />} onSelect={archive}>Archive</MenuItem>
+                </MenuContent>
+              </Menu>
             )}
           </>
         }
@@ -352,7 +459,9 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
         </div>
       )}
 
-      {isHome ? (
+      {isHome && renderHome ? (
+        renderHome({ composer: composer("home"), notices })
+      ) : isHome ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-[760px] flex-col px-4 pt-[12vh] pb-10 sm:px-6">
             <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }} className="text-center">
@@ -461,8 +570,9 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
                       message={m}
                       modelLabel={modelName(m.model) ?? model?.displayName ?? "Aatmiq"}
                       isLast={i === messages.length - 1}
-                      onRegenerate={!streaming ? regenerate : undefined}
+                      onRegenerate={!streaming && !readOnly ? regenerate : undefined}
                       onCite={openSource}
+                      onSave={project?.canEdit && !readOnly ? saveAnswer : undefined}
                     />
                   ))}
                 </AnimatePresence>
@@ -471,13 +581,35 @@ export function ChatView({ chatId: initialId, onCreated }: { chatId?: string; on
           </div>
           <div className="px-4 pb-3 sm:px-6">
             <div className="mx-auto max-w-[760px]">
-              {notices}
-              {composer("thread")}
-              <FooterHint quota={quota.data} blocked={quotaBlocked} orgName={me.org.name} onRequest={() => setRequestOpen(true)} />
+              {readOnly ? (
+                <div className="mb-1 flex items-center gap-2.5 rounded-xl border border-border bg-surface px-4 py-3 text-[13px] text-fg-muted" data-testid="read-only">
+                  <Eye className="size-4 shrink-0 text-fg-subtle" />
+                  <span className="min-w-0 flex-1">
+                    Shared to this project by <span className="text-fg">{existing.data?.authorName}</span>. You can read it; replies stay with its author.
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => router.push(newChatHref)}>
+                    Start your own chat
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {notices}
+                  {composer("thread")}
+                  <FooterHint quota={quota.data} blocked={quotaBlocked} orgName={me.org.name} onRequest={() => setRequestOpen(true)} />
+                </>
+              )}
             </div>
           </div>
         </>
       )}
+      <MoveToProjectDialog
+        chat={moving && chatId ? { id: chatId, title, projectId: project?.id ?? null } : null}
+        onOpenChange={(o) => {
+          if (o) return;
+          setMoving(false);
+          qc.invalidateQueries({ queryKey: ["chat", chatId] });
+        }}
+      />
       <RequestTokensDialog open={requestOpen} onOpenChange={setRequestOpen} workspaceId={workspaceId} />
       {sourceDialog}
     </div>
@@ -490,12 +622,14 @@ function MessageBlock({
   isLast,
   onRegenerate,
   onCite,
+  onSave,
 }: {
   message: UiMessage;
   modelLabel: string;
   isLast: boolean;
   onRegenerate?: () => void;
   onCite: (c: Citation) => void;
+  onSave?: (content: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   if (m.role === "user") {
@@ -554,6 +688,13 @@ function MessageBlock({
                 {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
               </Button>
             </Tooltip>
+            {onSave && m.content && !m.error && (
+              <Tooltip content="Save to project sources">
+                <Button variant="ghost" size="icon-sm" aria-label="Save to project" onClick={() => onSave(m.content)}>
+                  <BookmarkPlus className="size-3.5" />
+                </Button>
+              </Tooltip>
+            )}
             {isLast && onRegenerate && (
               <Tooltip content="Regenerate">
                 <Button variant="ghost" size="icon-sm" aria-label="Regenerate" onClick={onRegenerate}>
