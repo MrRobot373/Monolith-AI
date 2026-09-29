@@ -116,12 +116,17 @@ export const chatCreateSchema = z.object({
   workspaceId: z.string(),
   modelId: z.string().optional(),
   title: z.string().max(120).optional(),
+  projectId: z.string().optional(),
 });
 
 export const chatUpdateSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   pinned: z.boolean().optional(),
   modelId: z.string().optional(),
+  /** Move into a project (id) or back out of one (null). */
+  projectId: z.string().nullable().optional(),
+  archived: z.boolean().optional(),
+  sharedToProject: z.boolean().optional(),
 });
 
 export const sendMessageSchema = z.object({

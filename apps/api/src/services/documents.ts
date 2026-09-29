@@ -6,12 +6,16 @@
 import {
   and,
   asc,
+  chat,
   document,
   documentChunk,
   eq,
   inArray,
+  isNull,
+  message,
   model,
   modelProvider,
+  ne,
   or,
   sql,
   usageEvent,
@@ -22,6 +26,7 @@ import {
 import { embed, type ProviderConfig } from "@aatmiq/model-gateway";
 import type { SecretBox } from "../crypto";
 import { chunkPages, extractText, UnsupportedFileError } from "./extract";
+import { docInAccessibleProject } from "./projects";
 import type { Storage } from "./storage";
 
 const EMBED_BATCH = 32;
@@ -108,12 +113,55 @@ export async function processDocument(db: DB, box: SecretBox, storage: Storage, 
   }
 }
 
-/** Documents a user may read in a workspace: their own plus shared ones. */
+/** Documents a user may read in a workspace: their own, workspace-shared ones, and sources of projects they can open. */
 export function accessibleDocs(workspaceId: string, userId: string) {
   return and(
     eq(document.workspaceId, workspaceId),
-    or(eq(document.scope, "workspace"), eq(document.ownerId, userId)),
+    or(
+      and(isNull(document.projectId), or(eq(document.scope, "workspace"), eq(document.ownerId, userId))),
+      docInAccessibleProject(sql.raw(`"document"."id"`), userId),
+    ),
   );
+}
+
+export interface Recollection {
+  chatId: string;
+  title: string;
+  content: string;
+}
+
+/**
+ * Project-only memory: relevant messages from the user's other chats in the same project
+ * (plus chats teammates shared to it). Never looks outside the project.
+ */
+export async function recallProjectChats(
+  db: DB,
+  opts: { projectId: string; chatId: string; userId: string; query: string; k?: number },
+): Promise<Recollection[]> {
+  const q = toTsQuery(opts.query);
+  if (!q) return [];
+  const tsq = sql`to_tsquery('simple', ${q})`;
+  const rows = await db
+    .select({ chatId: chat.id, title: chat.title, content: message.content })
+    .from(message)
+    .innerJoin(chat, eq(chat.id, message.chatId))
+    .where(
+      and(
+        eq(chat.projectId, opts.projectId),
+        ne(chat.id, opts.chatId),
+        isNull(chat.archivedAt),
+        or(eq(chat.userId, opts.userId), eq(chat.sharedToProject, true)),
+        isNull(message.error),
+        sql`to_tsvector('simple', ${message.content}) @@ ${tsq}`,
+      ),
+    )
+    .orderBy(sql`ts_rank_cd(to_tsvector('simple', ${message.content}), ${tsq}) desc`)
+    .limit((opts.k ?? 3) * 2);
+  const seen = new Set<string>();
+  return rows
+    .filter((r) => (seen.has(r.chatId) ? false : (seen.add(r.chatId), true)))
+    .slice(0, opts.k ?? 3)
+    .map((r) => ({ ...r, content: r.content.slice(0, 900) }));
 }
 
 const STOPWORDS = new Set(
@@ -243,21 +291,34 @@ function dedupeOverlap(chunks: RetrievedChunk[]): RetrievedChunk[] {
   });
 }
 
-/** Number sources for the model and for the UI. Whole documents are one source per document page. */
-export function buildContext(chunks: RetrievedChunk[]): { system: string; citations: Citation[] } {
-  if (chunks.length === 0) return { system: "", citations: [] };
-  const citations: Citation[] = chunks.map((c, i) => ({
-    n: i + 1,
-    documentId: c.documentId,
-    name: c.name,
-    page: c.page,
-    snippet: c.content.slice(0, 700),
-  }));
-  const blocks = chunks
-    .map((c, i) => `[${i + 1}] ${c.name}${c.page ? `, page ${c.page}` : ""}\n${c.content}`)
-    .join("\n\n---\n\n");
+/** Number sources for the model and for the UI: document excerpts first, then earlier project chats. */
+export function buildContext(chunks: RetrievedChunk[], recollections: Recollection[] = []): { system: string; citations: Citation[] } {
+  if (chunks.length === 0 && recollections.length === 0) return { system: "", citations: [] };
+  const citations: Citation[] = [
+    ...chunks.map((c, i) => ({
+      n: i + 1,
+      kind: "document" as const,
+      documentId: c.documentId,
+      name: c.name,
+      page: c.page,
+      snippet: c.content.slice(0, 700),
+    })),
+    ...recollections.map((r, i) => ({
+      n: chunks.length + i + 1,
+      kind: "chat" as const,
+      documentId: null,
+      chatId: r.chatId,
+      name: r.title,
+      page: null,
+      snippet: r.content.slice(0, 700),
+    })),
+  ];
+  const blocks = [
+    ...chunks.map((c, i) => `[${i + 1}] ${c.name}${c.page ? `, page ${c.page}` : ""}\n${c.content}`),
+    ...recollections.map((r, i) => `[${chunks.length + i + 1}] Earlier chat in this project: "${r.title}"\n${r.content}`),
+  ].join("\n\n---\n\n");
   const system = [
-    "The user attached documents. Excerpts are below, numbered as sources.",
+    "Relevant sources are below, numbered: excerpts from documents and, where marked, from earlier chats in this project.",
     "Answer using these excerpts. Cite sources inline with their number in square brackets, like [1] or [2][3], right after the claim they support.",
     "If the excerpts don't contain the answer, say so plainly instead of guessing.",
     "",

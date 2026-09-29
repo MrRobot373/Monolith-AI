@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   customType,
+  type AnyPgColumn,
   boolean,
   index,
   integer,
@@ -41,6 +42,9 @@ export const messageRoleEnum = pgEnum("message_role", ["system", "user", "assist
 export const modelKindEnum = pgEnum("model_kind", ["chat", "embedding"]);
 export const documentScopeEnum = pgEnum("document_scope", ["private", "workspace"]);
 export const documentStatusEnum = pgEnum("document_status", ["processing", "ready", "failed"]);
+export const documentKindEnum = pgEnum("document_kind", ["file", "note", "answer"]);
+export const projectVisibilityEnum = pgEnum("project_visibility", ["private", "workspace"]);
+export const projectRoleEnum = pgEnum("project_role", ["chat", "edit"]);
 
 /** pgvector column without fixed dimensions (models differ: 384, 768, 1024…). */
 const vector = customType<{ data: number[]; driverData: string }>({
@@ -290,10 +294,19 @@ export const chat = pgTable(
     title: text("title").notNull().default("New chat"),
     modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
     pinned: boolean("pinned").notNull().default(false),
+    /** Chats inside a project inherit its instructions, sources and project-only memory. */
+    projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "cascade" }),
+    /** Visible (read-only) to other project members when true. Private to its owner otherwise. */
+    sharedToProject: boolean("shared_to_project").notNull().default(false),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("chat_ws_user_idx").on(t.workspaceId, t.userId, t.updatedAt)],
+  (t) => [
+    index("chat_ws_user_idx").on(t.workspaceId, t.userId, t.updatedAt),
+    index("chat_project_idx").on(t.projectId, t.updatedAt),
+    index("chat_title_fts_idx").using("gin", sql`to_tsvector('simple', ${t.title})`),
+  ],
 );
 
 export const message = pgTable(
@@ -315,7 +328,10 @@ export const message = pgTable(
     citations: jsonb("citations").$type<Citation[]>(),
     createdAt: createdAt(),
   },
-  (t) => [index("message_chat_idx").on(t.chatId, t.createdAt)],
+  (t) => [
+    index("message_chat_idx").on(t.chatId, t.createdAt),
+    index("message_fts_idx").using("gin", sql`to_tsvector('simple', ${t.content})`),
+  ],
 );
 
 /* ───────────── Notifications & audit ───────────── */
@@ -358,7 +374,10 @@ export const auditLog = pgTable(
 
 export interface Citation {
   n: number;
-  documentId: string;
+  /** "document" sources come from files/notes; "chat" sources are earlier chats in the same project. */
+  kind?: "document" | "chat";
+  documentId: string | null;
+  chatId?: string;
   name: string;
   page: number | null;
   snippet: string;
@@ -373,6 +392,9 @@ export const document = pgTable(
       .references(() => workspace.id, { onDelete: "cascade" }),
     ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
     name: text("name").notNull(),
+    kind: documentKindEnum("kind").notNull().default("file"),
+    /** Set for sources that belong to one project (deleted with it). Library documents have none. */
+    projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "cascade" }),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
     storageKey: text("storage_key").notNull(),
@@ -421,4 +443,57 @@ export const chatDocument = pgTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.chatId, t.documentId] })],
+);
+
+/* ───────────── Projects ───────────── */
+
+export const project = pgTable(
+  "project",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    color: text("color").notNull().default("190"),
+    description: text("description"),
+    /** Rules every chat in the project follows; they win over personal custom instructions. */
+    instructions: text("instructions"),
+    visibility: projectVisibilityEnum("visibility").notNull().default("private"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("project_ws_idx").on(t.workspaceId)],
+);
+
+export const projectMember = pgTable(
+  "project_member",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: projectRoleEnum("role").notNull().default("chat"),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.userId] })],
+);
+
+/** Documents available to every chat in a project (project uploads, notes, saved answers, library links). */
+export const projectSource = pgTable(
+  "project_source",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => document.id, { onDelete: "cascade" }),
+    addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.documentId] }), index("psource_doc_idx").on(t.documentId)],
 );

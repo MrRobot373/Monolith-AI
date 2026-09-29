@@ -409,3 +409,171 @@ d("Documents", () => {
     expect((await readdir(`${storageDir}/${workspaceId}`)).length).toBe(before - 1);
   });
 });
+
+/* ───────────── Projects ───────────── */
+
+d("Projects", () => {
+  const owner = jar();
+  const member = jar();
+  const other = jar();
+  let workspaceId = "";
+  let otherId = "";
+  let projectId = "";
+  let firstChat = "";
+  let libraryDoc = "";
+
+  const startOf = (body: string) => JSON.parse(body.split("event: start\ndata: ")[1]!.split("\n")[0]!);
+  async function waitSources(j: Jar) {
+    for (let i = 0; i < 50; i++) {
+      const p = await call(j, "GET", `/api/projects/${projectId}`);
+      if (p.json.sources.every((s: { status: string }) => s.status !== "processing")) return p.json;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("sources stayed in processing");
+  }
+
+  beforeAll(async () => {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const storageDir = await mkdtemp(`${tmpdir()}/aatmiq-proj-`);
+    await app?.close();
+    ({ db, close } = createDb(url));
+    await db.execute(sql`
+      do $$ declare r record; begin
+        for r in (select tablename from pg_tables where schemaname = 'public' and tablename not like '%drizzle%') loop
+          execute 'truncate table "' || r.tablename || '" cascade';
+        end loop;
+      end $$;`);
+    app = await buildApp(db, { ...cfg, storageDir });
+    await call(owner, "POST", "/api/setup", { orgName: "Proj Co", name: "Owner", email: "o@proj.test", password: "correct-horse-battery" });
+    workspaceId = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+    for (const [j, email, name] of [[member, "m@proj.test", "Mira"], [other, "x@proj.test", "Xavi"]] as const) {
+      const inv = await call(owner, "POST", "/api/admin/invites", { email, workspaces: [{ workspaceId, role: "member" }] });
+      await call(j, "POST", `/api/invites/${inv.json.link.split("/invite/")[1]}/accept`, { name, password: "another-good-password" });
+    }
+    otherId = (await call(other, "GET", "/api/me")).json.user.id;
+  });
+
+  it("creates a private project only its owner (and admins) can see", async () => {
+    const r = await call(member, "POST", "/api/projects", {
+      workspaceId,
+      name: "Office move",
+      instructions: "Always answer as a bulleted checklist.",
+    });
+    expect(r.status).toBe(200);
+    projectId = r.json.id;
+    expect((await call(member, "GET", `/api/projects?workspaceId=${workspaceId}`)).json).toHaveLength(1);
+    expect((await call(other, "GET", `/api/projects?workspaceId=${workspaceId}`)).json).toHaveLength(0);
+    expect((await call(other, "GET", `/api/projects/${projectId}`)).status).toBe(404);
+    // Org admins can manage every project.
+    expect((await call(owner, "GET", `/api/projects/${projectId}`)).json.canEdit).toBe(true);
+  });
+
+  it("answers from project sources and follows project instructions", async () => {
+    const note = await call(member, "POST", `/api/projects/${projectId}/sources/note`, {
+      title: "Move plan",
+      content: "The office moves to Riverside Tower on 14 March. Movers arrive at 7am.",
+    });
+    expect(note.status).toBe(200);
+    const p = await waitSources(member);
+    expect(p.sources[0]).toMatchObject({ name: "Move plan.md", kind: "note", status: "ready" });
+
+    await call(member, "PATCH", "/api/me", { customInstructions: "Answer in French." });
+    const c = await call(member, "POST", "/api/chats", { workspaceId, projectId });
+    firstChat = c.json.id;
+    const r = await call(member, "POST", `/api/chats/${firstChat}/messages`, { content: "When is the move to Riverside Tower?" });
+    expect(r.status).toBe(200);
+    expect(startOf(r.body).citations[0]).toMatchObject({ kind: "document", name: "Move plan.md" });
+    const full = await call(member, "GET", `/api/chats/${firstChat}`);
+    expect(full.json.messages[1].content).toContain("following its instructions");
+    expect(full.json.project).toMatchObject({ id: projectId, name: "Office move" });
+
+    // Project chats live in the project, not in Recents.
+    expect((await call(member, "GET", `/api/chats?workspaceId=${workspaceId}`)).json).toHaveLength(0);
+    expect((await call(member, "GET", `/api/chats?workspaceId=${workspaceId}&projectId=${projectId}`)).json).toHaveLength(1);
+  });
+
+  it("remembers earlier chats in the same project", async () => {
+    const c = await call(member, "POST", "/api/chats", { workspaceId, projectId });
+    await call(member, "POST", `/api/chats/${c.json.id}/messages`, { content: "Budget note: the catering budget is 3200 euros" });
+    const c2 = await call(member, "POST", "/api/chats", { workspaceId, projectId });
+    const r = await call(member, "POST", `/api/chats/${c2.json.id}/messages`, { content: "What was the catering budget?" });
+    const chatCites = startOf(r.body).citations.filter((x: { kind: string }) => x.kind === "chat");
+    expect(chatCites[0]).toMatchObject({ chatId: c.json.id });
+    expect(chatCites[0].snippet).toContain("3200");
+  });
+
+  it("shares with a member: sources and instructions yes, private chats no", async () => {
+    expect((await call(member, "PUT", `/api/projects/${projectId}/members`, { userId: otherId, role: "chat" })).status).toBe(200);
+    const p = await call(other, "GET", `/api/projects/${projectId}`);
+    expect(p.status).toBe(200);
+    expect(p.json.role).toBe("chat");
+    expect(p.json.instructions).toContain("checklist");
+    expect(p.json.chats).toHaveLength(0);
+    expect((await call(other, "GET", `/api/chats/${firstChat}`)).status).toBe(404);
+    expect((await call(other, "GET", `/api/documents/${p.json.sources[0].id}`)).status).toBe(200);
+    // "chat" role can't change the project.
+    expect((await call(other, "PATCH", `/api/projects/${projectId}`, { instructions: "x" })).status).toBe(403);
+    expect((await call(other, "POST", `/api/projects/${projectId}/sources/note`, { title: "x", content: "y" })).status).toBe(403);
+
+    // The other member's own project chat isn't recalled in Mira's chats.
+    const oc = await call(other, "POST", "/api/chats", { workspaceId, projectId });
+    await call(other, "POST", `/api/chats/${oc.json.id}/messages`, { content: "My secret salary is 9999 zorkmids" });
+    const mc = await call(member, "POST", "/api/chats", { workspaceId, projectId });
+    const r = await call(member, "POST", `/api/chats/${mc.json.id}/messages`, { content: "zorkmids salary?" });
+    expect(r.body).not.toContain("9999");
+  });
+
+  it("shares a chat to the project read-only", async () => {
+    expect((await call(member, "PATCH", `/api/chats/${firstChat}`, { sharedToProject: true })).status).toBe(200);
+    const p = await call(other, "GET", `/api/projects/${projectId}`);
+    // Xavi sees the shared chat plus his own, never Mira's unshared ones.
+    expect(p.json.chats.map((c: { userName: string }) => c.userName).sort()).toEqual(["Mira", "Xavi"]);
+    expect(p.json.chats.map((c: { id: string }) => c.id)).toContain(firstChat);
+    const c = await call(other, "GET", `/api/chats/${firstChat}`);
+    expect(c.json).toMatchObject({ readOnly: true, authorName: "Mira" });
+    expect((await call(other, "POST", `/api/chats/${firstChat}/messages`, { content: "hi" })).status).toBe(404);
+    expect((await call(other, "PATCH", `/api/chats/${firstChat}`, { title: "mine now" })).status).toBe(404);
+  });
+
+  it("gives linked library documents to project members", async () => {
+    const { body, contentType } = multipart({ workspaceId, scope: "private" }, { name: "floorplan.txt", content: "Desks are on floor 12." });
+    const up = await app.inject({ method: "POST", url: "/api/documents", headers: { origin: APP_URL, cookie: member.cookie, "content-type": contentType }, payload: body });
+    libraryDoc = up.json().id;
+    expect((await call(other, "GET", `/api/documents/${libraryDoc}`)).status).toBe(404);
+    expect((await call(member, "POST", `/api/projects/${projectId}/sources/link`, { documentId: libraryDoc })).status).toBe(200);
+    expect((await call(other, "GET", `/api/documents/${libraryDoc}`)).status).toBe(200);
+    // Linked documents stay in the owner's library.
+    expect((await call(member, "GET", `/api/documents?workspaceId=${workspaceId}`)).json.map((x: { id: string }) => x.id)).toEqual([libraryDoc]);
+  });
+
+  it("moves, archives and searches chats", async () => {
+    const found = await call(member, "GET", `/api/search?workspaceId=${workspaceId}&q=catering`);
+    expect(found.json.chats[0]).toMatchObject({ projectName: "Office move" });
+    // Matches inside message text come back with a snippet.
+    const inText = await call(member, "GET", `/api/search?workspaceId=${workspaceId}&q=movers`);
+    expect(inText.json.chats.find((c: { snippet: string | null }) => c.snippet)?.snippet).toMatch(/movers/i);
+    expect((await call(other, "GET", `/api/search?workspaceId=${workspaceId}&q=catering`)).json.chats).toHaveLength(0);
+    expect((await call(member, "GET", `/api/search?workspaceId=${workspaceId}&q=office`)).json.projects).toHaveLength(1);
+
+    const moved = await call(member, "PATCH", `/api/chats/${firstChat}`, { projectId: null });
+    expect(moved.json).toMatchObject({ projectId: null, sharedToProject: false });
+    expect((await call(other, "GET", `/api/chats/${firstChat}`)).status).toBe(404);
+    expect((await call(member, "GET", `/api/chats?workspaceId=${workspaceId}`)).json).toHaveLength(1);
+
+    await call(member, "PATCH", `/api/chats/${firstChat}`, { archived: true });
+    expect((await call(member, "GET", `/api/chats?workspaceId=${workspaceId}`)).json).toHaveLength(0);
+    expect((await call(member, "GET", `/api/chats?workspaceId=${workspaceId}&archived=1`)).json[0].id).toBe(firstChat);
+  });
+
+  it("only the owner or an admin deletes a project; library files survive", async () => {
+    await call(member, "PUT", `/api/projects/${projectId}/members`, { userId: otherId, role: "edit" });
+    expect((await call(other, "DELETE", `/api/projects/${projectId}`)).status).toBe(403);
+    const sources = (await call(member, "GET", `/api/projects/${projectId}`)).json.sources;
+    const note = sources.find((s: { projectOnly: boolean }) => s.projectOnly);
+    expect((await call(member, "DELETE", `/api/projects/${projectId}`)).status).toBe(200);
+    expect((await call(member, "GET", `/api/documents/${note.id}`)).status).toBe(404);
+    expect((await call(member, "GET", `/api/documents/${libraryDoc}`)).status).toBe(200);
+    expect((await call(member, "GET", `/api/chats/${firstChat}`)).status).toBe(200);
+  });
+});

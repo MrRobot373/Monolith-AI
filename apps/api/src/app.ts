@@ -14,6 +14,7 @@ import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
 import { chatRoutes } from "./routes/chat";
 import { meRoutes } from "./routes/me";
+import { projectRoutes } from "./routes/projects";
 import { requestRoutes } from "./routes/requests";
 
 export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; storage?: Storage } = {}): Promise<FastifyInstance> {
@@ -58,6 +59,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; st
   await meRoutes(app, ctx);
   await chatRoutes(app, ctx);
   await documentRoutes(app, ctx);
+  await projectRoutes(app, ctx);
   await requestRoutes(app, ctx);
   await adminOrgRoutes(app, ctx);
   await adminSystemRoutes(app, ctx);

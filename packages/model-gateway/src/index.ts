@@ -158,6 +158,8 @@ export function estimateUsage(messages: ChatMessage[], output: string): Usage {
 function mockReply(messages: ChatMessage[]): string {
   const last = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
   const sys = messages.find((m) => m.role === "system")?.content ?? "";
+  const proj = /This chat is in the project "([^"]+)"(\. Follow the project's instructions)?/.exec(sys);
+  const note = proj ? [`_Project **${proj[1]}**${proj[2] ? ", following its instructions" : ""}._`, ""] : [];
   const sources = [...sys.matchAll(/\[(\d+)\] ([^\n]+)\n([\s\S]*?)(?=\n\n---\n\n|\n<\/sources>)/g)];
   if (sources.length) {
     const lines = sources.slice(0, 3).map((m) => {
@@ -165,6 +167,7 @@ function mockReply(messages: ChatMessage[]): string {
       return `- ${text.slice(0, 160)}${text.length > 160 ? "…" : ""} [${m[1]}]`;
     });
     return [
+      ...note,
       `Here's what your documents say about _"${last.slice(0, 120)}"_ (demo model, quoting the most relevant passages):`,
       "",
       ...lines,
@@ -173,6 +176,7 @@ function mockReply(messages: ChatMessage[]): string {
     ].join("\n");
   }
   return [
+    ...note,
     `This is a reply from the **Aatmiq demo model**. It runs locally and never leaves this server.`,
     ``,
     `You said: _"${last.slice(0, 160)}${last.length > 160 ? "…" : ""}"_`,

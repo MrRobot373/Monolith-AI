@@ -1,10 +1,11 @@
-import { and, desc, document, eq, user, type DB } from "@aatmiq/db";
+import { and, desc, document, eq, isNull, user, type DB } from "@aatmiq/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
 import { randomToken } from "../crypto";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
 import { accessibleDocs, processDocument } from "../services/documents";
+import { getProjectAccess } from "../services/projects";
 import { isSupported, SUPPORTED_HINT } from "../services/extract";
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
@@ -14,12 +15,21 @@ const updateSchema = z.object({
   scope: z.enum(["private", "workspace"]).optional(),
 });
 
-async function loadReadable(ctx: AppContext, u: SessionUser, id: string) {
+export async function loadReadable(ctx: AppContext, u: SessionUser, id: string) {
   const [doc] = await ctx.db.select().from(document).where(eq(document.id, id));
   if (!doc) throw notFound("Document not found");
   const m = await requireWorkspaceCap(ctx, u, doc.workspaceId, "workspace.use");
   const isAdmin = u.orgRole !== "member" || m?.role === "admin";
-  if (doc.scope === "private" && doc.ownerId !== u.id && !isAdmin) throw notFound("Document not found");
+  if (doc.projectId) {
+    const a = await getProjectAccess(ctx, u, doc.projectId).catch(() => null);
+    if (!a) throw notFound("Document not found");
+    return { doc, canManage: a.canEdit || doc.ownerId === u.id };
+  }
+  if (doc.scope === "private" && doc.ownerId !== u.id && !isAdmin) {
+    const [ok] = await ctx.db.select({ id: document.id }).from(document).where(and(eq(document.id, id), accessibleDocs(doc.workspaceId, u.id)));
+    if (!ok) throw notFound("Document not found");
+    return { doc, canManage: false };
+  }
   return { doc, canManage: doc.ownerId === u.id || isAdmin };
 }
 
@@ -41,7 +51,7 @@ export function listDocuments(db: DB, workspaceId: string, userId: string) {
     })
     .from(document)
     .leftJoin(user, eq(user.id, document.ownerId))
-    .where(accessibleDocs(workspaceId, userId))
+    .where(and(accessibleDocs(workspaceId, userId), isNull(document.projectId)))
     .orderBy(desc(document.createdAt))
     .limit(500);
 }
