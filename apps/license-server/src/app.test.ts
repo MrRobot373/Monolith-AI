@@ -116,7 +116,8 @@ d("license server", () => {
     const o = ov.json;
     expect(o.attention.find((x: { id: string }) => x.id === lic.id).instanceConflict).toBe(true);
     expect(o).toMatchObject({ customers: 1, activeLicenses: 1, seatsSold: 40 });
-    expect(o.tokensDaily.at(-1).tokens).toBe(1500);
+    expect(o.tokensDaily).toHaveLength(30);
+    expect(o.tokensDaily.at(-1)).toMatchObject({ input: 1000, output: 500 });
   });
 
   it("rejects forged keys and reports revoked licenses", async () => {

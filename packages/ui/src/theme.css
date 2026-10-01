@@ -1,0 +1,201 @@
+
+/*
+ * Aatmiq design tokens (docs/00-master-plan.md §11).
+ * Neutral charcoal / gray / white, like a native pro tool. Primary actions are
+ * white-on-black (dark) or black-on-white (light). The org accent (--accent,
+ * default cyan) is a small touch only: logo, focus, active markers, links.
+ */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --accent: #22d3ee;
+  --accent-fg: #041014;
+
+  --canvas: #ebebeb; /* behind the app window */
+  --bg: #fbfbfb; /* app window */
+  --bg-subtle: #f5f5f5; /* sidebar */
+  --surface: #ffffff; /* cards, inputs */
+  --surface-2: #f2f2f2; /* hover, chips */
+  --surface-3: #e8e8e8;
+  --border: #e4e4e4;
+  --border-strong: #d0d0d0;
+  --fg: #171717;
+  --fg-muted: #5c5c5c;
+  --fg-subtle: #8f8f8f;
+  --primary: #171717; /* primary button */
+  --primary-fg: #ffffff;
+  --danger: #dc2626;
+  --warning: #b45309;
+  --success: #15803d;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px -6px rgb(0 0 0 / 0.08);
+  --accent-text: color-mix(in oklab, var(--accent) 50%, #000);
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --canvas: #1c1c1c;
+  --bg: #0f0f0f;
+  --bg-subtle: #0f0f0f;
+  --surface: #151515;
+  --surface-2: #1c1c1c;
+  --surface-3: #252525;
+  --border: #242424;
+  --border-strong: #363636;
+  --fg: #ededed;
+  --fg-muted: #a1a1a1;
+  --fg-subtle: #6e6e6e;
+  --primary: #f2f2f2;
+  --primary-fg: #0f0f0f;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --success: #4ade80;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(0 0 0 / 0.7);
+  --accent-text: var(--accent);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
+  --color-accent-line: color-mix(in oklab, var(--accent) 35%, transparent);
+  /* Chart mark color: a deeper step of the accent, validated for light and dark surfaces (dataviz check). */
+  --color-chart-1: color-mix(in oklab, var(--accent) 74%, #000);
+  --color-chart-1-soft: color-mix(in oklab, var(--accent) 22%, transparent);
+  --color-danger: var(--danger);
+  --color-danger-soft: color-mix(in oklab, var(--danger) 12%, transparent);
+  --color-warning: var(--warning);
+  --color-warning-soft: color-mix(in oklab, var(--warning) 14%, transparent);
+  --color-success: var(--success);
+  --color-success-soft: color-mix(in oklab, var(--success) 14%, transparent);
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Newsreader", ui-serif, Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  --shadow-soft: var(--shadow);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-fade-in: fade-in 180ms var(--ease-out-soft) both;
+  --animate-rise: rise 240ms var(--ease-out-soft) both;
+  --animate-caret: caret 1s steps(2, start) infinite;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes caret {
+  to { visibility: hidden; }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--canvas);
+    color: var(--fg);
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01", "ss03";
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
+  }
+  *:focus-visible {
+    outline: 1.5px solid color-mix(in oklab, var(--accent) 70%, transparent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* ── Markdown (assistant messages) ── */
+.prose-chat {
+  line-height: 1.7;
+  font-size: 14.5px;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+.prose-chat > * + * { margin-top: 0.8em; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; line-height: 1.3; margin-top: 1.4em; letter-spacing: -0.01em; }
+.prose-chat h1 { font-size: 1.3em; }
+.prose-chat h2 { font-size: 1.15em; }
+.prose-chat h3 { font-size: 1.02em; }
+.prose-chat ul { list-style: disc; padding-left: 1.3em; }
+.prose-chat ol { list-style: decimal; padding-left: 1.3em; }
+.prose-chat li + li { margin-top: 0.3em; }
+.prose-chat li::marker { color: var(--fg-subtle); }
+.prose-chat a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.prose-chat strong { font-weight: 600; }
+.prose-chat blockquote { border-left: 2px solid var(--border-strong); padding-left: 1em; color: var(--fg-muted); }
+.prose-chat hr { border-color: var(--border); }
+.prose-chat :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+}
+.prose-chat table { width: 100%; border-collapse: collapse; font-size: 0.93em; display: block; overflow-x: auto; }
+.prose-chat th, .prose-chat td { border: 1px solid var(--border); padding: 0.45em 0.7em; text-align: left; }
+.prose-chat th { background: var(--surface-2); font-weight: 600; }
+
+/* Syntax highlighting (highlight.js classes), tuned to the neutral palette. */
+.hljs { color: var(--fg); }
+.hljs-comment, .hljs-quote { color: var(--fg-subtle); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in { color: #c792ea; }
+.hljs-string, .hljs-attr, .hljs-template-tag { color: #a5d6a7; }
+.hljs-number, .hljs-symbol { color: #f5a97f; }
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: #82aaff; }
+.hljs-type, .hljs-class .hljs-title { color: #ffcb6b; }
+.hljs-variable, .hljs-params { color: var(--fg); }
+:root:not([data-theme="dark"]) .hljs-keyword, :root:not([data-theme="dark"]) .hljs-built_in { color: #7c3aed; }
+:root:not([data-theme="dark"]) .hljs-string, :root:not([data-theme="dark"]) .hljs-attr { color: #15803d; }
+:root:not([data-theme="dark"]) .hljs-number { color: #c2410c; }
+:root:not([data-theme="dark"]) .hljs-title { color: #1d4ed8; }
+:root:not([data-theme="dark"]) .hljs-type { color: #a16207; }

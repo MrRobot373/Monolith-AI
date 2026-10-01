@@ -249,10 +249,18 @@ export async function buildApp(db: LDB, cfg: Config, keys: SigningKeys, opts: { 
       .from(license);
     const daily = (await db.execute(sql`
       select to_char(date_trunc('day', c.created_at), 'YYYY-MM-DD') as day,
-             coalesce(sum((u->>'inputTokens')::bigint + (u->>'outputTokens')::bigint), 0)::bigint as tokens
+             coalesce(sum((u->>'inputTokens')::bigint), 0)::bigint as input,
+             coalesce(sum((u->>'outputTokens')::bigint), 0)::bigint as output
       from check_in c left join lateral jsonb_array_elements(c.usage) u on true
       where c.created_at >= ${ago30}
-      group by 1 order by 1`)) as unknown as { day: string; tokens: string }[];
+      group by 1 order by 1`)) as unknown as { day: string; input: string; output: string }[];
+    // Every one of the last 30 days, zero-filled, for the chart.
+    const byDay = new Map(daily.map((d) => [d.day, d]));
+    const tokensDaily = Array.from({ length: 30 }, (_, i) => {
+      const day = new Date(now.getTime() - (29 - i) * 86400_000).toISOString().slice(0, 10);
+      const d = byDay.get(day);
+      return { date: day, input: Number(d?.input ?? 0), output: Number(d?.output ?? 0) };
+    });
     const attention = await db
       .select({ id: license.id, customerId: license.customerId, customer: customer.name, expiresAt: license.expiresAt, lastCheckInAt: license.lastCheckInAt, instanceConflict: license.instanceConflict, seats: license.seats, activeSeats: license.activeSeats })
       .from(license)
@@ -265,7 +273,7 @@ export async function buildApp(db: LDB, cfg: Config, keys: SigningKeys, opts: { 
       )
       .orderBy(license.expiresAt)
       .limit(20);
-    return { ...totals, tokensDaily: daily.map((d) => ({ day: d.day, tokens: Number(d.tokens) })), attention };
+    return { ...totals, tokensDaily, attention };
   });
 
   /* ───────────── Customers ───────────── */
