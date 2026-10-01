@@ -1,0 +1,32 @@
+{
+  "name": "@aatmiq/license-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx --env-file-if-exists=.env src/migrate.ts"
+  },
+  "dependencies": {
+    "@aatmiq/license": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
+    "jose": "^6.2.12",
+    "postgres": "^3.4.7",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "drizzle-kit": "^0.31.5",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6",
+    "vitest": "^3.2.4"
+  }
+}

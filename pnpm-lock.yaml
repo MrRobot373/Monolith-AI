@@ -91,6 +91,49 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
+  apps/license-server:
+    dependencies:
+      '@aatmiq/license':
+        specifier: workspace:*
+        version: link:../../packages/license
+      '@fastify/cookie':
+        specifier: ^11.0.2
+        version: 11.1.2
+      '@fastify/rate-limit':
+        specifier: ^10.3.0
+        version: 10.3.0
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(kysely@0.29.6)(postgres@3.4.9)
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
+      postgres:
+        specifier: ^3.4.7
+        version: 3.4.9
+      zod:
+        specifier: ^4.1.12
+        version: 4.6.5
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.4
+      drizzle-kit:
+        specifier: ^0.31.5
+        version: 0.31.11
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(tsx@4.23.15)(typescript@5.9.3)
+      tsx:
+        specifier: ^4.20.6
+        version: 4.23.15
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
+
   apps/web:
     dependencies:
       '@aatmiq/shared':
@@ -176,6 +219,19 @@ importers:
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
+
+  packages/license:
+    dependencies:
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
+    devDependencies:
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.4
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
   packages/model-gateway:
     dependencies:
