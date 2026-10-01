@@ -25,17 +25,23 @@
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
 | Compliance recording notice, accent-color branding, dark/light themes | ✅ |
 | Docker images + Compose stack | ✅ |
-| SSO (Google/Microsoft/SAML), license server | ⏭ next (P1) |
+| Single sign-on: Google, Microsoft Entra ID, any OpenID Connect provider (Okta, Keycloak…), invite-only or domain auto-join, "require SSO" ([details](docs/04-single-sign-on.md)) | ✅ (SAML: P4) |
+| Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
+| License server + Super Admin console: customers, issue/change/revoke licenses, check-ins, release channel | ✅ `apps/license-server`, `apps/license-console` |
 | Work AI (DeepSeek Harness), Code (VS Code fork) | ⏭ P2 / P3 |
 
 ## Repository layout
 
 ```
-apps/api            Fastify API (auth, admin, chat, gateway, quotas)
+apps/api            Fastify API (auth, SSO, admin, chat, gateway, quotas, license client)
 apps/web            Next.js app: landing, sign-in, chat, admin console
+apps/license-server License server (our cloud): signs licenses, receives check-ins
+apps/license-console Super Admin console for the license server
 packages/db         Drizzle schema + migrations (Postgres)
 packages/shared     Roles/permissions, validation schemas, quota maths
 packages/model-gateway  Provider adapters (Ollama / OpenAI-compatible), streaming, metering
+packages/license    License key format, signing/verification, plan presets, grace rules
+packages/ui         Shared design system (buttons, fields, dialogs, charts, theme)
 deploy/             Dockerfiles and docker-compose stack
 docs/               Plans, specs and decisions
 ```
@@ -61,6 +67,9 @@ pnpm -r typecheck
 pnpm --filter @aatmiq/shared test
 pnpm --filter @aatmiq/model-gateway test
 TEST_DATABASE_URL=postgres://…/aatmiq_test pnpm --filter @aatmiq/api test   # needs a migrated, disposable database
+pnpm --filter @aatmiq/license test
+LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
+# Browser suites (see tests/e2e/README.md): full.mjs (product) and run-licensing.sh (console + licensed product + SSO)
 ```
 
 ## Deploy on a server
@@ -72,4 +81,6 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile ollama up -d --build
 ```
 
-The API applies database migrations automatically on start. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000.
+The API applies database migrations automatically on start. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.
+
+The license server and Super Admin console run separately, in Aatmiq's cloud: `deploy/license/docker-compose.yml` (see [docs/05-license-server.md](docs/05-license-server.md)).

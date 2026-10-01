@@ -1,0 +1,56 @@
+# Aatmiq licensing (runs in OUR cloud, not at customers).
+#   cp deploy/license/.env.example deploy/license/.env   (then edit it)
+#   docker compose -f deploy/license/docker-compose.yml --env-file deploy/license/.env up -d
+# Expose two hostnames through your TLS proxy:
+#   license.<domain> → license-server:4100  (deployments POST /v1/check-in here)
+#   admin.<domain>   → console:3100         (Super Admin console; restrict by IP/VPN if you can)
+name: aatmiq-license
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aatmiq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: aatmiq_license
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aatmiq"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  license-server:
+    build: { context: ../.., dockerfile: deploy/license/Dockerfile.server }
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://aatmiq:${POSTGRES_PASSWORD}@postgres:5432/aatmiq_license
+      SERVER_SECRET: ${SERVER_SECRET:?set SERVER_SECRET}
+      CONSOLE_URL: ${CONSOLE_URL:?set CONSOLE_URL}
+      # Optional: bring your own Ed25519 signing key (PKCS8 PEM). Otherwise one is generated and stored encrypted.
+      LICENSE_SIGNING_KEY: ${LICENSE_SIGNING_KEY:-}
+      # Creates the first Super Admin on an empty database. Remove after the first start.
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-}
+    ports:
+      - "${LICENSE_PORT:-4100}:4100"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4100/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  console:
+    build: { context: ../.., dockerfile: deploy/license/Dockerfile.console }
+    restart: unless-stopped
+    depends_on:
+      license-server: { condition: service_healthy }
+    ports:
+      - "${CONSOLE_PORT:-3100}:3100"
+
+volumes:
+  pgdata:

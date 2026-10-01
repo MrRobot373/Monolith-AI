@@ -61,7 +61,7 @@ export async function startMockIdp({ port = 0, clientId = "aatmiq-test", clientS
           <label>Email <input name="email" type="email" required></label><br><br>
           <label>Name <input name="name"></label><br><br>
           <button type="submit">Sign in</button>
-          <button type="submit" name="deny" value="1">Cancel</button>
+          <button type="submit" name="deny" value="1" formnovalidate>Cancel</button>
         </form>`),
       );
     }

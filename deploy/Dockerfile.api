@@ -7,6 +7,7 @@ COPY apps/api/package.json apps/api/
 COPY packages/db/package.json packages/db/
 COPY packages/shared/package.json packages/shared/
 COPY packages/model-gateway/package.json packages/model-gateway/
+COPY packages/license/package.json packages/license/
 RUN pnpm install --frozen-lockfile --filter @aatmiq/api...
 COPY packages packages
 COPY apps/api apps/api

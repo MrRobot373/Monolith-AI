@@ -221,12 +221,12 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 
 | Phase | Scope | Result |
 |---|---|---|
-| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw; Google/Microsoft SSO still to do), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, Docker Compose. License client still to do | Installable, admin-manageable shell |
+| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
 | **P1 Chat** | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
 | **P2 Work AI** | DSH adapter, sandbox containers, tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules | Cowork-class agent |
 | **P3 Code** | Code-OSS fork, branding, Open VSX, web + desktop builds, Aatmiq panel wired to the harness | Cursor-class IDE |
 | **P4 Enterprise** | SAML/OIDC, audit exports, retention policies, Helm/K8s, offline licenses, backups, SOC2-style docs | Mid-size readiness |
-| **Parallel** | Marketing site + Super Admin license server | Sales and customer management |
+| **Parallel** | Marketing site + Super Admin license server (license server + console ✅) | Sales and customer management |
 
 ---
 

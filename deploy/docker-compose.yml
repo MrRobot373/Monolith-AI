@@ -30,6 +30,11 @@ services:
       APP_URL: ${APP_URL:?set APP_URL}
       APP_SECRET: ${APP_SECRET:?set APP_SECRET}
       ALLOW_MOCK_PROVIDER: ${ALLOW_MOCK_PROVIDER:-false}
+      OCR_ENABLED: ${OCR_ENABLED:-true}
+      # Aatmiq's license public key (from your order email). Without it the server runs in development mode.
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
+      # Daily check-ins (counts only). Set empty for air-gapped installs.
+      LICENSE_SERVER_URL: ${LICENSE_SERVER_URL-https://license.aatmiq.com}
     volumes:
       - files:/data
     healthcheck:

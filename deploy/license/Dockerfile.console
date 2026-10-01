@@ -1,0 +1,26 @@
+# Aatmiq Super Admin console (Next.js standalone).
+FROM node:22-alpine AS build
+RUN corepack enable
+WORKDIR /repo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/license-console/package.json apps/license-console/
+COPY packages/license/package.json packages/license/
+COPY packages/ui/package.json packages/ui/
+RUN pnpm install --frozen-lockfile --filter @aatmiq/license-console...
+COPY packages/license packages/license
+COPY packages/ui packages/ui
+COPY apps/license-console apps/license-console
+ENV NEXT_TELEMETRY_DISABLED=1
+# Read at build time for the /api rewrite; the compose service name is used.
+ARG LICENSE_API_URL=http://license-server:4100
+ENV LICENSE_API_URL=$LICENSE_API_URL
+RUN pnpm --filter @aatmiq/license-console build
+
+FROM node:22-alpine
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3100 HOSTNAME=0.0.0.0
+WORKDIR /app
+COPY --from=build /repo/apps/license-console/.next/standalone ./
+COPY --from=build /repo/apps/license-console/.next/static ./apps/license-console/.next/static
+USER node
+EXPOSE 3100
+CMD ["node", "apps/license-console/server.js"]

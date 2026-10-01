@@ -1,6 +1,7 @@
 "use client";
 
 import { Switch as RSwitch, Tooltip as RTooltip } from "radix-ui";
+import type React from "react";
 import type { ReactNode } from "react";
 import { cn } from "./cn";
 
@@ -13,8 +14,12 @@ function initials(name: string): string {
     .join("");
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn("rounded-xl border border-border bg-surface", className)}>{children}</div>;
+export function Card({ className, children, ...rest }: { className?: string; children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("rounded-xl border border-border bg-surface", className)} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 type Tone = "neutral" | "accent" | "success" | "warning" | "danger";
