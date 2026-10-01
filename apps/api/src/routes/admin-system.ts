@@ -354,14 +354,20 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         .where(gte(usageEvent.createdAt, since)),
       db.select({ id: modelProvider.id, name: modelProvider.name, type: modelProvider.type, health: modelProvider.health }).from(modelProvider),
     ]);
-    const org = await getOrg(db);
+    const lic = await ctx.license.info();
     return {
       users,
       workspaces: workspaces?.n ?? 0,
       pendingRequests: pending?.n ?? 0,
       tokens30d: Number(tokens30?.n ?? 0),
       providers,
-      license: { status: org?.licenseKey ? "active" : "unlicensed", tier: org?.licenseKey ? "licensed" : "Development" },
+      license: {
+        status: lic.status.state,
+        tier: lic.claims?.tier ?? null,
+        seats: lic.claims?.seats ?? null,
+        expiresAt: lic.claims ? new Date(lic.claims.exp * 1000).toISOString() : null,
+        message: lic.status.message,
+      },
     };
   });
 

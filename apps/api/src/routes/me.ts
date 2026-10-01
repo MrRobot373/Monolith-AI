@@ -47,6 +47,8 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
       .where(and(eq(notification.userId, u.id), isNull(notification.readAt)));
 
     void db.update(user).set({ lastActiveAt: new Date() }).where(eq(user.id, u.id)).catch(() => {});
+    const lic = await ctx.license.info();
+    const admin = isOrgAdmin(u.orgRole);
     return {
       user: { ...u, ...profile },
       isAdmin: isOrgAdmin(u.orgRole),
@@ -59,6 +61,15 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
       },
       workspaces,
       unreadNotifications: unread?.n ?? 0,
+      license: {
+        state: lic.status.state,
+        canUse: lic.status.canUse,
+        tier: lic.claims?.tier ?? null,
+        sections: lic.status.state === "development" ? ["chat", "work", "code"] : (lic.claims?.sections ?? []),
+        features: lic.status.state === "development" ? null : (lic.claims?.features ?? []),
+        // Admins see every notice; others only when they can't use the product.
+        message: admin || !lic.status.canUse ? lic.status.message : null,
+      },
     };
   });
 

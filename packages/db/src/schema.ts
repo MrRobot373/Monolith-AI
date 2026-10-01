@@ -47,6 +47,7 @@ export const projectVisibilityEnum = pgEnum("project_visibility", ["private", "w
 export const projectRoleEnum = pgEnum("project_role", ["chat", "edit"]);
 /** How far a source can be trusted: the model is told, and answers say so. */
 export const sourceLabelEnum = pgEnum("source_label", ["confirmed", "assumption", "tbd"]);
+export const ssoTypeEnum = pgEnum("sso_type", ["google", "microsoft", "oidc"]);
 
 /** pgvector column without fixed dimensions (models differ: 384, 768, 1024…). */
 const vector = customType<{ data: number[]; driverData: string }>({
@@ -68,6 +69,8 @@ export const organization = pgTable("organization", {
   promptLogging: boolean("prompt_logging").notNull().default(false),
   retentionDays: integer("retention_days"),
   licenseKey: text("license_key"),
+  /** When on, only the owner may still sign in with a password (break-glass); everyone else uses SSO. */
+  ssoRequired: boolean("sso_required").notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -342,6 +345,45 @@ export const message = pgTable(
     index("message_fts_idx").using("gin", sql`to_tsvector('simple', ${t.content})`),
   ],
 );
+
+/* ───────────── Single sign-on ───────────── */
+
+export const ssoConnection = pgTable("sso_connection", {
+  id: id(),
+  type: ssoTypeEnum("type").notNull(),
+  /** Button label, e.g. "Google" or "Okta". */
+  name: text("name").notNull(),
+  /** OpenID issuer URL (derived for Google and Microsoft). */
+  issuer: text("issuer").notNull(),
+  /** Microsoft Entra directory (tenant) id. */
+  tenantId: text("tenant_id"),
+  clientId: text("client_id").notNull(),
+  clientSecretEnc: text("client_secret_enc").notNull(),
+  /** Allowed email domains. Empty: any address the provider vouches for. */
+  domains: text("domains").array().notNull().default(sql`'{}'::text[]`),
+  /** Let people from these domains create an account on first sign-in (otherwise invitation only). */
+  autoJoin: boolean("auto_join").notNull().default(false),
+  defaultWorkspaceId: text("default_workspace_id").references(() => workspace.id, { onDelete: "set null" }),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/* ───────────── License (client side) ───────────── */
+
+/** One row: what this deployment knows about its license check-ins. The key itself is `organization.license_key`. */
+export const licenseState = pgTable("license_state", {
+  id: text("id").primaryKey().default("current"),
+  /** Random id for this installation, sent with check-ins (no hardware fingerprinting). */
+  instanceId: text("instance_id").notNull(),
+  lastCheckInAt: timestamp("last_check_in_at", { withTimezone: true }),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  revoked: boolean("revoked").notNull().default(false),
+  /** Newer release announced by the license server, if any. */
+  release: jsonb("release").$type<{ version: string; notes: string | null; url: string | null } | null>(),
+  updatedAt: updatedAt(),
+});
 
 /* ───────────── Notifications & audit ───────────── */
 

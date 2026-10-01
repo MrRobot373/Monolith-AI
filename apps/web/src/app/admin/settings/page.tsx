@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, KeyRound, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Section } from "@/components/admin/table";
@@ -166,11 +167,11 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="License">
-        <Card className="flex items-center gap-3 p-5">
+        <Link href="/admin/license" className="flex items-center gap-3 rounded-xl border border-border bg-surface p-5 transition-colors hover:border-border-strong">
           <KeyRound className="size-4 text-fg-subtle" />
-          <div className="flex-1 text-sm">{form.hasLicense ? "A license key is installed." : "Running without a license key (evaluation)."}</div>
-          <Badge tone={form.hasLicense ? "success" : "warning"}>{form.hasLicense ? "Licensed" : "Evaluation"}</Badge>
-        </Card>
+          <div className="flex-1 text-sm">Plan, seats and license server check-ins.</div>
+          <ArrowUpRight className="size-4 text-fg-subtle" />
+        </Link>
       </Section>
 
       <Dialog

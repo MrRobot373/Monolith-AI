@@ -30,6 +30,7 @@ async function loadReadableChat(ctx: AppContext, u: SessionUser, chatId: string)
 
 async function requireChatSection(ctx: AppContext, u: SessionUser, workspaceId: string) {
   const m = await requireWorkspaceCap(ctx, u, workspaceId, "workspace.use");
+  if (!(await ctx.license.hasSection("chat"))) throw forbidden("Chat isn't included in your organization's license.");
   if (m && !m.sections.includes("chat") && !isOrgAdmin(u.orgRole)) throw forbidden("Chat is not enabled for you.");
 }
 

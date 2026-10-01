@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthShell, FormError, usePublicStatus } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, Textarea } from "@/components/ui/field";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { applyAccent } from "@/lib/theme";
@@ -18,6 +18,29 @@ export default function SetupPage() {
   const [form, setForm] = useState({ orgName: "", name: "", email: "", password: "", accentColor: "#22D3EE", licenseKey: "" });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState<{ customer: string; tier: string; seats: number; expiresAt: string; accent: string | null } | null>(null);
+
+  async function checkKey(): Promise<boolean> {
+    if (!form.licenseKey.trim()) {
+      setPreview(null);
+      if (status?.licenseRequired) setError("Enter the license key from your Aatmiq order.");
+      return !status?.licenseRequired;
+    }
+    try {
+      const p = await api<NonNullable<typeof preview>>("/api/public/license/preview", { method: "POST", json: { key: form.licenseKey } });
+      setPreview(p);
+      setError(null);
+      if (p.accent) {
+        setForm((f) => ({ ...f, accentColor: p.accent! }));
+        applyAccent(p.accent);
+      }
+      return true;
+    } catch (err) {
+      setPreview(null);
+      setError((err as Error).message);
+      return false;
+    }
+  }
 
   useEffect(() => {
     if (status && !status.setupRequired) router.replace("/login");
@@ -27,7 +50,10 @@ export default function SetupPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (step === 0) return setStep(1);
+    if (step === 0) {
+      if (status?.licenseRequired && !preview && !(await checkKey())) return;
+      return setStep(1);
+    }
     setLoading(true);
     setError(null);
     try {
@@ -75,9 +101,31 @@ export default function SetupPage() {
                 ))}
               </div>
             </Field>
-            <Field label="License key" hint="Optional for evaluation. Paste the key from your Aatmiq order.">
-              <Input value={form.licenseKey} onChange={set("licenseKey")} placeholder="aatmiq_lic_…" />
-            </Field>
+            {status?.licenseRequired && (
+              <Field label="License key" hint="Paste the key from your Aatmiq order. It's checked on this server; nothing is sent.">
+                <Textarea
+                  value={form.licenseKey}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, licenseKey: e.target.value }));
+                    setPreview(null);
+                  }}
+                  onBlur={() => void checkKey()}
+                  placeholder="eyJhbGciOiJFZERTQSIs…"
+                  className="min-h-20 font-mono text-[11.5px] break-all"
+                  data-testid="setup-license"
+                />
+              </Field>
+            )}
+            {preview && (
+              <div className="animate-rise rounded-lg border border-border bg-surface px-3 py-2.5 text-[12.5px]" data-testid="license-preview">
+                <div className="text-fg">
+                  {preview.customer} · {preview.tier} plan
+                </div>
+                <div className="text-fg-subtle">
+                  {preview.seats} seats · valid until {new Date(preview.expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div key="s1" className="animate-rise space-y-4">

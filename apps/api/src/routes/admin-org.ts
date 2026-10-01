@@ -102,6 +102,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     if (!target) throw notFound("User not found");
     if (target.orgRole === "owner") throw forbidden("The owner's role and status can't be changed here.");
     if (target.id === u.id) throw forbidden("You can't change your own role or status.");
+    if (body.status === "active" && target.status !== "active") await ctx.license.requireSeats(1, { countPending: false });
     await db.update(user).set(body).where(eq(user.id, target.id));
     if (body.status === "deactivated") await db.delete(session).where(eq(session.userId, target.id));
     await audit(ctx, {
@@ -139,6 +140,12 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     const email = body.email.toLowerCase();
     const [exists] = await db.select({ id: user.id }).from(user).where(eq(sql`lower(${user.email})`, email));
     if (exists) throw conflict("A user with this email already exists.");
+    // A re-invite replaces the open invitation, so it doesn't take another seat.
+    const [open] = await db
+      .select({ id: invitation.id })
+      .from(invitation)
+      .where(and(eq(invitation.email, email), isNull(invitation.acceptedAt), isNull(invitation.revokedAt), gte(invitation.expiresAt, new Date())));
+    await ctx.license.requireSeats(open ? 0 : 1);
     if (body.workspaces.length) {
       const found = await db
         .select({ id: workspace.id })
@@ -214,6 +221,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.workspaces.manage");
     const body = parse(workspaceSchema, req.body);
+    await ctx.license.requireWorkspaceSlot();
     const [ws] = await db.insert(workspace).values(body).returning();
     // The creator joins as workspace admin so it shows up in their workspace switcher.
     await db

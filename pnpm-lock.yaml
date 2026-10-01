@@ -23,6 +23,9 @@ importers:
       '@aatmiq/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aatmiq/license':
+        specifier: workspace:*
+        version: link:../../packages/license
       '@aatmiq/model-gateway':
         specifier: workspace:*
         version: link:../../packages/model-gateway

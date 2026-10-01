@@ -16,10 +16,20 @@ export interface Me {
   org: { name: string; productName: string; accentColor: string; promptLogging: boolean };
   workspaces: { id: string; name: string; icon: string | null; role: WorkspaceRole; sections: Section[] }[];
   unreadNotifications: number;
+  license?: {
+    state: string;
+    canUse: boolean;
+    tier: string | null;
+    sections: string[];
+    features: string[] | null;
+    message: string | null;
+  };
 }
 
 export interface PublicStatus {
   setupRequired: boolean;
+  licenseRequired?: boolean;
+  sso?: { id: string; type: "google" | "microsoft" | "oidc"; name: string }[];
   org: { name: string | null; productName: string; accentColor: string; loginMessage: string | null };
 }
 

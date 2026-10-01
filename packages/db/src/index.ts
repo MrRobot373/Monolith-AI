@@ -4,7 +4,7 @@ import * as schema from "./schema";
 
 export * from "./schema";
 export { schema };
-export { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+export { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 export type DB = PostgresJsDatabase<typeof schema>;
 

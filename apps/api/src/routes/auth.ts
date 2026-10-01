@@ -80,6 +80,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     const org = await getOrg(db);
     return {
       setupRequired: !org,
+      licenseRequired: ctx.license.required,
       org: org
         ? {
             name: org.name,
@@ -95,10 +96,22 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/api/setup", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (req, reply) => {
     const body = parse(setupSchema, req.body);
     if (await getOrg(db)) throw conflict("Aatmiq is already set up on this server.");
+    // With a public key configured, a genuine license is needed to set up.
+    const claims = ctx.license.required
+      ? body.licenseKey
+        ? await ctx.license.verifyOrThrow(body.licenseKey)
+        : (() => {
+            throw badRequest("Enter your license key to set up Aatmiq.");
+          })()
+      : null;
 
     const [org] = await db
       .insert(organization)
-      .values({ name: body.orgName, accentColor: body.accentColor ?? DEFAULT_ACCENT, licenseKey: body.licenseKey ?? null })
+      .values({
+        name: body.orgName,
+        accentColor: body.accentColor ?? claims?.branding?.accent ?? DEFAULT_ACCENT,
+        licenseKey: claims ? body.licenseKey!.trim() : null,
+      })
       .returning();
 
     const { headers, response } = await auth.api.signUpEmail({
@@ -141,6 +154,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       ip: req.ip,
     });
     forwardCookies(reply, headers);
+    if (claims) void ctx.license.checkIn().catch(() => {});
     return { ok: true };
   });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, BarChart3, Cpu, Inbox, LayoutDashboard, Layers, ScrollText, Settings2, Users } from "lucide-react";
+import { ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -9,6 +9,7 @@ import { AppFrame, TopBar } from "@/components/app/frame";
 import { SessionGate, useSession } from "@/components/app/session";
 import { WorkspaceTile } from "@/components/app/sidebar";
 import { SidebarStateProvider } from "@/components/app/sidebar-state";
+import { LicenseBanner } from "@/components/admin/license";
 import { get } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
@@ -30,7 +31,13 @@ const GROUPS = [
       { href: "/admin/audit", label: "Audit log", icon: ScrollText, org: true },
     ],
   },
-  { label: "Configure", items: [{ href: "/admin/settings", label: "Settings", icon: Settings2, org: true }] },
+  {
+    label: "Configure",
+    items: [
+      { href: "/admin/settings", label: "Settings", icon: Settings2, org: true },
+      { href: "/admin/license", label: "License", icon: KeyRound, org: true },
+    ],
+  },
 ];
 
 function AdminNav() {
@@ -101,6 +108,8 @@ const TITLES: Record<string, string> = {
   usage: "Usage",
   audit: "Audit log",
   settings: "Settings",
+  license: "License",
+  authentication: "Authentication",
 };
 
 function Crumbs() {
@@ -134,6 +143,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <div className="hidden md:block">
               <TopBar title={<Crumbs />} />
             </div>
+            <LicenseBanner />
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto max-w-6xl animate-fade-in px-4 py-8 sm:px-8">{children}</div>
             </div>

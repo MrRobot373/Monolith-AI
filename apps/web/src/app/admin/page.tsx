@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { DailyColumns, StatTile } from "@/components/admin/charts";
+import { LICENSE_STATE } from "@/components/admin/license";
 import { Section } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { useSession } from "@/components/app/session";
@@ -21,7 +22,7 @@ interface Overview {
   pendingRequests: number;
   tokens30d: number;
   providers: { id: string; name: string; type: string; health: { ok: boolean; latencyMs?: number; error?: string; checkedAt: string } | null }[];
-  license: { status: string; tier: string };
+  license: { status: string; tier: string | null; seats: number | null; expiresAt: string | null; message: string | null };
 }
 
 export default function AdminOverview() {
@@ -87,11 +88,17 @@ export default function AdminOverview() {
             </Card>
           </Section>
           <Section title="License">
-            <Card className="flex items-center gap-3 p-4">
+            <Link href="/admin/license" className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-strong">
               <KeyRound className="size-4 text-fg-subtle" />
-              <div className="flex-1 text-sm">{o.data?.license.tier ?? "…"}</div>
-              <Badge tone={o.data?.license.status === "active" ? "success" : "warning"}>{o.data?.license.status ?? "…"}</Badge>
-            </Card>
+              <div className="min-w-0 flex-1 text-sm">
+                {o.data?.license.tier ? `${o.data.license.tier[0]!.toUpperCase()}${o.data.license.tier.slice(1)} plan · ${o.data.license.seats} seats` : "Development mode"}
+              </div>
+              {o.data && (
+                <Badge tone={LICENSE_STATE[o.data.license.status]?.tone === "neutral" ? "neutral" : (LICENSE_STATE[o.data.license.status]?.tone ?? "neutral")}>
+                  {LICENSE_STATE[o.data.license.status]?.label ?? o.data.license.status}
+                </Badge>
+              )}
+            </Link>
           </Section>
         </div>
       </div>

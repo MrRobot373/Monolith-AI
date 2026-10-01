@@ -14,11 +14,17 @@ import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
 import { chatRoutes, purgeTemporaryChats } from "./routes/chat";
 import { stopOcr } from "./services/ocr";
+import { LicenseService } from "./services/license";
+import { licenseRoutes } from "./routes/license";
 import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
 import { requestRoutes } from "./routes/requests";
 
-export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; storage?: Storage } = {}): Promise<FastifyInstance> {
+export async function buildApp(
+  db: DB,
+  cfg: Config,
+  opts: { logger?: boolean; storage?: Storage; fetch?: typeof fetch } = {},
+): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
     trustProxy: true,
@@ -30,6 +36,7 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; st
     auth: createAuth(db, cfg),
     box: createSecretBox(cfg.secret),
     storage: opts.storage ?? createLocalStorage(cfg.storageDir),
+    license: new LicenseService(db, cfg, opts.fetch),
   };
 
   // Keyed by session when signed in, so colleagues behind one office IP don't share a bucket.
@@ -56,6 +63,19 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; st
 
   app.get("/api/health", async () => ({ ok: true }));
 
+  // License enforcement for changes. Reading stays possible so nobody loses access to their history.
+  //  - license not usable (missing, expired past grace, revoked): only sign-in, setup and entering a key work
+  //  - admin changes locked (no check-in for 30 days): admin settings are read-only
+  const OPEN = [/^\/api\/auth\//, /^\/api\/setup$/, /^\/api\/public\//, /^\/api\/admin\/license/, /^\/api\/invites\//];
+  app.addHook("preHandler", async (req) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    const path = req.url.split("?")[0]!;
+    if (!path.startsWith("/api/") || OPEN.some((r) => r.test(path))) return;
+    const { status } = await ctx.license.info();
+    if (!status.canUse) throw new HttpError(402, status.message ?? "The license isn't active.", "license_inactive");
+    if (!status.canAdmin && path.startsWith("/api/admin/")) throw new HttpError(402, status.message ?? "Admin changes are paused.", "license_admin_locked");
+  });
+
   await authRoutes(app, ctx);
   await meRoutes(app, ctx);
   await chatRoutes(app, ctx);
@@ -64,17 +84,20 @@ export async function buildApp(db: DB, cfg: Config, opts: { logger?: boolean; st
   await requestRoutes(app, ctx);
   await adminOrgRoutes(app, ctx);
   await adminSystemRoutes(app, ctx);
+  await licenseRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));
   let timer: NodeJS.Timeout | undefined;
   app.addHook("onReady", async () => {
+    ctx.license.start();
     purge();
     timer = setInterval(purge, 60 * 60 * 1000);
     timer.unref();
   });
   app.addHook("onClose", async () => {
     clearInterval(timer);
+    ctx.license.stop();
     await stopOcr();
   });
   return app;

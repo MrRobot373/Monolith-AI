@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
+import { LicenseBanner } from "@/components/admin/license";
 import { AppFrame } from "@/components/app/frame";
 import { SessionGate } from "@/components/app/session";
 import { Sidebar } from "@/components/app/sidebar";
@@ -36,7 +37,10 @@ function Shell({ children }: { children: ReactNode }) {
           </>
         )}
       </AnimatePresence>
-      <main className="relative flex min-w-0 flex-1 flex-col">{children}</main>
+      <main className="relative flex min-w-0 flex-1 flex-col">
+        <LicenseBanner />
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      </main>
     </AppFrame>
   );
 }

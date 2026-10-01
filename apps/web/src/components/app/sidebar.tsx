@@ -166,7 +166,8 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
   });
 
   const sections = workspace?.sections ?? ["chat"];
-  const can = (s: "chat" | "work" | "code") => sections.includes(s) || me.isAdmin;
+  // A section shows when the license includes it and the person (or an admin) has it enabled.
+  const can = (s: "chat" | "work" | "code") => (me.license?.sections.includes(s) ?? true) && (sections.includes(s) || me.isAdmin);
 
   const chatRow = (c: ChatSummary) => {
     const active = pathname === `/app/chat/${c.id}`;

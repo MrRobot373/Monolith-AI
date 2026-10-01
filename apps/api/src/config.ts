@@ -5,6 +5,11 @@ export interface Config {
   allowMockProvider: boolean;
   port: number;
   storageDir: string;
+  /** Aatmiq's license public key. When set, a valid license is required. */
+  licensePublicKey?: string | null;
+  /** Where check-ins go. Empty turns check-ins off (air-gapped installs). */
+  licenseServerUrl?: string | null;
+  version?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -18,5 +23,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowMockProvider: env.ALLOW_MOCK_PROVIDER === "true",
     port: Number(env.PORT ?? 4000),
     storageDir: env.STORAGE_DIR ?? ".data/files",
+    licensePublicKey: env.LICENSE_PUBLIC_KEY || null,
+    licenseServerUrl: env.LICENSE_SERVER_URL === undefined ? "https://license.aatmiq.com" : env.LICENSE_SERVER_URL || null,
+    version: env.APP_VERSION ?? "0.1.0",
   };
 }
