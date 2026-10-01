@@ -158,6 +158,10 @@ d("Licensed deployment", () => {
   });
 
   it("no check-in for 30 days pauses admin changes, not chat", async () => {
+    // Let the check-in started by the last key change finish first.
+    const n = checkIns.length;
+    await waitFor(() => checkIns.length > n);
+    await new Promise((r) => setTimeout(r, 200));
     await db.update(licenseState).set({ lastCheckInAt: new Date(Date.now() - 40 * DAY_MS) });
     const locked = await call("PUT", "/api/admin/settings", { loginMessage: "hello" });
     expect(locked.json.code).toBe("license_admin_locked");

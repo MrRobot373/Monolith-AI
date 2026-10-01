@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, Users } from "lucide-react";
+import { ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -35,6 +35,7 @@ const GROUPS = [
     label: "Configure",
     items: [
       { href: "/admin/settings", label: "Settings", icon: Settings2, org: true },
+      { href: "/admin/authentication", label: "Authentication", icon: ShieldCheck, org: true },
       { href: "/admin/license", label: "License", icon: KeyRound, org: true },
     ],
   },

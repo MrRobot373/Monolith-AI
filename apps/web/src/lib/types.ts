@@ -29,7 +29,7 @@ export interface Me {
 export interface PublicStatus {
   setupRequired: boolean;
   licenseRequired?: boolean;
-  sso?: { id: string; type: "google" | "microsoft" | "oidc"; name: string }[];
+  ssoRequired?: boolean;
   org: { name: string | null; productName: string; accentColor: string; loginMessage: string | null };
 }
 

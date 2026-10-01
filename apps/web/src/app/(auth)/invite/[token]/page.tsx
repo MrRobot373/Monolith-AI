@@ -1,15 +1,24 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
-import { AuthShell, FormError } from "@/components/auth-shell";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { AuthShell, FormError, usePublicStatus } from "@/components/auth-shell";
+import { SsoButtons, useSsoOptions } from "@/components/sso-buttons";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { api, get } from "@/lib/api";
 
 export default function InvitePage() {
+  return (
+    <Suspense>
+      <Invite />
+    </Suspense>
+  );
+}
+
+function Invite() {
   const { token } = useParams<{ token: string }>();
   const router = useRouter();
   const invite = useQuery({
@@ -19,7 +28,11 @@ export default function InvitePage() {
   });
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(useSearchParams().get("sso_error"));
+  const sso = useSsoOptions();
+  const { data: status } = usePublicStatus();
+  const options = sso.data ?? [];
+  const passwordAllowed = !status?.ssoRequired || !options.length;
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -50,6 +63,14 @@ export default function InvitePage() {
 
   return (
     <AuthShell title={`Join ${invite.data!.orgName}`} subtitle={<>You were invited as <span className="text-fg">{invite.data!.email}</span></>}>
+      {options.length > 0 && <SsoButtons options={options} invite={token} email={invite.data!.email} next="/app" />}
+      {options.length > 0 && passwordAllowed && (
+        <div className="my-6 flex items-center gap-3 text-xs text-fg-subtle">
+          <span className="h-px flex-1 bg-border" /> or create a password <span className="h-px flex-1 bg-border" />
+        </div>
+      )}
+      {!passwordAllowed && <div className="mt-4"><FormError message={error} /></div>}
+      {passwordAllowed && (
       <form onSubmit={submit} className="space-y-4">
         <Field label="Your name">
           <Input autoFocus required value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
@@ -62,6 +83,7 @@ export default function InvitePage() {
           Join workspace
         </Button>
       </form>
+      )}
     </AuthShell>
   );
 }

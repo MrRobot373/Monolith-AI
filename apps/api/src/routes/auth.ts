@@ -54,6 +54,14 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       if (isSignIn && email && recentFailures(email).length >= FAIL_MAX) {
         throw new HttpError(429, "Too many failed sign-in attempts for this account. Try again in 15 minutes.", "too_many_attempts");
       }
+      // With single sign-on required, only the owner keeps a password (so the org can't lock itself out).
+      if (isSignIn && email) {
+        const org = await getOrg(db);
+        if (org?.ssoRequired) {
+          const [who] = await db.select({ orgRole: user.orgRole }).from(user).where(eq(sql`lower(${user.email})`, email));
+          if (who?.orgRole !== "owner") throw new HttpError(403, "Your organization signs in with single sign-on. Use the button below.", "sso_required");
+        }
+      }
       const url = new URL(req.url, cfg.appUrl);
       const res = await auth.handler(
         new Request(url, {
@@ -81,6 +89,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     return {
       setupRequired: !org,
       licenseRequired: ctx.license.required,
+      ssoRequired: org?.ssoRequired ?? false,
       org: org
         ? {
             name: org.name,
@@ -186,6 +195,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     async (req, reply) => {
       const body = parse(acceptInviteSchema, req.body);
       const inv = await findInvite(req.params.token);
+      if ((await getOrg(db))?.ssoRequired) throw new HttpError(403, "Your organization signs in with single sign-on. Use the button above.", "sso_required");
       const [existing] = await db
         .select({ n: sql<number>`count(*)::int` })
         .from(user)

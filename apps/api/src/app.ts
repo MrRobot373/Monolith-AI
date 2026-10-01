@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { createAuth } from "./auth";
 import type { Config } from "./config";
 import type { AppContext } from "./context";
-import { createSecretBox } from "./crypto";
+import { createSecretBox, sha256 } from "./crypto";
 import { HttpError } from "./errors";
 import { documentRoutes } from "./routes/documents";
 import { createLocalStorage, type Storage } from "./services/storage";
@@ -16,6 +16,7 @@ import { chatRoutes, purgeTemporaryChats } from "./routes/chat";
 import { stopOcr } from "./services/ocr";
 import { LicenseService } from "./services/license";
 import { licenseRoutes } from "./routes/license";
+import { ssoRoutes } from "./routes/sso";
 import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
 import { requestRoutes } from "./routes/requests";
@@ -33,7 +34,7 @@ export async function buildApp(
   const ctx: AppContext = {
     db,
     cfg,
-    auth: createAuth(db, cfg),
+    auth: createAuth(db, cfg, sha256),
     box: createSecretBox(cfg.secret),
     storage: opts.storage ?? createLocalStorage(cfg.storageDir),
     license: new LicenseService(db, cfg, opts.fetch),
@@ -76,6 +77,7 @@ export async function buildApp(
     if (!status.canAdmin && path.startsWith("/api/admin/")) throw new HttpError(402, status.message ?? "Admin changes are paused.", "license_admin_locked");
   });
 
+  await ssoRoutes(app, ctx);
   await authRoutes(app, ctx);
   await meRoutes(app, ctx);
   await chatRoutes(app, ctx);
