@@ -1,4 +1,4 @@
-# Aatmiq API (with the Work AI agent runtime)
+# Aatmiq API (with the Work AI agent runtime and Aatmiq Code)
 # Debian, not Alpine: the agent runtime has native modules built for glibc, and tasks need
 # ordinary tools (bash, coreutils, Python, git) to do their work.
 FROM node:22-bookworm AS build
@@ -27,22 +27,35 @@ RUN npm ci --omit=dev --no-audit --no-fund \
  # It also ships a browser UI (Next.js) that Aatmiq never starts.
  && rm -rf node_modules/next node_modules/@next
 
+# Aatmiq Code (the IDE): the pinned Code-OSS server build plus our branding and extensions.
+FROM node:22-bookworm AS code
+WORKDIR /build/apps/code
+COPY apps/code/package.json apps/code/base.json apps/code/product.json apps/code/settings.json ./
+COPY apps/code/scripts scripts
+COPY apps/code/branding branding
+COPY apps/code/extensions extensions
+RUN npm install --no-save --no-audit --no-fund @napi-rs/canvas@1 \
+ && node scripts/build.mjs --out /opt/aatmiq-code
+
 FROM node:22-bookworm-slim
 # Tools the agent uses inside a task folder. Add more (or a full Python stack) in your own image.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bash ca-certificates curl git jq less procps unzip zip file python3 python3-pip python3-venv \
+      bash ca-certificates curl git jq less procps unzip zip file python3 python3-pip python3-venv openssh-client \
+      libnss-wrapper \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m pip install --no-cache-dir --break-system-packages pandas openpyxl matplotlib
 ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000 STORAGE_DIR=/data/files WORK_DIR=/data/work \
-    MPLCONFIGDIR=/tmp/matplotlib
+    CODE_DIR=/data/code AATMIQ_CODE_DIST=/opt/aatmiq-code MPLCONFIGDIR=/tmp/matplotlib
 WORKDIR /app
 COPY --from=build /out /app
 COPY --from=dsh /opt/dsh /opt/dsh
+COPY --from=code /opt/aatmiq-code /opt/aatmiq-code
 ENV AATMIQ_DSH_CLI=/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
-# The API runs as root inside the container so each Work AI task can run as its own unprivileged
-# Unix user (tasks can't read documents or each other's folders). See docs/06-work-ai.md.
-RUN mkdir -p /data/files /data/work && chmod 700 /data/files && chmod 711 /data/work
+# The API runs as root inside the container so each Work AI task and each person's IDE can run as
+# its own unprivileged Unix user (no access to documents or anyone else's folders).
+# See docs/06-work-ai.md and docs/07-code.md.
+RUN mkdir -p /data/files /data/work /data/code && chmod 700 /data/files && chmod 711 /data/work /data/code
 VOLUME /data
 EXPOSE 4000
 CMD ["node", "dist/server.js"]

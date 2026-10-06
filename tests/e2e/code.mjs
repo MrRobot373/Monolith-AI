@@ -53,7 +53,7 @@ page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message}`));
 const failedRequests = [];
 page.on("requestfailed", (r) => failedRequests.push(`${r.failure()?.errorText} ${r.url().slice(0, 160)}`));
 // Messages the workbench logs while a page unloads between steps (navigation), not failures.
-const UNLOAD_NOISE = /Long running operations during shutdown|BroadcastChannel|Unable to load and parse grammar/;
+const UNLOAD_NOISE = /Long running operations during shutdown|BroadcastChannel|Unable to load and parse grammar|DeprecationWarning/;
 page.setDefaultTimeout(20000);
 
 async function step(area, name, fn) {

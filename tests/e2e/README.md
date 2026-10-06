@@ -29,6 +29,17 @@ CHROMIUM_PATH=/path/to/chrome tests/e2e/run-work.sh     # E2E_SCRIPT=…/full.mj
 docker build -f deploy/Dockerfile.api -t aatmiq-api . && API_IMAGE=aatmiq-api tests/e2e/run-work.sh   # the API from its image
 ```
 
+## Code
+
+`code.mjs` (13 checks) runs on the same stack as Work AI and needs the IDE build
+(`pnpm --filter @aatmiq/code build`): workspaces, the IDE inside Aatmiq, terminal identity, the
+Aatmiq panel (file creation, approval-gated delete, opening files, diffs), cloning from a local HTTP
+Git server, and access rules.
+
+```bash
+E2E_SCRIPT=$PWD/tests/e2e/code.mjs tests/e2e/run-work.sh
+```
+
 ## Licensing and single sign-on
 
 `run-licensing.sh` starts the license server (:4100), the Super Admin console (:3100), a mock

@@ -29,7 +29,7 @@
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
 | License server + Super Admin console: customers, issue/change/revoke licenses, check-ins, release channel | ✅ `apps/license-server`, `apps/license-console` |
 | Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), MCP connectors, skills, schedules, per-task isolation, metering ([details](docs/06-work-ai.md)) | ✅ |
-| Code (VS Code fork) | ⏭ P3 |
+| Code: Aatmiq Code (Code-OSS) in the browser, per-person IDE as your own user, terminals, Git (clone, your name on commits), Open VSX extensions, and the Aatmiq panel: a coding agent with approvals and diffs ([details](docs/07-code.md)) | ✅ (desktop app next) |
 
 ## Repository layout
 
@@ -44,6 +44,7 @@ packages/model-gateway  Provider adapters (Ollama / OpenAI-compatible), streamin
 packages/license    License key format, signing/verification, plan presets, grace rules
 packages/ui         Shared design system (buttons, fields, dialogs, charts, theme)
 packages/harness    Work AI agent engine adapter (DeepSeek Harness), its plugin and risk policy
+apps/code           Aatmiq Code: builds the IDE from a pinned Code-OSS server build + our patches and extensions
 deploy/             Dockerfiles and docker-compose stack
 docs/               Plans, specs and decisions
 ```
@@ -54,6 +55,7 @@ Requirements: Node 22, pnpm 10, PostgreSQL 16 with the pgvector extension.
 
 ```bash
 pnpm install
+pnpm --filter @aatmiq/code build        # the IDE (download cached in apps/code/.cache)
 cp .env.example .env                 # edit DATABASE_URL / APP_SECRET if needed
 createdb aatmiq                      # or use any Postgres you have
 pnpm db:migrate                      # reads DATABASE_URL from .env
@@ -72,7 +74,7 @@ TEST_DATABASE_URL=postgres://…/aatmiq_test pnpm --filter @aatmiq/api test   # 
 pnpm --filter @aatmiq/license test
 pnpm --filter @aatmiq/harness test   # runs the real agent runtime against a fake model
 LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
-# Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI) and run-licensing.sh (console + licensed product + SSO)
+# Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI; E2E_SCRIPT=code.mjs for Code) and run-licensing.sh
 ```
 
 ## Deploy on a server
