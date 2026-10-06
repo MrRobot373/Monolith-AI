@@ -56,8 +56,12 @@ interface Live {
   /** Set by the model proxy when it refused a call (quota, model offline), reported at turn end. */
   lastError: string | null;
   lastAnswer: string;
+  /** This turn's plan as the agent last wrote it. */
+  plan: PlanItem[] | null;
   idleTimer?: NodeJS.Timeout;
 }
+
+type PlanItem = { content: string; status: string };
 
 const MAX_TOOL_TEXT = 20_000;
 const SEED_CHARS = 16_000;
@@ -212,6 +216,7 @@ export class WorkRunner {
       clearTimeout(l.idleTimer);
       l.busy = true;
       l.lastError = null;
+      l.plan = null;
       await this.setStatus(taskId, "running", { error: null });
       try {
         await l.runtime.send(prompt);
@@ -267,7 +272,7 @@ export class WorkRunner {
     const [task] = await db.select().from(workTask).where(eq(workTask.id, taskId));
     if (!task || task.status !== "queued") return;
     const token = randomBytes(32).toString("hex");
-    const l: Live = { taskId, userId: task.userId, workspaceId: task.workspaceId, token, runtime: null, busy: true, cancelled: false, lastError: null, lastAnswer: "" };
+    const l: Live = { taskId, userId: task.userId, workspaceId: task.workspaceId, token, runtime: null, busy: true, cancelled: false, lastError: null, lastAnswer: "", plan: null };
     this.live.set(taskId, l);
     this.byToken.set(token, taskId);
     await this.setStatus(taskId, "running");
@@ -373,6 +378,7 @@ export class WorkRunner {
         this.pulse(taskId, "files", {});
         return;
       case "plan":
+        l.plan = e.items;
         await this.record(taskId, "plan", { items: e.items });
         return;
       case "turn_end": {
@@ -381,6 +387,12 @@ export class WorkRunner {
         // completed, blocked (a person said no) and max-tokens all end with an answer to show.
         const ok = e.reason === "completed" || e.reason === "blocked" || e.reason === "max-tokens";
         const error = l.lastError ?? (ok ? null : (e.error ?? `The agent stopped (${e.reason}).`));
+        // Models often finish the work without ticking the last steps off; a turn that ended
+        // normally is done, so its plan is too.
+        if (!error && e.reason === "completed" && l.plan?.some((i) => i.status !== "completed")) {
+          l.plan = l.plan.map((i) => ({ ...i, status: "completed" }));
+          await this.record(taskId, "plan", { items: l.plan });
+        }
         await this.setStatus(taskId, error ? "failed" : "completed", { result: l.lastAnswer ? clip(l.lastAnswer, 4000) : null, error });
         await this.notifyDone(l, error);
         this.armIdle(l);

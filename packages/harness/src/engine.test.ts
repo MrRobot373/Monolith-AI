@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDshEngine } from "./dsh/engine";
 import { buildPatch } from "./dsh/patch";
 import { classifyRisk } from "./policy";
+import { cleanArgs, planReminder, stripReminders } from "../dsh-plugin/tooling.mjs";
 import type { HarnessEvent, TaskSpec } from "./types";
 
 let server: Server;
@@ -19,6 +20,7 @@ const approvals: { toolName: string; reason: string | null }[] = [];
 let approvalAnswer: "approved" | "rejected" = "rejected";
 const searches: string[] = [];
 const seenAuth = new Set<string>();
+const toolMessages: string[] = [];
 
 function sse(res: import("node:http").ServerResponse, chunks: unknown[]) {
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -26,20 +28,34 @@ function sse(res: import("node:http").ServerResponse, chunks: unknown[]) {
   res.end("data: [DONE]\n\n");
 }
 
-/** Scripted model: "run: X" → bash, "search: X" → web_search, then summarize the tool result. */
+/**
+ * Scripted model: "run: X" → bash, "search: X" → web_search, then summarize the tool result.
+ * "script: [[tool, args], …]" makes those calls one after another, then says "Done.".
+ */
 function fakeModel(body: { messages: { role: string; content: unknown }[] }, res: import("node:http").ServerResponse) {
   const text = (c: unknown) => (typeof c === "string" ? c : Array.isArray(c) ? c.map((p: { text?: string }) => p.text ?? "").join("") : "");
   const last = body.messages.at(-1)!;
   const usage = { choices: [], usage: { prompt_tokens: 50, completion_tokens: 10 } };
-  if (last.role === "tool") return sse(res, [{ choices: [{ index: 0, delta: { content: `Result: ${text(last.content).trim().slice(0, 200)}` } }] }, { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }, usage]);
-  const ask = text([...body.messages].reverse().find((m) => m.role === "user" && !/^Current runtime context/.test(text(m.content)))?.content);
+  const askAt = body.messages.findLastIndex((m) => m.role === "user" && !/^Current runtime context/.test(text(m.content)));
+  const ask = text(body.messages[askAt]?.content);
+  if (last.role === "tool") toolMessages.push(text(last.content));
+  const script = /^script: (.+)/s.exec(ask);
   let call: [string, unknown] | null = null;
+  if (script) {
+    const steps = JSON.parse(script[1]!) as [string, unknown][];
+    call = steps[body.messages.slice(askAt).filter((m) => m.role === "tool").length] ?? null;
+    if (!call) return sse(res, [{ choices: [{ index: 0, delta: { content: "Done." } }] }, { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }, usage]);
+  } else if (last.role === "tool") {
+    return sse(res, [{ choices: [{ index: 0, delta: { content: `Result: ${text(last.content).trim().slice(0, 200)}` } }] }, { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }, usage]);
+  }
   let m: RegExpExecArray | null;
-  if ((m = /run: (.+)/s.exec(ask))) call = ["bash", { description: "Run it", command: m[1]!.trim() }];
+  if (call) {
+    /* scripted */
+  } else if ((m = /run: (.+)/s.exec(ask))) call = ["bash", { description: "Run it", command: m[1]!.trim() }];
   else if ((m = /search: (.+)/.exec(ask))) call = ["web_search", { queries: [m[1]!.trim()] }];
   if (!call) return sse(res, [{ choices: [{ index: 0, delta: { content: "Hello from the fake model." } }] }, { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }, usage]);
   return sse(res, [
-    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call_${Date.now()}`, type: "function", function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, type: "function", function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] },
     { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
     usage,
   ]);
@@ -128,6 +144,42 @@ describe("risk policy", () => {
   });
 });
 
+describe("tool-call cleanup", () => {
+  it("drops sandbox_permissions that ask for nothing, keeps a real escalation", () => {
+    const mode = "workspace-write";
+    expect(cleanArgs("bash", { command: "ls", sandbox_permissions: "workspace-write" }, mode)).toEqual({ command: "ls" });
+    expect(cleanArgs("write", { file_path: "a", content: "x", sandbox_permissions: "read,write", justification: "save" }, mode)).toEqual({ file_path: "a", content: "x" });
+    expect(cleanArgs("bash", { command: "ls", sandbox_permissions: "danger-full-access" }, mode)).toEqual({ command: "ls" }); // no justification
+    const escalate = { command: "pip install --user x", sandbox_permissions: "danger-full-access", justification: "Install the library." };
+    expect(cleanArgs("bash", escalate, mode)).toBe(escalate);
+    const plain = { command: "ls" };
+    expect(cleanArgs("bash", plain, mode)).toBe(plain);
+  });
+  it("fixes todo_write items: task → content, missing or loose status, extra fields, a JSON string", () => {
+    expect(cleanArgs("todo_write", { todos: [{ task: "Write CSS" }, { content: "Write JS", status: "Done" }, { title: "Test", status: "in-progress", id: 3 }] }, "workspace-write")).toEqual({
+      todos: [
+        { content: "Write CSS", status: "pending" },
+        { content: "Write JS", status: "completed" },
+        { content: "Test", status: "in_progress" },
+      ],
+    });
+    expect(cleanArgs("todo_write", { todos: JSON.stringify([{ content: "A", status: "pending" }]) }, "workspace-write")).toEqual({ todos: [{ content: "A", status: "pending" }] });
+  });
+  it("reminds after a few steps without a plan update, and only while steps are open", () => {
+    const todos = [
+      { content: "Write CSS", status: "completed" },
+      { content: "Write JS", status: "in_progress" },
+      { content: "Test", status: "pending" },
+    ];
+    expect(planReminder(todos, 2)).toBeNull();
+    expect(planReminder(todos, 3)).toContain('1 of 3 done, current step "Write JS"');
+    expect(planReminder(todos, 4)).toBeNull();
+    expect(planReminder(todos, 7)).not.toBeNull();
+    expect(planReminder(todos.map((t) => ({ ...t, status: "completed" })), 3)).toBeNull();
+    expect(stripReminders(`ok\n\n${planReminder(todos, 3)}`)).toBe("ok");
+  });
+});
+
 describe("patch", () => {
   it("routes models through Aatmiq and switches off third-party clouds", async () => {
     const y = buildPatch(await spec());
@@ -203,6 +255,40 @@ describe("DeepSeek Harness engine", () => {
     } finally {
       await rm(secretDir, { recursive: true, force: true });
     }
+  }, 60_000);
+
+  it("runs calls with stray sandbox_permissions and misnamed plan fields instead of failing them", async () => {
+    const script = [
+      ["todo_write", { todos: [{ task: "Write the note" }, { task: "Check it", status: "todo" }] }],
+      ["write", { file_path: "note.txt", content: "hello", sandbox_permissions: "read,write" }],
+      ["bash", { description: "Show it", command: "cat note.txt", sandbox_permissions: "workspace-write", justification: "Read the note" }],
+    ];
+    const { events, spec: s } = await runTurn(`script: ${JSON.stringify(script)}`);
+    const results = events.filter((e) => e.type === "tool_result") as { isError: boolean; text: string }[];
+    expect(results.map((r) => r.isError)).toEqual([false, false, false]);
+    expect(results[2]!.text).toContain("hello");
+    expect(await readFile(join(s.workdir, "note.txt"), "utf8")).toBe("hello");
+    const plans = events.filter((e) => e.type === "plan") as { items: { content: string; status: string }[] }[];
+    expect(plans[0]!.items).toEqual([
+      { content: "Write the note", status: "pending" },
+      { content: "Check it", status: "pending" },
+    ]);
+  }, 60_000);
+
+  it("reminds the agent to update a stale plan, out of sight of the person", async () => {
+    const script = [
+      ["todo_write", { todos: [{ content: "One", status: "in_progress" }, { content: "Two", status: "pending" }] }],
+      ["bash", { description: "Step", command: "echo step-1" }],
+      ["bash", { description: "Step", command: "echo step-2" }],
+      ["bash", { description: "Step", command: "echo step-3" }],
+    ];
+    toolMessages.length = 0;
+    const { events } = await runTurn(`script: ${JSON.stringify(script)}`);
+    expect(toolMessages.filter((t) => t.includes("<plan-reminder>"))).toHaveLength(1);
+    expect(toolMessages.at(-1)).toContain('0 of 2 done, current step "One"');
+    const results = events.filter((e) => e.type === "tool_result") as { text: string }[];
+    expect(results.at(-1)!.text).toContain("step-3");
+    expect(results.some((r) => r.text.includes("plan-reminder"))).toBe(false);
   }, 60_000);
 
   it("searches the web through Aatmiq", async () => {

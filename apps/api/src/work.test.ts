@@ -244,6 +244,22 @@ d("Work AI", () => {
     expect(t.task.status).toBe("completed");
   }, 60_000);
 
+  it("keeps the plan true: misnamed fields are fixed, open steps are ticked when the turn completes", async () => {
+    const todos = [{ task: "Gather the numbers", status: "in-progress" }, { task: "Write the summary" }];
+    const r = await call("POST", "/api/work/tasks", { workspaceId, prompt: `use todo_write ${JSON.stringify({ todos })}` });
+    const t = await waitStatus(r.json.id, "completed", "failed");
+    expect(t.task.status).toBe("completed");
+    const plans = t.events.filter((e) => e.kind === "plan").map((e) => e.data.items);
+    expect(plans[0]).toEqual([
+      { content: "Gather the numbers", status: "in_progress" },
+      { content: "Write the summary", status: "pending" },
+    ]);
+    expect(plans.at(-1)).toEqual([
+      { content: "Gather the numbers", status: "completed" },
+      { content: "Write the summary", status: "completed" },
+    ]);
+  }, 60_000);
+
   it("streams the timeline over SSE", async () => {
     const res = await fetch(`${apiUrl}/api/work/tasks/${taskId}/stream?after=2`, { headers: { cookie: owner.cookie } });
     const reader = res.body!.getReader();

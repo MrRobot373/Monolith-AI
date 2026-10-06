@@ -83,7 +83,15 @@ package installs and deletions, and the Aatmiq panel writing and testing code.
   the text to the browser as it's written. The runtime never sees provider keys.
 - **Our DSH plugin** (packages/harness/dsh-plugin/aatmiq.mjs) adds the approval policy
   (`tools/pre-execute` → *ask*), the approval answerer (a person decides in Aatmiq; long-poll; any
-  failure counts as *no*), and the `aatmiq` web search provider.
+  failure counts as *no*), and the `aatmiq` web search provider. It also smooths over common
+  tool-call slips before a tool checks its arguments (`tools/execute`, `dsh-plugin/tooling.mjs`):
+  a `sandbox_permissions` that asks for nothing (the call's own mode, or a value that isn't a mode)
+  is dropped, while a real request to widen still goes to a person; `todo_write` items get `task`
+  (or `title`, `text`…) read as `content`, a missing status as `pending`, and loose statuses
+  (`done`, `in-progress`) normalized.
+- **The plan stays true.** After 3 steps without a plan update (then every 4), the agent gets a short
+  reminder appended to the tool result; it's stripped from what people see. When a turn ends
+  normally, steps the agent left open are ticked off, so a finished task never shows "0 of 9".
 - **The timeline** is DSH's session events normalized into `work_event` rows (`user`, `assistant`,
   `tool_call`, `tool_result`, `approval`, `plan`, `status`) with a per-task sequence number. The
   browser replays from a sequence number over SSE, so reconnecting never loses or repeats steps.

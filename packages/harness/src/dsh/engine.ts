@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chown, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { stripReminders } from "../../dsh-plugin/tooling.mjs";
 import { resolveFromHarness } from "../files";
 import type { HarnessEngine, HarnessEvent, TaskRuntime, TaskSpec } from "../types";
 import { buildPatch, PROVIDER_ID } from "./patch";
@@ -81,7 +82,8 @@ export function mapEvent(ev: DshSessionEvent): HarnessEvent | null {
     }
     case "tool/result": {
       const m = d.message as { toolCallId?: string; content?: Block[]; isError?: boolean } | undefined;
-      return { type: "tool_result", callId: String(m?.toolCallId ?? ""), text: textOf(m?.content), isError: !!m?.isError };
+      // Plan reminders are for the agent, not for the person reading the step.
+      return { type: "tool_result", callId: String(m?.toolCallId ?? ""), text: stripReminders(textOf(m?.content)), isError: !!m?.isError };
     }
     case "todo/write": {
       const items = (d.todos ?? d.items) as { content?: string; status?: string }[] | undefined;

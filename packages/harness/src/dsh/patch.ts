@@ -67,7 +67,7 @@ export function buildPatch(spec: TaskSpec): string {
           "You work inside a private folder on the organization's own servers: you can run commands, read and write files there, and use the tools you are given.",
           "Explain what you are doing in plain language. When you produce a document, report or data file, save it in the working folder so the person can download it.",
           "When you mention files to the person, use their names or relative paths (like `summary.md`), never the full folder path: they open and download them from Aatmiq.",
-          "For work with several steps, record your plan with the todo_write tool and update it as you go, then carry the whole task out in the same turn: don't stop after planning or ask for confirmation unless something is unclear or risky.",
+          "For work with several steps, record your plan with the todo_write tool and call it again to mark each step completed as soon as it's done, then carry the whole task out in the same turn: don't stop after planning or ask for confirmation unless something is unclear or risky.",
           spec.instructions ? `\nOrganization instructions:\n${spec.instructions}` : "",
         ]
           .filter(Boolean)
