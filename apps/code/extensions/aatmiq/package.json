@@ -1,0 +1,31 @@
+{
+  "name": "aatmiq",
+  "displayName": "Aatmiq",
+  "description": "Your organization's private coding agent, built into Aatmiq Code.",
+  "publisher": "aatmiq",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["AI", "Other"],
+  "extensionKind": ["workspace"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [{ "id": "aatmiq", "title": "Aatmiq", "icon": "media/aatmiq.svg" }]
+    },
+    "views": {
+      "aatmiq": [{ "type": "webview", "id": "aatmiq.agent", "name": "Agent" }]
+    },
+    "commands": [
+      { "command": "aatmiq.newTask", "title": "New task", "category": "Aatmiq", "icon": "$(add)" },
+      { "command": "aatmiq.askAboutSelection", "title": "Ask Aatmiq about the selection", "category": "Aatmiq" },
+      { "command": "aatmiq.focus", "title": "Open the Aatmiq panel", "category": "Aatmiq" }
+    ],
+    "menus": {
+      "view/title": [{ "command": "aatmiq.newTask", "when": "view == aatmiq.agent", "group": "navigation" }],
+      "editor/context": [{ "command": "aatmiq.askAboutSelection", "when": "editorHasSelection", "group": "aatmiq@1" }]
+    },
+    "keybindings": [{ "command": "aatmiq.focus", "key": "ctrl+alt+i", "mac": "cmd+alt+i" }]
+  }
+}

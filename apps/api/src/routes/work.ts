@@ -2,9 +2,9 @@
  * Work AI for people: tasks, their live timeline, approvals and the files the agent works on.
  * Tasks are private to the person who started them.
  */
-import { and, asc, desc, eq, ilike, workApproval, workEvent, workTask } from "@aatmiq/db";
+import { and, asc, desc, eq, ilike, isNull, workApproval, workEvent, workTask } from "@aatmiq/db";
 import { isOrgAdmin, workMessageSchema, workTaskCreateSchema } from "@aatmiq/shared";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, sep } from "node:path";
@@ -113,7 +113,7 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
         finishedAt: workTask.finishedAt,
       })
       .from(workTask)
-      .where(and(eq(workTask.workspaceId, wsId), eq(workTask.userId, u.id), q ? ilike(workTask.title, `%${q.replace(/[%_\\]/g, "\\$&")}%`) : undefined))
+      .where(and(eq(workTask.workspaceId, wsId), eq(workTask.userId, u.id), isNull(workTask.codeWorkspaceId), q ? ilike(workTask.title, `%${q.replace(/[%_\\]/g, "\\$&")}%`) : undefined))
       .orderBy(desc(workTask.pinned), desc(workTask.updatedAt))
       .limit(200);
   });
@@ -149,53 +149,11 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     return { task: t, events, live: work.isLive(t.id) };
   });
 
-  /**
-   * Live timeline (Server-Sent Events). Replays stored events after `after`, then streams:
-   *   event: event  {seq, kind, data, at}   a stored timeline event
-   *   event: delta  {text}                  text the model is writing right now
-   *   event: files  {}                      the folder may have changed
-   */
+  /** Live timeline (see streamTask). */
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>("/api/work/tasks/:id/stream", async (req, reply) => {
     const u = await requireUser(ctx, req);
     const t = await loadOwnTask(ctx, u, req.params.id);
-    const after = Number(req.query.after ?? 0) || 0;
-
-    reply.hijack();
-    const res = reply.raw;
-    res.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      "x-accel-buffering": "no",
-    });
-    const send = (event: string, data: unknown) => {
-      if (!res.writableEnded && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
-    let last = after;
-    const buffered: WorkStreamEvent[] = [];
-    let replaying = true;
-    const emit = (e: WorkStreamEvent) => {
-      if (e.seq === undefined) return send(e.kind, e.data);
-      if (e.seq <= last) return;
-      last = e.seq;
-      send("event", e);
-    };
-    const unsubscribe = work.subscribe(t.id, (e) => (replaying ? buffered.push(e) : emit(e)));
-    const ping = setInterval(() => res.write(": ping\n\n"), 20_000);
-    res.on("close", () => {
-      clearInterval(ping);
-      unsubscribe();
-    });
-
-    const stored = await db
-      .select({ seq: workEvent.seq, kind: workEvent.kind, data: workEvent.data, at: workEvent.createdAt })
-      .from(workEvent)
-      .where(eq(workEvent.taskId, t.id))
-      .orderBy(asc(workEvent.seq));
-    for (const e of stored) if (e.seq > after) emit({ ...e, at: e.at.toISOString() });
-    replaying = false;
-    for (const e of buffered.splice(0)) emit(e);
-    send("ready", { after: last });
+    await streamTask(ctx, t.id, Number(req.query.after ?? 0) || 0, reply);
   });
 
   app.post<{ Params: { id: string } }>("/api/work/tasks/:id/messages", async (req) => {
@@ -329,4 +287,51 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     work.pulse(t.id, "files", {});
     return { path: saved };
   });
+}
+
+/**
+ * A task's live timeline as Server-Sent Events. Replays stored events after `after`, then streams:
+ *   event: event  {seq, kind, data, at}   a stored timeline event
+ *   event: delta  {text}                  text the model is writing right now
+ *   event: files  {}                      the folder may have changed
+ */
+export async function streamTask(ctx: AppContext, taskId: string, after: number, reply: FastifyReply) {
+  const { db, work } = ctx;
+  const t = { id: taskId };
+  reply.hijack();
+  const res = reply.raw;
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  const send = (event: string, data: unknown) => {
+    if (!res.writableEnded && !res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  let last = after;
+  const buffered: WorkStreamEvent[] = [];
+  let replaying = true;
+  const emit = (e: WorkStreamEvent) => {
+    if (e.seq === undefined) return send(e.kind, e.data);
+    if (e.seq <= last) return;
+    last = e.seq;
+    send("event", e);
+  };
+  const unsubscribe = work.subscribe(t.id, (e) => (replaying ? buffered.push(e) : emit(e)));
+  const ping = setInterval(() => res.write(": ping\n\n"), 20_000);
+  res.on("close", () => {
+    clearInterval(ping);
+    unsubscribe();
+  });
+
+  const stored = await db
+    .select({ seq: workEvent.seq, kind: workEvent.kind, data: workEvent.data, at: workEvent.createdAt })
+    .from(workEvent)
+    .where(eq(workEvent.taskId, t.id))
+    .orderBy(asc(workEvent.seq));
+  for (const e of stored) if (e.seq > after) emit({ ...e, at: e.at.toISOString() });
+  replaying = false;
+  for (const e of buffered.splice(0)) emit(e);
+  send("ready", { after: last });
 }

@@ -25,6 +25,7 @@ import { workConfigRoutes } from "./routes/work-config";
 import { startScheduler } from "./services/schedules";
 import { CodeServers } from "./services/code";
 import { codeRoutes } from "./routes/code";
+import { codeInternalRoutes } from "./routes/code-internal";
 import { createCodeProxy } from "./routes/code-proxy";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { workInternalRoutes } from "./routes/work-internal";
@@ -134,6 +135,7 @@ export async function buildApp(
   await workInternalRoutes(app, ctx);
   await workConfigRoutes(app, ctx);
   await codeRoutes(app, ctx);
+  await codeInternalRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));

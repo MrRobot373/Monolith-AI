@@ -12,6 +12,7 @@
 import {
   and,
   asc,
+  codeWorkspace,
   connector,
   desc,
   eq,
@@ -272,13 +273,17 @@ export class WorkRunner {
     await this.setStatus(taskId, "running");
 
     try {
-      const { model: m } = await resolveModel(db, box, task.workspaceId, "work", task.modelId);
+      // In Aatmiq Code the agent works in the person's own workspace, as the person's own user.
+      const [code] = task.codeWorkspaceId ? await db.select().from(codeWorkspace).where(eq(codeWorkspace.id, task.codeWorkspaceId)) : [];
+      const { model: m } = await resolveModel(db, box, task.workspaceId, code ? "code" : "work", task.modelId);
       if (task.modelId !== m.id) await db.update(workTask).set({ modelId: m.id }).where(eq(workTask.id, taskId));
-      const workdir = this.filesDir(taskId);
+      const runUid = code ? await this.ctx.code.uidFor(task.userId) : task.runUid;
+      const workdir = code ? this.ctx.code.workspacePath(task.userId, code.slug) : this.filesDir(taskId);
       const homeDir = join(this.taskDir(taskId), "runtime");
       await mkdir(this.dir, { recursive: true });
       const skillsDir = await this.writeSkills(task.userId, join(homeDir, "skills"));
-      await this.prepareFolder(taskId, task.runUid);
+      await this.prepareFolder(taskId, runUid);
+      if (code) await this.ctx.code.prepare(task.userId, workdir);
       const [org] = await db.select({ productName: organization.productName }).from(organization).limit(1);
       const runtime = await this.engine.start(
         {
@@ -295,7 +300,16 @@ export class WorkRunner {
           connectors: await this.connectorSpecs(),
           productName: org?.productName ?? PRODUCT_NAME,
           sandbox: this.ctx.cfg.workSandbox ?? "on",
-          ...(this.isolated ? { uid: task.runUid, gid: task.runUid } : {}),
+          ...(this.isolated ? { uid: runUid, gid: runUid } : {}),
+          ...(code
+            ? {
+                instructions: [
+                  `You are the coding agent inside Aatmiq Code, working in the person's workspace "${code.name}" (your working folder).`,
+                  "Read the relevant code before changing it, keep changes focused, follow the project's conventions, and run its tests or build when you change behavior.",
+                  "The person sees your edits in their editor and in Source Control; summarize what you changed and why at the end.",
+                ].join(" "),
+              }
+            : {}),
         },
         (e) => void this.onEvent(l, e).catch((err) => this.opts.log?.("work: handling an event failed", err)),
       );

@@ -11,11 +11,50 @@ import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import type { FastifyRequest } from "fastify";
 import { getSessionUser, type AppContext, type SessionUser } from "../context";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { extname, join, normalize, sep } from "node:path";
 import { HttpError } from "../errors";
-import { IDE_BASE_PATH } from "../services/code";
+import { codeDistDir, IDE_BASE_PATH } from "../services/code";
 import { canUseCode } from "./code";
 
 const SESSION_TTL_MS = 30_000;
+
+/** The IDE's own shipped files (/code/ide/<quality>-<commit>/static/…): public code, served directly. */
+const STATIC = new RegExp(`^${IDE_BASE_PATH}/[a-z]+-[0-9a-f]{40}/static/((?:out|resources|extensions|node_modules)/[^?#]*)`);
+const TYPES: Record<string, string> = {
+  ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png",
+  ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".wasm": "application/wasm",
+  ".map": "application/json", ".txt": "text/plain; charset=utf-8",
+};
+
+async function serveStatic(url: string, res: ServerResponse): Promise<boolean> {
+  const m = STATIC.exec(url);
+  if (!m) return false;
+  const root = codeDistDir();
+  const rel = normalize(decodeURIComponent(m[1]!));
+  const file = join(root, rel);
+  if (!file.startsWith(root + sep) || rel.includes("..")) {
+    res.writeHead(404).end();
+    return true;
+  }
+  const st = await stat(file).catch(() => null);
+  if (!st?.isFile()) {
+    res.writeHead(404).end();
+    return true;
+  }
+  res.writeHead(200, {
+    "content-type": TYPES[extname(file)] ?? "application/octet-stream",
+    "content-length": String(st.size),
+    // The commit is in the path, so these never change.
+    "cache-control": "public, max-age=31536000, immutable",
+    // Webview frames (and their service worker) load from here.
+    ...(rel.includes("contrib/webview/browser/pre/") ? { "service-worker-allowed": "/" } : {}),
+  });
+  createReadStream(file).pipe(res);
+  return true;
+}
 
 /** Only the IDE's own cookies go through. */
 function ideCookies(cookie: string | undefined) {
@@ -58,6 +97,7 @@ export function createCodeProxy(ctx: AppContext) {
 
   async function http(req: IncomingMessage, res: ServerResponse) {
     try {
+      if ((req.method === "GET" || req.method === "HEAD") && (await serveStatic(req.url ?? "", res))) return;
       const { user, allowed } = await who(req);
       if (!user) {
         const wantsPage = (req.headers.accept ?? "").includes("text/html");

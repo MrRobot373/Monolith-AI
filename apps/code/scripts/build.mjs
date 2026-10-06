@@ -100,11 +100,43 @@ export function replaceInlinedProduct(code, product) {
   return { code, count };
 }
 
-/** Add `configurationDefaults` to the web workbench options the server sends to the browser. */
-export function injectConfigurationDefaults(code, defaults) {
+/**
+ * Extend the web workbench options the server sends to the browser:
+ *  - configurationDefaults: our default settings, applied before any extension loads
+ *  - webviewEndpoint: serve webviews from this server (not Microsoft's vscode-cdn.net)
+ */
+export function injectWorkbenchOptions(code, defaults, product) {
   const anchor = /productConfiguration:([A-Za-z_$][\w$]*),callbackRoute:([A-Za-z_$][\w$]*)\}/;
-  if (!anchor.test(code)) throw new Error("workbench options not found in server-main.js; the upstream build layout changed");
-  return code.replace(anchor, (m, a, b) => `productConfiguration:${a},callbackRoute:${b},configurationDefaults:${JSON.stringify(defaults)}}`);
+  const base = /M=\{remoteAuthority:[A-Za-z_$][\w$]*,serverBasePath:([A-Za-z_$][\w$]*),/.exec(code) ?? /serverBasePath:([A-Za-z_$][\w$]*),_wrapWebWorkerExtHostInIframe/.exec(code);
+  if (!anchor.test(code) || !base) throw new Error("workbench options not found in server-main.js; the upstream build layout changed");
+  const pre = `/${product.quality}-${product.commit}/static/out/vs/workbench/contrib/webview/browser/pre`;
+  return code.replace(
+    anchor,
+    (m, a, b) => `productConfiguration:${a},callbackRoute:${b},configurationDefaults:${JSON.stringify(defaults)},webviewEndpoint:(${base[1]}||"")+${JSON.stringify(pre)}}`,
+  );
+}
+
+/**
+ * Webview frames normally live on a per-origin hash subdomain of a CDN. Aatmiq serves them from
+ * its own origin, so the frame also accepts a parent on its own origin. The page pins its inline
+ * script with a CSP hash, which is recomputed.
+ */
+export function patchWebviewHost(html) {
+  const check = "if (hostname === parentOriginHash || hostname.startsWith(parentOriginHash + '.')) {";
+  if (!html.includes(check)) throw new Error("webview host check not found; the upstream build layout changed");
+  const patched = html.replace(check, "if (parentOrigin === location.origin || hostname === parentOriginHash || hostname.startsWith(parentOriginHash + '.')) {");
+  const m = /<script async type="module">([\s\S]*?)<\/script>/.exec(patched);
+  if (!m) throw new Error("webview inline script not found");
+  const hash = createHash("sha256").update(m[1]).digest("base64");
+  return patched.replace(/'sha256-[A-Za-z0-9+/=]+'/, `'sha256-${hash}'`);
+}
+
+/** The workbench compares webview origins by parsing the endpoint; resolve our path-only endpoint first. */
+export function patchWebviewEndpoint(code) {
+  const re = /const ([A-Za-z_$][\w$]*)=this\.([A-Za-z_$][\w$]*)\.webviewExternalEndpoint;if\(!\1\)throw/g;
+  const matches = code.match(re);
+  if (!matches || matches.length !== 1) throw new Error("webview endpoint lookup not found in workbench.js; the upstream build layout changed");
+  return code.replace(re, (m, v, o) => `let ${v}=this.${o}.webviewExternalEndpoint;${v}&&${v}.startsWith("/")&&(${v}=location.origin+${v});if(!${v})throw`);
 }
 
 async function icons(dir) {
@@ -178,6 +210,10 @@ async function main() {
   const manifestPath = join(resources, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   writeFileSync(manifestPath, JSON.stringify({ ...manifest, name: product.nameLong, short_name: product.nameShort }, null, 2));
+  const workbenchJs = join(out, "out", "vs", "code", "browser", "workbench", "workbench.js");
+  writeFileSync(workbenchJs, patchWebviewEndpoint(readFileSync(workbenchJs, "utf8")));
+  const webviewHtml = join(out, "out", "vs", "workbench", "contrib", "webview", "browser", "pre", "index.html");
+  writeFileSync(webviewHtml, patchWebviewHost(readFileSync(webviewHtml, "utf8")));
   for (const v of ["dark", "light", "hcDark", "hcLight"]) {
     cpSync(join(ROOT, "branding", `letterpress-${v}.svg`), join(out, "out", "media", `letterpress-${v}.svg`));
   }
@@ -193,7 +229,7 @@ async function main() {
   const defaults = JSON.parse(readFileSync(join(ROOT, "settings.json"), "utf8"));
   delete defaults["//"];
   const serverMain = join(out, "out", "server-main.js");
-  const patched = injectConfigurationDefaults(readFileSync(serverMain, "utf8"), defaults);
+  const patched = injectWorkbenchOptions(readFileSync(serverMain, "utf8"), defaults, product);
   writeFileSync(serverMain, patched);
   mkdirSync(join(out, "aatmiq"), { recursive: true });
   writeFileSync(join(out, "aatmiq", "build.json"), JSON.stringify({ base: base.name, version: base.version, arch, builtAt: new Date().toISOString() }, null, 2));
