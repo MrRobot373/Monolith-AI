@@ -132,7 +132,7 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
       .insert(workTask)
       .values({ workspaceId: b.workspaceId, userId: u.id, title: titleFrom(b.prompt), modelId: m.id, projectId: b.projectId ?? null })
       .returning();
-    await work.submit(t!.id, b.prompt);
+    if (b.start) await work.submit(t!.id, b.prompt);
     const [fresh] = await db.select().from(workTask).where(eq(workTask.id, t!.id));
     return fresh;
   });

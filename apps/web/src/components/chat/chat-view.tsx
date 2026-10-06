@@ -634,7 +634,7 @@ export function ChatView({
             <section>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-[13px] text-fg">Connect your tools</h2>
-                <span className="text-[12px] text-fg-subtle">Arrives with Work AI</span>
+                <Link href="/app/work" className="text-[12px] text-fg-subtle transition-colors hover:text-fg">Through Work AI connectors</Link>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {APPS.map((a) => (
@@ -647,7 +647,7 @@ export function ChatView({
                         <a.icon className="size-3.5" />
                       </span>
                       <span className="flex-1 text-[13px] text-fg">{a.name}</span>
-                      <span className="rounded border border-border px-1.5 py-px text-[10.5px] text-fg-subtle">Soon</span>
+                      <span className="rounded border border-border px-1.5 py-px text-[10.5px] text-fg-subtle">MCP</span>
                     </div>
                     <p className="mt-2.5 line-clamp-2 text-[12px] leading-relaxed text-fg-subtle">{a.desc}</p>
                   </div>

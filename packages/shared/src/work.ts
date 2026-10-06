@@ -22,6 +22,8 @@ export const workTaskCreateSchema = z.object({
   prompt: z.string().trim().min(1).max(50_000),
   modelId: z.string().optional(),
   projectId: z.string().optional(),
+  /** false: create the task without starting it (to add files first), then send the prompt as a message. */
+  start: z.boolean().default(true),
 });
 
 export const workMessageSchema = z.object({ prompt: z.string().trim().min(1).max(50_000) });

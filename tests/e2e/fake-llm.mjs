@@ -10,6 +10,15 @@ createServer(async (req, res) => {
     const vec = (t) => { const v = new Array(64).fill(0); for (const w of t.toLowerCase().split(/\W+/)) if (w) v[[...w].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 64] += 1; const n = Math.hypot(...v) || 1; return v.map((x) => x / n); };
     return res.end(JSON.stringify({ data: [].concat(input).map((t, index) => ({ index, embedding: vec(t) })), usage: { prompt_tokens: 10 } }));
   }
+  if (req.url?.startsWith("/searx/search")) {
+    res.setHeader("content-type", "application/json");
+    const q = new URL(req.url, "http://x").searchParams.get("q") ?? "";
+    return res.end(JSON.stringify({ results: [
+      { url: "https://intranet.example/travel-policy", title: "Travel policy 2026", content: `Economy class for flights under 6 hours (${q}).` },
+      { url: "https://example.org/guide", title: "A public guide", content: "Background reading." },
+    ] }));
+  }
+  if (req.url === "/mcp") return fakeMcp(req, res);
   if (req.url === "/v1/chat/completions") {
     let body = ""; for await (const c of req) body += c;
     const j = JSON.parse(body);
@@ -70,24 +79,67 @@ async function agentReply(j, res) {
     }
     finish("stop");
   };
+  // Only the latest real user request matters (runtime context and reminders are skipped;
+  // a restarted task's earlier conversation is ignored).
+  const clean = (m) => textOf(m.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+  const askIdx = msgs.findLastIndex((m) => m.role === "user" && clean(m) && !/^Current runtime context/.test(clean(m)));
+  const ask = askIdx >= 0 ? clean(msgs[askIdx]).split("</earlier-conversation>").at(-1).trim() : "";
+  const toolsSoFar = msgs.slice(askIdx + 1).filter((m) => m.role === "tool").length;
+  const callTool = (name, args, preface) => {
+    const a = JSON.stringify(args);
+    if (preface) send({ choices: [{ index: 0, delta: { content: preface } }] });
+    send({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call_${Date.now()}_${toolsSoFar}`, type: "function", function: { name, arguments: "" } }] } }] });
+    for (let i = 0; i < a.length; i += 20) send({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: a.slice(i, i + 20) } }] } }] });
+    finish("tool_calls");
+  };
+  // "demo: …" walks through a small multi-step job: a plan, a command, a file, then an answer.
+  if (/^demo:/.test(ask)) {
+    const plan = (done) => ({ todos: ["Collect the sales numbers", "Write the report", "Summarize the result"].map((content, i) => ({ content, status: i < done ? "completed" : i === done ? "in_progress" : "pending" })) });
+    const script = [
+      () => callTool("todo_write", plan(0), "Let me plan this."),
+      () => callTool("bash", { description: "Create the data", command: "printf 'region,sales\\nNorth,120\\nSouth,95\\n' > sales.csv && cat sales.csv" }),
+      () => callTool("todo_write", plan(1)),
+      () => callTool("write", { file_path: "report.md", content: "# Sales report\n\n| Region | Sales |\n|---|---|\n| North | 120 |\n| South | 95 |\n\nNorth leads by 25.\n" }),
+      () => callTool("todo_write", plan(3)),
+    ];
+    if (toolsSoFar < script.length) return script[toolsSoFar]();
+    return say("I created **sales.csv** and **report.md**. North leads South by 25 (120 vs 95). Open the Files panel to download the report.");
+  }
   if (last.role === "tool") {
     const out = textOf(last.content).replace(/\s+/g, " ").trim().slice(0, 300);
     return say(`Done. The tool returned: ${out}`);
   }
-  // Only the latest real user request matters (runtime context messages are skipped).
-  const user = [...msgs].reverse().find((m) => m.role === "user" && !/^Current runtime context/.test(textOf(m.content)));
-  const ask = textOf(user?.content ?? "");
   let call = null;
   let m;
-  if ((m = /run: (.+)/s.exec(ask)) && has("bash")) call = ["bash", { description: "Run the requested command", command: m[1].trim() }];
+  if ((m = /run: (.+?)(?:\n\n|$)/s.exec(ask)) && has("bash")) call = ["bash", { description: "Run the requested command", command: m[1].trim() }];
   else if ((m = /write (\S+): (.+)/s.exec(ask)) && has("write")) call = ["write", { file_path: m[1], content: m[2].trim() }];
   else if ((m = /search: (.+)/.exec(ask)) && has("web_search")) call = ["web_search", { queries: [m[1].trim()] }];
   else if ((m = /fetch: (\S+)/.exec(ask)) && has("web_fetch")) call = ["web_fetch", { url: m[1] }];
-  else if ((m = /use (\w+) (\{.*\})/s.exec(ask)) && has(m[1])) call = [m[1], JSON.parse(m[2])];
+  else if ((m = /use (\S+) (\{.*\})/s.exec(ask)) && has(m[1])) call = [m[1], JSON.parse(m[2])];
   if (!call) return say(`**${j.model}** (agent) here. You asked: "${ask.slice(0, 200)}". I can run commands, write files and search the web.`);
   const args = JSON.stringify(call[1]);
   send({ choices: [{ index: 0, delta: { content: `I'll use ${call[0]}.` } }] });
   send({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call_${Date.now()}`, type: "function", function: { name: call[0], arguments: "" } }] } }] });
   for (let i = 0; i < args.length; i += 20) send({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: args.slice(i, i + 20) } }] } }] });
   finish("tool_calls");
+}
+
+/** A tiny MCP server (streamable HTTP, JSON responses) with a notes tool, for connector tests. */
+const notes = [];
+async function fakeMcp(req, res) {
+  if (req.method !== "POST") { res.statusCode = 405; return res.end(); }
+  let body = ""; for await (const c of req) body += c;
+  const msg = JSON.parse(body);
+  if (msg.id === undefined) { res.statusCode = 202; return res.end(); }
+  const reply = (result) => { res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fake" }); res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result })); };
+  if (msg.method === "initialize") return reply({ protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "notes", version: "1.0" } });
+  if (msg.method === "tools/list") return reply({ tools: [
+    { name: "create_note", description: "Save a note for the team", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+    { name: "list_notes", description: "List saved notes", inputSchema: { type: "object", properties: {} } },
+  ] });
+  if (msg.method === "tools/call") {
+    if (msg.params.name === "create_note") { notes.push(msg.params.arguments?.text ?? ""); return reply({ content: [{ type: "text", text: `Saved note #${notes.length}: ${msg.params.arguments?.text}` }] }); }
+    return reply({ content: [{ type: "text", text: notes.length ? notes.join("\n") : "No notes yet." }] });
+  }
+  return reply({});
 }

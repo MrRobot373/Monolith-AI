@@ -204,7 +204,8 @@ export class WorkRunner {
       const queued = await this.ctx.db
         .select({ id: workTask.id, userId: workTask.userId })
         .from(workTask)
-        .where(eq(workTask.status, "queued"))
+        // Drafts (created without a message yet) wait until their first message.
+        .where(and(eq(workTask.status, "queued"), sql`exists (select 1 from work_event e where e.task_id = ${workTask.id} and e.kind = 'user')`))
         .orderBy(asc(workTask.updatedAt));
       for (const t of queued) {
         if (this.live.has(t.id)) continue;
@@ -440,6 +441,8 @@ export class WorkRunner {
 
   async requestApproval(taskId: string, a: { callId: string | null; toolName: string; reason: string | null }) {
     const { db } = this.ctx;
+    // The tool call itself may still be on its way to the timeline.
+    await this.writes.get(taskId)?.catch(() => undefined);
     let detail: Record<string, unknown> | null = null;
     if (a.callId) {
       const calls = await db
