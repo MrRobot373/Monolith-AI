@@ -35,6 +35,14 @@ export interface TaskSpec {
   productName: string;
   /** Extra instructions placed in the system prompt (org/project). */
   instructions?: string;
+  /**
+   * Run the runtime as this Unix user/group (the API must run as root). Each task gets its own,
+   * so tasks can't read each other's folders or the server's files.
+   */
+  uid?: number;
+  gid?: number;
+  /** "on": commands may only change the task folder (bwrap/Landlock). "off": rely on `uid` isolation alone. */
+  sandbox?: "on" | "off";
 }
 
 export type HarnessEvent =

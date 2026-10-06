@@ -1,0 +1,2 @@
+CREATE SEQUENCE "public"."work_uid_seq" INCREMENT BY 1 MINVALUE 100000 MAXVALUE 2000000000 START WITH 100000 CACHE 1;--> statement-breakpoint
+ALTER TABLE "work_task" ADD COLUMN "run_uid" integer DEFAULT nextval('work_uid_seq') NOT NULL;

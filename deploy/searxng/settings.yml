@@ -1,0 +1,19 @@
+# SearXNG for Aatmiq's private web search (compose profile "search").
+# Work AI asks for JSON results; nothing here is exposed outside the Docker network.
+use_default_settings: true
+general:
+  instance_name: "Aatmiq search"
+  enable_metrics: false
+server:
+  # Replaced at start from SEARXNG_SECRET (see docker-compose.yml).
+  secret_key: "change-me"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+outgoing:
+  request_timeout: 6.0

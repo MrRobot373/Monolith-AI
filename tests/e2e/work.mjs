@@ -199,6 +199,18 @@ await step("Tasks", "Task list shows statuses; rename and pin from the menu", pa
   await shot(page, "work-home-tasks");
 });
 
+await step("Isolation", "A task runs as its own user, can't write outside its folder or read the server's environment", page, async () => {
+  await page.goto(`${APP}/app/work`);
+  await send(page, "run: id -u; touch /dev/shm/aatmiq-escape && echo ESCAPED; cat /proc/1/environ | head -c 40; echo; echo done");
+  await page.waitForURL(/\/app\/work\/[\w-]+$/);
+  await waitStatus(page, "completed");
+  const out = await page.getByTestId("task-answer").last().innerText();
+  const uid = Number(/returned: (\d+)/.exec(out)?.[1]);
+  expect(uid >= 100000, `uid ${uid}: ${out}`);
+  expect(!out.includes("ESCAPED"), `wrote outside the folder: ${out}`);
+  expect(/permission denied/i.test(out), `environ readable: ${out}`);
+});
+
 /* ═════════════ Skills, schedules, connectors ═════════════ */
 await step("Skills", "Create an org skill; the agent sees it", page, async () => {
   await page.goto(`${APP}/app/work/skills`);

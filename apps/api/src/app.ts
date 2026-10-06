@@ -27,6 +27,7 @@ import { workInternalRoutes } from "./routes/work-internal";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
 import type { AddressInfo } from "node:net";
+import { chmod, mkdir } from "node:fs/promises";
 
 export async function buildApp(
   db: DB,
@@ -114,6 +115,11 @@ export async function buildApp(
   let timer: NodeJS.Timeout | undefined;
   let stopScheduler: (() => void) | undefined;
   app.addHook("onReady", async () => {
+    // Document storage is the server's alone; Work AI tasks run as other users (docs/06-work-ai.md).
+    if (process.getuid?.() === 0 && cfg.storageDir) {
+      await mkdir(cfg.storageDir, { recursive: true }).catch(() => undefined);
+      await chmod(cfg.storageDir, 0o700).catch(() => undefined);
+    }
     ctx.license.start();
     purge();
     void ctx.work.recover().catch((e) => app.log.warn(e, "recovering Work AI tasks failed"));

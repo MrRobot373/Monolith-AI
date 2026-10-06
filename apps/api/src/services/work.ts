@@ -29,7 +29,7 @@ import {
 import { createDshEngine, type HarnessEngine, type HarnessEvent, type TaskRuntime } from "@aatmiq/harness";
 import { DEFAULT_WORK_SETTINGS, PRODUCT_NAME, type WorkSettingsValue } from "@aatmiq/shared";
 import { randomBytes } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, chown, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { AppContext } from "../context";
 import { resolveModel } from "./models";
@@ -104,6 +104,36 @@ export class WorkRunner {
 
   get dir() {
     return resolve(this.ctx.cfg.workDir ?? ".data/work");
+  }
+  /** Each task runs as its own Unix user (needs root; see docs/06-work-ai.md). */
+  get isolated() {
+    return this.ctx.cfg.workIsolation !== "off" && process.getuid?.() === 0;
+  }
+
+  /**
+   * Create the task folder. When isolated, it belongs to the task's user with 0700 and the work
+   * root is 0711, so a task can reach its own folder but can't list or read anyone else's.
+   */
+  async prepareFolder(taskId: string, uid: number) {
+    const dir = this.taskDir(taskId);
+    await mkdir(join(dir, "files"), { recursive: true });
+    await mkdir(join(dir, "runtime"), { recursive: true });
+    if (!this.isolated) return;
+    await chmod(this.dir, 0o711);
+    await this.chownTree(dir, uid);
+    await chmod(dir, 0o700);
+  }
+
+  /** Give the task's user its folder contents (for files the server adds: uploads, skills). */
+  async chownTree(path: string, uid: number) {
+    if (!this.isolated) return;
+    await chown(path, uid, uid);
+    const entries = await readdir(path, { withFileTypes: true }).catch(() => []);
+    for (const e of entries) {
+      const p = join(path, e.name);
+      if (e.isDirectory()) await this.chownTree(p, uid);
+      else await chown(p, uid, uid).catch(() => undefined);
+    }
   }
   taskDir(taskId: string) {
     return join(this.dir, taskId);
@@ -194,29 +224,41 @@ export class WorkRunner {
     void this.pump().catch((e) => this.opts.log?.("work: starting a task failed", e));
   }
 
-  /** Start queued tasks while people have free slots (oldest first). */
-  private pumping: Promise<void> | null = null;
+  /**
+   * Start queued tasks while people have free slots (oldest first). Calls made while a pass is
+   * running (for example from a task that failed to start) ask for one more pass instead of waiting,
+   * so a pass never waits on itself.
+   */
+  private pumping = false;
+  private pumpAgain = false;
   async pump(): Promise<void> {
     if (this.stopped) return;
-    if (this.pumping) return this.pumping.then(() => this.pump());
-    this.pumping = (async () => {
-      const settings = await getWorkSettings(this.ctx.db);
-      const queued = await this.ctx.db
-        .select({ id: workTask.id, userId: workTask.userId })
-        .from(workTask)
-        // Drafts (created without a message yet) wait until their first message.
-        .where(and(eq(workTask.status, "queued"), sql`exists (select 1 from work_event e where e.task_id = ${workTask.id} and e.kind = 'user')`))
-        .orderBy(asc(workTask.updatedAt));
-      for (const t of queued) {
-        if (this.live.has(t.id)) continue;
-        const busy = [...this.live.values()].filter((l) => l.userId === t.userId && l.busy).length;
-        if (busy >= settings.maxConcurrentPerUser) continue;
-        await this.start(t.id, settings);
-      }
-    })().finally(() => {
-      this.pumping = null;
-    });
-    return this.pumping;
+    if (this.pumping) {
+      this.pumpAgain = true;
+      return;
+    }
+    this.pumping = true;
+    try {
+      do {
+        this.pumpAgain = false;
+        const settings = await getWorkSettings(this.ctx.db);
+        const queued = await this.ctx.db
+          .select({ id: workTask.id, userId: workTask.userId })
+          .from(workTask)
+          // Drafts (created without a message yet) wait until their first message.
+          .where(and(eq(workTask.status, "queued"), sql`exists (select 1 from work_event e where e.task_id = ${workTask.id} and e.kind = 'user')`))
+          .orderBy(asc(workTask.updatedAt));
+        for (const t of queued) {
+          if (this.stopped) return;
+          if (this.live.has(t.id)) continue;
+          const busy = [...this.live.values()].filter((l) => l.userId === t.userId && l.busy).length;
+          if (busy >= settings.maxConcurrentPerUser) continue;
+          await this.start(t.id, settings);
+        }
+      } while (this.pumpAgain && !this.stopped);
+    } finally {
+      this.pumping = false;
+    }
   }
 
   private async start(taskId: string, settings: WorkSettingsValue) {
@@ -234,8 +276,9 @@ export class WorkRunner {
       if (task.modelId !== m.id) await db.update(workTask).set({ modelId: m.id }).where(eq(workTask.id, taskId));
       const workdir = this.filesDir(taskId);
       const homeDir = join(this.taskDir(taskId), "runtime");
-      await mkdir(workdir, { recursive: true });
+      await mkdir(this.dir, { recursive: true });
       const skillsDir = await this.writeSkills(task.userId, join(homeDir, "skills"));
+      await this.prepareFolder(taskId, task.runUid);
       const [org] = await db.select({ productName: organization.productName }).from(organization).limit(1);
       const runtime = await this.engine.start(
         {
@@ -251,6 +294,8 @@ export class WorkRunner {
           skillsDir,
           connectors: await this.connectorSpecs(),
           productName: org?.productName ?? PRODUCT_NAME,
+          sandbox: this.ctx.cfg.workSandbox ?? "on",
+          ...(this.isolated ? { uid: task.runUid, gid: task.runUid } : {}),
         },
         (e) => void this.onEvent(l, e).catch((err) => this.opts.log?.("work: handling an event failed", err)),
       );

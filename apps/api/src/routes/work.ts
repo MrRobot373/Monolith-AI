@@ -6,7 +6,7 @@ import { and, asc, desc, eq, ilike, workApproval, workEvent, workTask } from "@a
 import { isOrgAdmin, workMessageSchema, workTaskCreateSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, sep } from "node:path";
 import { z } from "zod";
 import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
@@ -319,9 +319,10 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
       const data = await part.toBuffer();
       if (part.file.truncated) throw new HttpError(413, "Files can be up to 25 MB.", "too_large");
       const name = basename(part.filename || "upload").replace(/[\\/\0]/g, "_").slice(0, 200) || "upload";
-      const root = work.filesDir(t.id);
-      await mkdir(root, { recursive: true });
-      await writeFile(join(root, name), data);
+      await work.prepareFolder(t.id, t.runUid);
+      const target = join(work.filesDir(t.id), name);
+      await writeFile(target, data);
+      await work.chownTree(target, t.runUid);
       saved = name;
     }
     if (!saved) throw badRequest("No file was uploaded");

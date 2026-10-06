@@ -22,6 +22,8 @@ let close: () => Promise<void>;
 let fake: Server;
 let fakeUrl = "";
 let apiUrl = "";
+let workDir = "";
+let storageDir = "";
 const modelRequests: { role: string; content: unknown }[][] = [];
 const mcpCalls: { name: string; arguments?: Record<string, unknown> }[] = [];
 let lastTools: string[] = [];
@@ -154,8 +156,8 @@ d("Work AI", () => {
       secret: "test-secret-test-secret-test-secret-1234",
       allowMockProvider: false,
       port: 0,
-      storageDir: await mkdtemp(join(tmpdir(), "aatmiq-files-")),
-      workDir: await mkdtemp(join(tmpdir(), "aatmiq-work-")),
+      storageDir: (storageDir = await mkdtemp(join(tmpdir(), "aatmiq-files-"))),
+      workDir: (workDir = await mkdtemp(join(tmpdir(), "aatmiq-work-"))),
     };
     app = await buildApp(db, cfg);
     apiUrl = await app.listen({ port: 0, host: "127.0.0.1" });
@@ -336,6 +338,26 @@ d("Work AI", () => {
     expect(list.json[0]).toMatchObject({ lastTaskId: run.json.taskId, lastStatus: "completed" });
     const off = await call("PATCH", `/api/work/schedules/${s.json.id}`, { enabled: false });
     expect(off.json.nextRunAt).toBeNull();
+  }, 60_000);
+
+  it.runIf(process.getuid?.() === 0)("isolates tasks: own Unix user, no access to other tasks or documents", async () => {
+    const other = join(workDir, taskId, "files");
+    const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: `run: id -u; ls ${other}; ls ${storageDir}` });
+    const done = await waitStatus(t.json.id, "completed", "failed");
+    const out = String(done.events.find((e) => e.kind === "tool_result")?.data.text);
+    expect(Number(out.split("\n")[0])).toBeGreaterThanOrEqual(100000);
+    expect(out.match(/permission denied/gi)?.length).toBe(2);
+  }, 60_000);
+
+  it("a runtime that can't start fails its task without blocking the next one", async () => {
+    process.env.AATMIQ_DSH_CLI = "/nonexistent/dsh.js";
+    const broken = await call("POST", "/api/work/tasks", { workspaceId, prompt: "hello?" });
+    const failed = await waitStatus(broken.json.id, "failed", "completed");
+    delete process.env.AATMIQ_DSH_CLI;
+    expect(failed.task.status).toBe("failed");
+    expect(failed.task.error).toMatch(/start|Cannot find module/i);
+    const next = await call("POST", "/api/work/tasks", { workspaceId, prompt: "still there?" });
+    expect((await waitStatus(next.json.id, "completed", "failed")).task.status).toBe("completed");
   }, 60_000);
 
   it("guards the internal API and cancels running work", async () => {

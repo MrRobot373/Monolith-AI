@@ -14,6 +14,10 @@ export interface Config {
   workDir?: string;
   /** How the agent runtime reaches this API (default: this server on 127.0.0.1). */
   workControlUrl?: string | null;
+  /** "on": commands can only change the task folder (bwrap/Landlock). "off" where the kernel offers neither. */
+  workSandbox?: "on" | "off";
+  /** "auto": each task runs as its own Unix user when the API runs as root. "off": same user as the API. */
+  workIsolation?: "auto" | "off";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -32,5 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     version: env.APP_VERSION ?? "0.1.0",
     workDir: env.WORK_DIR ?? ".data/work",
     workControlUrl: env.WORK_CONTROL_URL || null,
+    workSandbox: env.WORK_SANDBOX === "off" ? "off" : "on",
+    workIsolation: env.WORK_ISOLATION === "off" ? "off" : "auto",
   };
 }

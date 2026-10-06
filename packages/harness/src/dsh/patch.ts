@@ -3,12 +3,11 @@
  * models come from Aatmiq's gateway, approvals and web search go through Aatmiq, and anything
  * that could reach a third-party cloud or change the runtime itself is switched off.
  */
-import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
 import type { TaskSpec } from "../types";
+import { harnessFile } from "../files";
 
 export const PROVIDER_ID = "aatmiq";
-export const PLUGIN_PATH = fileURLToPath(new URL("../../dsh-plugin/aatmiq.mjs", import.meta.url));
 
 /** Rows from the stock profile that must not run inside a private, multi-user deployment. */
 export const DISABLED_ROWS = [
@@ -68,6 +67,8 @@ export function buildPatch(spec: TaskSpec): string {
       },
     },
     { id: "web", name: "@deepseek-ai/dsh-web", config: { searchProvider: PROVIDER_ID, fetchProvider: "http" } },
+    // Every approval goes to Aatmiq, whatever the sandbox mode (the stock profile skips asking when unconfined).
+    { id: "approval", name: "@deepseek-ai/dsh-user-approval", config: { policy: "ask" } },
     {
       id: "skill-filesystem",
       name: "@deepseek-ai/dsh-skill-filesystem",
@@ -79,7 +80,7 @@ export function buildPatch(spec: TaskSpec): string {
   const inserts: Record<string, unknown>[] = [
     {
       id: "aatmiq",
-      name: PLUGIN_PATH,
+      name: harnessFile("dsh-plugin/aatmiq.mjs"),
       config: {
         controlUrl: spec.controlUrl,
         taskId: spec.taskId,

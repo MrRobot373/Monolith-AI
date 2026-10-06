@@ -1,7 +1,8 @@
 # Aatmiq: self-hosted stack.
 #   cp deploy/.env.example deploy/.env   (then edit it)
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
-# Optional local models: add `--profile ollama`.
+# Optional local models: add `--profile ollama`. Private web search for Work AI: add `--profile search`
+# (then set the SearXNG URL to http://searxng:8080 in Admin → Work AI).
 name: aatmiq
 
 services:
@@ -35,6 +36,9 @@ services:
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
       # Daily check-ins (counts only). Set empty for air-gapped installs.
       LICENSE_SERVER_URL: ${LICENSE_SERVER_URL-https://license.aatmiq.com}
+      # Work AI: commands may only change their task folder (Landlock/bubblewrap). Set "off" only on
+      # hosts whose kernel has neither; each task still runs as its own Unix user.
+      WORK_SANDBOX: ${WORK_SANDBOX:-on}
     volumes:
       - files:/data
     healthcheck:
@@ -52,6 +56,17 @@ services:
       SHOW_MARKETING: "false"
     ports:
       - "${HTTP_PORT:-3000}:3000"
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles: ["search"]
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-${APP_SECRET}}
+      # Listen on IPv4 (the default IPv6 socket fails on hosts without IPv6).
+      GRANIAN_HOST: 0.0.0.0
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   ollama:
     image: ollama/ollama:latest

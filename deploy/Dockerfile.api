@@ -1,5 +1,7 @@
-# Aatmiq API
-FROM node:22-alpine AS build
+# Aatmiq API (with the Work AI agent runtime)
+# Debian, not Alpine: the agent runtime has native modules built for glibc, and tasks need
+# ordinary tools (bash, coreutils, Python, git) to do their work.
+FROM node:22-bookworm AS build
 RUN corepack enable
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -8,6 +10,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/shared/package.json packages/shared/
 COPY packages/model-gateway/package.json packages/model-gateway/
 COPY packages/license/package.json packages/license/
+COPY packages/harness/package.json packages/harness/
 RUN pnpm install --frozen-lockfile --filter @aatmiq/api...
 COPY packages packages
 COPY apps/api apps/api
@@ -16,12 +19,30 @@ RUN pnpm --filter @aatmiq/api build \
  && cp -r apps/api/dist /out/dist \
  && cp -r packages/db/migrations /out/migrations
 
-FROM node:22-alpine
-ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000 STORAGE_DIR=/data/files
+# The agent runtime, pinned by deploy/dsh/package-lock.json. npm installs its plugins' peer packages.
+FROM node:22-bookworm AS dsh
+WORKDIR /opt/dsh
+COPY deploy/dsh/package.json deploy/dsh/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund \
+ # It also ships a browser UI (Next.js) that Aatmiq never starts.
+ && rm -rf node_modules/next node_modules/@next
+
+FROM node:22-bookworm-slim
+# Tools the agent uses inside a task folder. Add more (or a full Python stack) in your own image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash ca-certificates curl git jq less procps unzip zip file python3 python3-pip python3-venv \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m pip install --no-cache-dir --break-system-packages pandas openpyxl matplotlib
+ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000 STORAGE_DIR=/data/files WORK_DIR=/data/work \
+    MPLCONFIGDIR=/tmp/matplotlib
 WORKDIR /app
 COPY --from=build /out /app
-RUN mkdir -p /data/files && chown -R node:node /data
-USER node
+COPY --from=dsh /opt/dsh /opt/dsh
+ENV AATMIQ_DSH_CLI=/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
+# The API runs as root inside the container so each Work AI task can run as its own unprivileged
+# Unix user (tasks can't read documents or each other's folders). See docs/06-work-ai.md.
+RUN mkdir -p /data/files /data/work && chmod 700 /data/files && chmod 711 /data/work
 VOLUME /data
 EXPOSE 4000
 CMD ["node", "dist/server.js"]

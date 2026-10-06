@@ -16,6 +16,7 @@
     "@aatmiq/license": "workspace:*",
     "@aatmiq/model-gateway": "workspace:*",
     "@aatmiq/shared": "workspace:*",
+    "@deepseek-ai/dsh-sdk-protocol": "0.2.0-rc.2",
     "@fastify/cookie": "^11.0.2",
     "@fastify/multipart": "^9.4.0",
     "@fastify/rate-limit": "^10.3.0",
@@ -33,6 +34,7 @@
     "postgres": "^3.4.7",
     "tesseract.js": "^7.0.0",
     "unpdf": "^1.8.1",
+    "yaml": "^2.8.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {

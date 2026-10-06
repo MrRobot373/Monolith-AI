@@ -171,6 +171,40 @@ describe("DeepSeek Harness engine", () => {
     expect(existsSync(join(s.workdir, "keep.txt"))).toBe(false);
   }, 90_000);
 
+  it("confines commands: writes outside the task folder (and /tmp) fail", async () => {
+    const s = await spec();
+    const { mkdtemp: mk, rm } = await import("node:fs/promises");
+    const elsewhere = await mk(join(process.cwd(), ".sandbox-test-"));
+    const outside = join(elsewhere, "escape.txt");
+    try {
+      const { events } = await runTurn(`run: echo nope > ${outside}`, s);
+      const result = events.find((e) => e.type === "tool_result") as { text: string };
+      expect(result.text).toMatch(/denied|read-only|not permitted|exit code: [1-9]/i);
+      expect(existsSync(outside)).toBe(false);
+    } finally {
+      await rm(elsewhere, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it.runIf(process.getuid?.() === 0)("runs as the task's own user, which can't read private server files", async () => {
+    const { mkdtemp: mk, rm, chmod } = await import("node:fs/promises");
+    const secretDir = await mk(join(tmpdir(), "aatmiq-private-"));
+    await writeFile(join(secretDir, "secret.txt"), "top-secret");
+    await chmod(secretDir, 0o700);
+    const base = await spec();
+    const root = join(base.workdir, "..");
+    await chmod(root, 0o711);
+    try {
+      const { events } = await runTurn(`run: id -u; cat ${secretDir}/secret.txt`, { ...base, uid: 100_123, gid: 100_123 });
+      const result = events.find((e) => e.type === "tool_result") as { text: string };
+      expect(result.text).toContain("100123");
+      expect(result.text).not.toContain("top-secret");
+      expect(result.text).toMatch(/permission denied/i);
+    } finally {
+      await rm(secretDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("searches the web through Aatmiq", async () => {
     const { events } = await runTurn("search: travel policy flights");
     expect(searches).toContain("travel policy flights");

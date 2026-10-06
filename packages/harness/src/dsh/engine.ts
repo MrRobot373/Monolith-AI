@@ -6,17 +6,16 @@
 import { JsonRpcLineTransport } from "@deepseek-ai/dsh-sdk-protocol";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { chown, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { resolveFromHarness } from "../files";
 import type { HarnessEngine, HarnessEvent, TaskRuntime, TaskSpec } from "../types";
 import { buildPatch, PROVIDER_ID } from "./patch";
 
-const require = createRequire(import.meta.url);
-
-/** Where the published DSH CLI lives (pinned in package.json). */
+/** Where the DSH CLI lives: AATMIQ_DSH_CLI (production images, see deploy/dsh), else this package's copy. */
 export async function dshCli(): Promise<string> {
-  const pkgPath = require.resolve("@deepseek-ai/dsh/package.json");
+  if (process.env.AATMIQ_DSH_CLI) return process.env.AATMIQ_DSH_CLI;
+  const pkgPath = resolveFromHarness("@deepseek-ai/dsh/package.json");
   const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { bin?: string | Record<string, string> };
   const bin = typeof pkg.bin === "string" ? pkg.bin : (pkg.bin?.dsh ?? Object.values(pkg.bin ?? {})[0]);
   if (!bin) throw new Error("The DeepSeek Harness package has no CLI entry");
@@ -29,7 +28,13 @@ export interface Launcher {
 }
 
 export const processLauncher: Launcher = {
-  spawn: ({ cli, argv, cwd, env }) => spawn(process.execPath, [cli, ...argv], { cwd, env, stdio: ["pipe", "pipe", "pipe"] }),
+  spawn: ({ cli, argv, cwd, env, spec }) =>
+    spawn(process.execPath, [cli, ...argv], {
+      cwd,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      ...(spec.uid !== undefined ? { uid: spec.uid, gid: spec.gid ?? spec.uid } : {}),
+    }),
 };
 
 type DshSessionEvent = { type: string; data?: Record<string, unknown> };
@@ -102,7 +107,7 @@ function runtimeEnv(spec: TaskSpec): NodeJS.ProcessEnv {
     LANG: process.env.LANG ?? "C.UTF-8",
     TZ: process.env.TZ ?? "UTC",
     NODE_ENV: "production",
-    DSH_PERMISSION_MODE: "workspace-write",
+    DSH_PERMISSION_MODE: spec.sandbox === "off" ? "danger-full-access" : "workspace-write",
     AATMIQ_TOKEN: spec.token,
     ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}),
   };
@@ -117,6 +122,10 @@ export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs
       await mkdir(spec.homeDir, { recursive: true });
       const patchPath = join(spec.homeDir, "aatmiq.patch.yml");
       await writeFile(patchPath, buildPatch(spec));
+      if (spec.uid !== undefined) {
+        const gid = spec.gid ?? spec.uid;
+        for (const p of [spec.workdir, spec.homeDir, patchPath]) await chown(p, spec.uid, gid);
+      }
       const cli = await dshCli();
       const child = launcher.spawn({ cli, argv: ["--profile", "sdk", "--patch", patchPath], cwd: spec.workdir, env: runtimeEnv(spec), spec });
 
@@ -160,6 +169,9 @@ export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs
         ]);
       } catch (e) {
         child.kill("SIGKILL");
+        // The runtime's own last words explain more than "input closed".
+        const tail = stderr.trim().split("\n").filter(Boolean).slice(-3).join(" ").slice(0, 500);
+        if (tail && !(e as Error).message.includes(tail)) throw new Error(`The agent runtime couldn't start: ${tail}`);
         throw e;
       }
 

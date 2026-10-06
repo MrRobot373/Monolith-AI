@@ -12,6 +12,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  pgSequence,
   pgTable,
   primaryKey,
   real,
@@ -574,6 +575,9 @@ export interface WorkSettings {
   idleMinutes: number;
 }
 
+/** Unix user ids for task runtimes (each task runs as its own user when the API runs as root). */
+export const workUidSeq = pgSequence("work_uid_seq", { startWith: 100000, minValue: 100000, maxValue: 2000000000 });
+
 /**
  * An agent task: one goal, worked on by the harness in its own workspace folder.
  * Follow-up messages continue the same task.
@@ -601,6 +605,8 @@ export const workTask = pgTable(
     scheduleId: text("schedule_id"),
     projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "set null" }),
     pinned: boolean("pinned").notNull().default(false),
+    /** The Unix user its runtime runs as (see workUidSeq). */
+    runUid: integer("run_uid").notNull().default(sql`nextval('work_uid_seq')`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),

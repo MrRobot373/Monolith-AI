@@ -74,7 +74,7 @@ Plain assistant. **No tool calling.**
 
 ### 4.3 Section 2 — Work AI (agent harness, "Cowork")
 The user assigns a task and the agent carries it out.
-- Engine: DSH wrapped by `packages/harness`. Runs inside the **user's isolated container**.
+- Engine: DSH wrapped by `packages/harness`. Each task runs as its own Unix user with commands confined to its folder (D25); per-user containers follow in P2.1. See [06-work-ai.md](06-work-ai.md).
 - Tools: file system, shell, code execution, web search (self-hosted SearXNG, so searches stay private), browser, skills.
 - Connectors (via MCP): Slack, Gmail, Google Drive, Google Calendar, GitHub, GitLab, Jira, Notion, Confluence… The admin enables them; each user signs in to their own accounts.
 - Task UI: plan → live steps timeline → tool calls with inputs/outputs → approvals for risky actions → final result/artifacts.
@@ -223,7 +223,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 |---|---|---|
 | **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
 | **P1 Chat** | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
-| **P2 Work AI** | DSH adapter, sandbox containers, tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules | Cowork-class agent |
+| **P2 Work AI** ✅ | DSH adapter, sandboxing (per-task user + Landlock; containers in P2.1), tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules ([details](06-work-ai.md)) | Cowork-class agent |
 | **P3 Code** | Code-OSS fork, branding, Open VSX, web + desktop builds, Aatmiq panel wired to the harness | Cursor-class IDE |
 | **P4 Enterprise** | SAML/OIDC, audit exports, retention policies, Helm/K8s, offline licenses, backups, SOC2-style docs | Mid-size readiness |
 | **Parallel** | Marketing site + Super Admin license server (license server + console ✅) | Sales and customer management |

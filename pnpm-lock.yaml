@@ -35,6 +35,9 @@ importers:
       '@aatmiq/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: 0.2.0-rc.2
+        version: 0.2.0-rc.2(@deepseek-ai/cordis@4.0.4)(@deepseek-ai/dsh-llm@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4))(@deepseek-ai/dsh-session@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4)(@deepseek-ai/dsh-scope@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4)(@deepseek-ai/dsh-invariants@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4))))(@deepseek-ai/dsh-subagent@0.2.0-rc.2(80b7d44467fffec2ca5e1216806852fd))
       '@fastify/cookie':
         specifier: ^11.0.2
         version: 11.1.2
@@ -86,6 +89,9 @@ importers:
       unpdf:
         specifier: ^1.8.1
         version: 1.8.1(@napi-rs/canvas@1.0.9)
+      yaml:
+        specifier: ^2.8.1
+        version: 2.9.1
       zod:
         specifier: ^4.1.12
         version: 4.6.5
@@ -295,9 +301,6 @@ importers:
 
   packages/harness:
     dependencies:
-      '@deepseek-ai/dsh':
-        specifier: 0.2.0-rc.2
-        version: 0.2.0-rc.2(c1cf7336bcba0070c57d19504814b21a)
       '@deepseek-ai/dsh-sdk-protocol':
         specifier: 0.2.0-rc.2
         version: 0.2.0-rc.2(@deepseek-ai/cordis@4.0.4)(@deepseek-ai/dsh-llm@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4))(@deepseek-ai/dsh-session@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4)(@deepseek-ai/dsh-scope@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4)(@deepseek-ai/dsh-invariants@0.2.0-rc.2(@deepseek-ai/cordis@4.0.4))))(@deepseek-ai/dsh-subagent@0.2.0-rc.2(80b7d44467fffec2ca5e1216806852fd))
@@ -305,6 +308,9 @@ importers:
         specifier: ^2.8.1
         version: 2.9.1
     devDependencies:
+      '@deepseek-ai/dsh':
+        specifier: 0.2.0-rc.2
+        version: 0.2.0-rc.2(c1cf7336bcba0070c57d19504814b21a)
       '@types/node':
         specifier: ^22.18.0
         version: 22.20.4

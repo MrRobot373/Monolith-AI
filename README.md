@@ -28,7 +28,8 @@
 | Single sign-on: Google, Microsoft Entra ID, any OpenID Connect provider (Okta, Keycloak…), invite-only or domain auto-join, "require SSO" ([details](docs/04-single-sign-on.md)) | ✅ (SAML: P4) |
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
 | License server + Super Admin console: customers, issue/change/revoke licenses, check-ins, release channel | ✅ `apps/license-server`, `apps/license-console` |
-| Work AI (DeepSeek Harness), Code (VS Code fork) | ⏭ P2 / P3 |
+| Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), MCP connectors, skills, schedules, per-task isolation, metering ([details](docs/06-work-ai.md)) | ✅ |
+| Code (VS Code fork) | ⏭ P3 |
 
 ## Repository layout
 
@@ -42,6 +43,7 @@ packages/shared     Roles/permissions, validation schemas, quota maths
 packages/model-gateway  Provider adapters (Ollama / OpenAI-compatible), streaming, metering
 packages/license    License key format, signing/verification, plan presets, grace rules
 packages/ui         Shared design system (buttons, fields, dialogs, charts, theme)
+packages/harness    Work AI agent engine adapter (DeepSeek Harness), its plugin and risk policy
 deploy/             Dockerfiles and docker-compose stack
 docs/               Plans, specs and decisions
 ```
@@ -68,8 +70,9 @@ pnpm --filter @aatmiq/shared test
 pnpm --filter @aatmiq/model-gateway test
 TEST_DATABASE_URL=postgres://…/aatmiq_test pnpm --filter @aatmiq/api test   # needs a migrated, disposable database
 pnpm --filter @aatmiq/license test
+pnpm --filter @aatmiq/harness test   # runs the real agent runtime against a fake model
 LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
-# Browser suites (see tests/e2e/README.md): full.mjs (product) and run-licensing.sh (console + licensed product + SSO)
+# Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI) and run-licensing.sh (console + licensed product + SSO)
 ```
 
 ## Deploy on a server
@@ -79,6 +82,8 @@ cp deploy/.env.example deploy/.env   # set APP_URL, APP_SECRET, POSTGRES_PASSWOR
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 # with local models on the same machine:
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile ollama up -d --build
+# private web search for Work AI (then Admin → Work AI → SearXNG URL http://searxng:8080):
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile search up -d --build
 ```
 
 The API applies database migrations automatically on start. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.

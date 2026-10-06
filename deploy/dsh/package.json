@@ -1,0 +1,8 @@
+{
+  "name": "aatmiq-agent-runtime",
+  "private": true,
+  "description": "The Work AI agent runtime (DeepSeek Harness) installed into the API image at /opt/dsh. Keep the version in step with packages/harness.",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.0-rc.2"
+  }
+}
