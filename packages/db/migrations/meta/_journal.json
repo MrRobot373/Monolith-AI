@@ -36,6 +36,13 @@
       "when": 1790853365017,
       "tag": "0004_license_sso",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791263949183,
+      "tag": "0005_work_ai",
+      "breakpoints": true
     }
   ]
 }

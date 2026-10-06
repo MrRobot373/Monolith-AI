@@ -5,3 +5,8 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
   - "@tailwindcss/oxide"
+  # DeepSeek Harness runtime (Work AI): subprocess helper and terminals.
+  - "@deepseek-ai/dsh-subprocess-local"
+  - koffi
+  - node-pty
+  - protobufjs

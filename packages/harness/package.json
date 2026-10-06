@@ -1,0 +1,17 @@
+{
+  "name": "@aatmiq/harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": { ".": "./src/index.ts", "./dsh-plugin/aatmiq.mjs": "./dsh-plugin/aatmiq.mjs" },
+  "files": ["src", "dsh-plugin"],
+  "scripts": { "typecheck": "tsc -p .", "test": "vitest run" },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-sdk-protocol": "0.2.0-rc.2",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": { "@types/node": "^22.18.0", "vitest": "^3.2.4" }
+}

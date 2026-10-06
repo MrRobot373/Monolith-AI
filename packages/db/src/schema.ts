@@ -48,6 +48,9 @@ export const projectRoleEnum = pgEnum("project_role", ["chat", "edit"]);
 /** How far a source can be trusted: the model is told, and answers say so. */
 export const sourceLabelEnum = pgEnum("source_label", ["confirmed", "assumption", "tbd"]);
 export const ssoTypeEnum = pgEnum("sso_type", ["google", "microsoft", "oidc"]);
+export const workTaskStatusEnum = pgEnum("work_task_status", ["queued", "running", "needs_approval", "completed", "failed", "cancelled"]);
+export const workApprovalStatusEnum = pgEnum("work_approval_status", ["pending", "approved", "rejected", "expired"]);
+export const skillScopeEnum = pgEnum("skill_scope", ["org", "personal"]);
 
 /** pgvector column without fixed dimensions (models differ: 384, 768, 1024…). */
 const vector = customType<{ data: number[]; driverData: string }>({
@@ -71,6 +74,8 @@ export const organization = pgTable("organization", {
   licenseKey: text("license_key"),
   /** When on, only the owner may still sign in with a password (break-glass); everyone else uses SSO. */
   ssoRequired: boolean("sso_required").notNull().default(false),
+  /** Work AI policy set by org admins (see WorkSettings). */
+  workSettings: jsonb("work_settings").$type<Partial<WorkSettings>>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -552,3 +557,153 @@ export const projectSource = pgTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.documentId] }), index("psource_doc_idx").on(t.documentId)],
 );
+
+/* ───────────── Work AI ───────────── */
+
+/** Org-wide Work AI policy. Missing fields fall back to DEFAULT_WORK_SETTINGS in @aatmiq/shared. */
+export interface WorkSettings {
+  /** When to stop and ask the person before a tool runs. */
+  approvals: "risky" | "always" | "never";
+  /** Self-hosted SearXNG for private web search (empty: web search off). */
+  searxngUrl: string | null;
+  /** Let commands reach the network (package installs, curl). Web search/fetch tools are separate. */
+  allowNetwork: boolean;
+  /** Tasks one person can run at the same time. */
+  maxConcurrentPerUser: number;
+  /** Minutes a finished task keeps its runtime warm for follow-ups. */
+  idleMinutes: number;
+}
+
+/**
+ * An agent task: one goal, worked on by the harness in its own workspace folder.
+ * Follow-up messages continue the same task.
+ */
+export const workTask = pgTable(
+  "work_task",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("New task"),
+    status: workTaskStatusEnum("status").notNull().default("queued"),
+    modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
+    /** Harness session id (the engine's own conversation log). */
+    sessionId: text("session_id"),
+    /** Last answer, for lists and notifications. */
+    result: text("result"),
+    error: text("error"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    scheduleId: text("schedule_id"),
+    projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "set null" }),
+    pinned: boolean("pinned").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("work_task_user_idx").on(t.userId, t.updatedAt), index("work_task_status_idx").on(t.status)],
+);
+
+/** The task timeline, normalized from harness events. `seq` orders events within a task. */
+export const workEvent = pgTable(
+  "work_event",
+  {
+    id: id(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => workTask.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    /** user | assistant | tool_call | tool_result | approval | plan | status | error */
+    kind: text("kind").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("work_event_task_seq_idx").on(t.taskId, t.seq)],
+);
+
+export const workApproval = pgTable(
+  "work_approval",
+  {
+    id: id(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => workTask.id, { onDelete: "cascade" }),
+    callId: text("call_id"),
+    toolName: text("tool_name").notNull(),
+    reason: text("reason"),
+    /** What the tool would do (command, file, connector call), shown to the approver. */
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
+    status: workApprovalStatusEnum("status").notNull().default("pending"),
+    decidedBy: text("decided_by").references(() => user.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("work_approval_task_idx").on(t.taskId, t.status)],
+);
+
+/** Reusable instructions the agent can load: org-wide (admins) or personal. */
+export const skill = pgTable(
+  "skill",
+  {
+    id: id(),
+    scope: skillScopeEnum("scope").notNull().default("personal"),
+    ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    /** Folder-safe identifier, unique per scope/owner. */
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    /** When to use it (the agent reads this to decide). */
+    description: text("description").notNull(),
+    body: text("body").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("skill_owner_idx").on(t.scope, t.ownerId)],
+);
+
+/** Recurring tasks: a prompt run on a cron schedule. */
+export const workSchedule = pgTable(
+  "work_schedule",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prompt: text("prompt").notNull(),
+    /** Five-field cron expression, evaluated in `timezone`. */
+    cron: text("cron").notNull(),
+    timezone: text("timezone").notNull().default("UTC"),
+    modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
+    enabled: boolean("enabled").notNull().default(true),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastTaskId: text("last_task_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("work_schedule_due_idx").on(t.enabled, t.nextRunAt)],
+);
+
+/** Org-level MCP servers the agent can use as tools (Slack, GitHub, Jira…). */
+export const connector = pgTable("connector", {
+  id: id(),
+  /** Tool namespace, e.g. "github" → github__create_issue. */
+  name: text("name").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  url: text("url").notNull(),
+  /** Request headers (e.g. Authorization), encrypted JSON. */
+  headersEnc: text("headers_enc"),
+  /** Tools whose names match are always approved by a person first (comma-separated globs). */
+  approveTools: text("approve_tools").notNull().default("*"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});

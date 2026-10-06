@@ -1,0 +1,190 @@
+/**
+ * DeepSeek Harness engine: one `dsh --profile sdk` process per task, driven over stdio JSON-RPC.
+ * The process runs in the task's folder with a scrubbed environment; models, approvals and search
+ * go back to Aatmiq through the per-task token.
+ */
+import { JsonRpcLineTransport } from "@deepseek-ai/dsh-sdk-protocol";
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import type { HarnessEngine, HarnessEvent, TaskRuntime, TaskSpec } from "../types";
+import { buildPatch, PROVIDER_ID } from "./patch";
+
+const require = createRequire(import.meta.url);
+
+/** Where the published DSH CLI lives (pinned in package.json). */
+export async function dshCli(): Promise<string> {
+  const pkgPath = require.resolve("@deepseek-ai/dsh/package.json");
+  const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { bin?: string | Record<string, string> };
+  const bin = typeof pkg.bin === "string" ? pkg.bin : (pkg.bin?.dsh ?? Object.values(pkg.bin ?? {})[0]);
+  if (!bin) throw new Error("The DeepSeek Harness package has no CLI entry");
+  return join(dirname(pkgPath), bin);
+}
+
+export interface Launcher {
+  /** Start the runtime process. Process mode runs it directly; container mode wraps it. */
+  spawn(args: { cli: string; argv: string[]; cwd: string; env: NodeJS.ProcessEnv; spec: TaskSpec }): ChildProcess;
+}
+
+export const processLauncher: Launcher = {
+  spawn: ({ cli, argv, cwd, env }) => spawn(process.execPath, [cli, ...argv], { cwd, env, stdio: ["pipe", "pipe", "pipe"] }),
+};
+
+type DshSessionEvent = { type: string; data?: Record<string, unknown> };
+type Block = { type: string; text?: string; id?: string; name?: string };
+
+const textOf = (content: unknown) =>
+  Array.isArray(content)
+    ? (content as Block[])
+        .filter((b) => b.type === "text")
+        .map((b) => b.text ?? "")
+        .join("")
+    : "";
+
+/** Translate one DSH session event into Aatmiq's vocabulary (or nothing). */
+export function mapEvent(ev: DshSessionEvent): HarnessEvent | null {
+  const d = ev.data ?? {};
+  switch (ev.type) {
+    case "user/message": {
+      const src = d.source as { kind?: string } | undefined;
+      if (src?.kind !== "user") return null; // runtime context and plugin notes stay internal
+      return { type: "user", id: String(d.id ?? ""), text: textOf(d.content) };
+    }
+    case "assistant/message": {
+      const m = d.message as { id?: string; content?: Block[] } | undefined;
+      const usage = d.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+      return {
+        type: "assistant",
+        id: String(m?.id ?? ""),
+        text: textOf(m?.content),
+        toolCalls: (m?.content ?? []).filter((b) => b.type === "tool-call").map((b) => ({ callId: String(b.id), name: String(b.name) })),
+        usage: usage ? { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 } : undefined,
+      };
+    }
+    case "tool/call": {
+      let args: unknown = d.arguments;
+      if (typeof args === "string") {
+        try {
+          args = JSON.parse(args);
+        } catch {
+          /* keep the raw string */
+        }
+      }
+      return { type: "tool_call", callId: String(d.callId), name: String(d.name), args };
+    }
+    case "tool/result": {
+      const m = d.message as { toolCallId?: string; content?: Block[]; isError?: boolean } | undefined;
+      return { type: "tool_result", callId: String(m?.toolCallId ?? ""), text: textOf(m?.content), isError: !!m?.isError };
+    }
+    case "todo/write": {
+      const items = (d.todos ?? d.items) as { content?: string; status?: string }[] | undefined;
+      return Array.isArray(items) ? { type: "plan", items: items.map((t) => ({ content: String(t.content ?? ""), status: String(t.status ?? "pending") })) } : null;
+    }
+    case "session/title":
+      return typeof d.title === "string" ? { type: "title", title: d.title } : null;
+    case "turn/end": {
+      const r = d.reason as { kind?: string } | undefined;
+      return { type: "turn_end", reason: r?.kind ?? "completed" };
+    }
+    default:
+      return null;
+  }
+}
+
+/** Environment for the runtime: nothing from the API process leaks in (no database URL, no secrets). */
+function runtimeEnv(spec: TaskSpec): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+    HOME: spec.homeDir,
+    DSH_HOME: spec.homeDir,
+    LANG: process.env.LANG ?? "C.UTF-8",
+    TZ: process.env.TZ ?? "UTC",
+    NODE_ENV: "production",
+    DSH_PERMISSION_MODE: "workspace-write",
+    AATMIQ_TOKEN: spec.token,
+    ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}),
+  };
+}
+
+export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs?: number } = {}): HarnessEngine {
+  const launcher = opts.launcher ?? processLauncher;
+  return {
+    id: "dsh",
+    async start(spec, onEvent) {
+      await mkdir(spec.workdir, { recursive: true });
+      await mkdir(spec.homeDir, { recursive: true });
+      const patchPath = join(spec.homeDir, "aatmiq.patch.yml");
+      await writeFile(patchPath, buildPatch(spec));
+      const cli = await dshCli();
+      const child = launcher.spawn({ cli, argv: ["--profile", "sdk", "--patch", patchPath], cwd: spec.workdir, env: runtimeEnv(spec), spec });
+
+      let stderr = "";
+      child.stderr?.on("data", (b: Buffer) => {
+        stderr = (stderr + b.toString()).slice(-4000);
+      });
+      let alive = true;
+      const exited = new Promise<void>((resolve) => {
+        child.on("exit", (code) => {
+          alive = false;
+          onEvent({ type: "exit", code, ...(code ? { error: stderr.trim().split("\n").slice(-5).join("\n") } : {}) });
+          resolve();
+        });
+        child.on("error", (e) => {
+          alive = false;
+          onEvent({ type: "exit", code: -1, error: e.message });
+          resolve();
+        });
+      });
+
+      const transport = new JsonRpcLineTransport(child.stdout!, child.stdin!);
+      transport.onNotification((method, params) => {
+        if (method === "session.event") {
+          const mapped = mapEvent(params.event as DshSessionEvent);
+          if (mapped) onEvent(mapped);
+        } else if (method === "session.status") {
+          onEvent({ type: "status", status: params.status === "running" ? "running" : "idle" });
+        }
+      });
+      transport.start();
+
+      const timeout = opts.initializeTimeoutMs ?? 60_000;
+      try {
+        await Promise.race([
+          transport.request("initialize", { cwd: spec.workdir, provider: PROVIDER_ID, model: spec.model.key }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("The agent runtime didn't start in time.")), timeout)),
+          exited.then(() => {
+            throw new Error(`The agent runtime stopped while starting.${stderr ? ` ${stderr.trim().split("\n").slice(-3).join(" ")}` : ""}`);
+          }),
+        ]);
+      } catch (e) {
+        child.kill("SIGKILL");
+        throw e;
+      }
+
+      const sessionId = `session-${randomUUID().replaceAll("-", "")}`;
+      const runtime: TaskRuntime = {
+        sessionId,
+        get alive() {
+          return alive;
+        },
+        async send(text) {
+          await transport.request("session/prompt", { sessionId, contentBlocks: [{ type: "text", text }] });
+        },
+        async stop() {
+          if (!alive) return;
+          try {
+            await Promise.race([transport.request("shutdown", {}), new Promise((r) => setTimeout(r, 3000))]);
+          } catch {
+            /* already gone */
+          }
+          if (alive) child.kill("SIGTERM");
+          await Promise.race([exited, new Promise((r) => setTimeout(r, 3000))]);
+          if (alive) child.kill("SIGKILL");
+        },
+      };
+      return runtime;
+    },
+  };
+}
