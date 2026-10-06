@@ -86,7 +86,8 @@ package installs and deletions, and the Aatmiq panel writing and testing code.
   failure counts as *no*), and the `aatmiq` web search provider. It also smooths over common
   tool-call slips before a tool checks its arguments (`tools/execute`, `dsh-plugin/tooling.mjs`):
   a `sandbox_permissions` that asks for nothing (the call's own mode, or a value that isn't a mode)
-  is dropped, while a real request to widen still goes to a person; `todo_write` items get `task`
+  is dropped, while a real request to widen still goes to a person; an empty `path` on `glob`/`grep`
+  means the working folder; `todo_write` items get `task`
   (or `title`, `text`…) read as `content`, a missing status as `pending`, and loose statuses
   (`done`, `in-progress`) normalized.
 - **The plan stays true.** After 3 steps without a plan update (then every 4), the agent gets a short

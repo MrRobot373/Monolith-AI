@@ -4,8 +4,9 @@
  * Plain JavaScript on purpose: it is loaded directly by the harness runtime.
  *
  *  - cleanArgs:     drops a `sandbox_permissions` that doesn't ask for anything (the call's own mode,
- *                   or a value that isn't a mode), and fixes todo_write items (`task` → `content`,
- *                   missing or loosely spelled `status`)
+ *                   or a value that isn't a mode) and an empty search `path` (meaning the working
+ *                   folder), and fixes todo_write items (`task` → `content`, missing or loosely
+ *                   spelled `status`)
  *  - planReminder:  a short nudge to keep the plan current, after a few steps without updating it
  */
 
@@ -14,6 +15,9 @@ const WIDER_MODES = {
   "read-only": ["workspace-write", "danger-full-access"],
   "workspace-write": ["danger-full-access"],
 };
+
+/** Tools whose `path` is optional and defaults to the working folder. */
+const SEARCH_TOOLS = new Set(["glob", "grep"]);
 
 const CONTENT_ALIASES = ["task", "title", "text", "description", "name", "step"];
 
@@ -85,6 +89,10 @@ export function cleanArgs(name, args, mode) {
       delete out.sandbox_permissions;
       delete out.justification;
     }
+  }
+  if (SEARCH_TOOLS.has(name) && typeof out.path === "string" && !out.path.trim()) {
+    out = { ...out };
+    delete out.path;
   }
   if (name === "todo_write") {
     let todos = out.todos ?? out.items ?? out.tasks;

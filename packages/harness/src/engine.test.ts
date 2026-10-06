@@ -155,6 +155,11 @@ describe("tool-call cleanup", () => {
     const plain = { command: "ls" };
     expect(cleanArgs("bash", plain, mode)).toBe(plain);
   });
+  it("reads an empty search path as the working folder", () => {
+    expect(cleanArgs("glob", { path: "", pattern: "**/*" }, "workspace-write")).toEqual({ pattern: "**/*" });
+    expect(cleanArgs("grep", { path: " ", pattern: "x", include: "*.html" }, "workspace-write")).toEqual({ pattern: "x", include: "*.html" });
+    expect(cleanArgs("read", { path: "" }, "workspace-write")).toEqual({ path: "" });
+  });
   it("fixes todo_write items: task → content, missing or loose status, extra fields, a JSON string", () => {
     expect(cleanArgs("todo_write", { todos: [{ task: "Write CSS" }, { content: "Write JS", status: "Done" }, { title: "Test", status: "in-progress", id: 3 }] }, "workspace-write")).toEqual({
       todos: [
@@ -262,11 +267,13 @@ describe("DeepSeek Harness engine", () => {
       ["todo_write", { todos: [{ task: "Write the note" }, { task: "Check it", status: "todo" }] }],
       ["write", { file_path: "note.txt", content: "hello", sandbox_permissions: "read,write" }],
       ["bash", { description: "Show it", command: "cat note.txt", sandbox_permissions: "workspace-write", justification: "Read the note" }],
+      ["glob", { path: "", pattern: "*.txt" }],
     ];
     const { events, spec: s } = await runTurn(`script: ${JSON.stringify(script)}`);
     const results = events.filter((e) => e.type === "tool_result") as { isError: boolean; text: string }[];
-    expect(results.map((r) => r.isError)).toEqual([false, false, false]);
+    expect(results.map((r) => r.isError)).toEqual([false, false, false, false]);
     expect(results[2]!.text).toContain("hello");
+    expect(results[3]!.text).toContain("note.txt");
     expect(await readFile(join(s.workdir, "note.txt"), "utf8")).toBe("hello");
     const plans = events.filter((e) => e.type === "plan") as { items: { content: string; status: string }[] }[];
     expect(plans[0]!.items).toEqual([
