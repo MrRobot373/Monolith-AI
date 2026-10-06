@@ -47,7 +47,8 @@ export const providerSchema = z.object({
   name: z.string().trim().min(1).max(60),
   type: z.enum(PROVIDER_TYPES),
   baseUrl: z.url().optional(),
-  apiKey: z.string().max(512).optional(),
+  /** One key, or several (one per line): calls move to the next when one hits its limit. */
+  apiKey: z.string().max(20_000).optional(),
 });
 
 export const modelSchema = z.object({

@@ -2,7 +2,7 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById("app");
-  const state = { workspace: null, reason: null, models: [], modelId: "", tasks: [], current: null, task: null, events: [], draft: "", changes: [], error: null, input: "" };
+  const state = { workspace: null, reason: null, models: [], modelId: "", tasks: [], current: null, task: null, events: [], draft: "", thinking: "", changes: [], error: null, input: "" };
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -63,8 +63,16 @@
   const toolIcon = (n) =>
     n.startsWith("mcp__") ? "plug" : n === "bash" ? "bash" : ["write", "edit", "str_replace_editor"].includes(n) ? "edit" : n === "read" ? "read" : ["glob", "grep"].includes(n) ? "search" : n.startsWith("web_") ? "web" : n === "todo_write" ? "plan" : "step";
 
+  const short = (p) => {
+    if (typeof p !== "string") return p;
+    const m = /\/workspaces\/[^/]+\/(.+)$/.exec(p);
+    return m ? m[1] : p;
+  };
+
   function describe(name, a) {
-    a = a || {};
+    a = Object.assign({}, a || {});
+    a.file_path = short(a.file_path);
+    a.path = short(a.path);
     const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
     if (mcp) return [`Used ${mcp[1]}`, mcp[2].replace(/_/g, " ")];
     switch (name) {
@@ -180,7 +188,7 @@
             return `<div class="note">${esc(it.text)}</div>`;
           })
           .join("") +
-        (busy && status !== "needs_approval" ? `<div class="working"><span class="shimmer">${state.draft ? "Writing…" : status === "queued" ? "Waiting for a free slot…" : "Working…"}</span>${state.draft ? `<div class="answer">${md(state.draft)}</div>` : ""}</div>` : "")
+        (busy && status !== "needs_approval" ? `<div class="working"><span class="shimmer">${state.draft ? "Writing…" : status === "queued" ? "Waiting for a free slot…" : state.thinking ? "Thinking…" : "Working…"}</span>${state.draft ? `<div class="answer">${md(state.draft)}</div>` : state.thinking ? `<div class="thinking">${esc(state.thinking.slice(-300))}</div>` : ""}</div>` : "")
       : `<div class="hello"><div class="mark"><svg viewBox="0 0 32 32" width="26" height="26" fill="none"><rect x="1.5" y="1.5" width="29" height="29" rx="8.5" stroke="currentColor" opacity=".35"/><path d="M10 24 L16 7.5 L22 24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="18.2" r="2.3" fill="var(--accent)"/></svg></div><h3>What should we build?</h3><p class="muted">The agent works in <strong>${esc(state.workspace.name)}</strong>: it reads code, edits files and runs commands, and asks before anything risky. Your edits and its edits show up in Source Control.</p>
          <div class="chips">${["Explain this project", "Write tests for the main module", "Find and fix a bug", "Add a README"].map((c) => `<button class="chip" data-chip="${esc(c)}">${esc(c)}</button>`).join("")}</div></div>`;
     const changes = state.changes.length
@@ -268,14 +276,21 @@
         state.events = m.events;
         state.current = m.task ? m.task.id : null;
         state.draft = "";
+        state.thinking = "";
         break;
       case "event":
         state.events.push(m.event);
-        if (m.event.kind === "assistant" || m.event.kind === "tool_call") state.draft = "";
+        if (m.event.kind === "assistant" || m.event.kind === "tool_call") {
+          state.draft = "";
+          state.thinking = "";
+        }
         if (m.event.kind === "status" && state.task) state.task.status = m.event.data.status;
         break;
       case "delta":
         state.draft += m.text;
+        break;
+      case "reasoning":
+        state.thinking = (state.thinking + m.text).slice(-2000);
         break;
       case "changes":
         state.changes = m.files;

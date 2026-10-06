@@ -263,6 +263,27 @@ await step("Connectors", "The agent uses the connector after approval", page, as
   await page.getByTestId("task-answer").filter({ hasText: "Saved note #1: Ship Work AI" }).waitFor();
 });
 
+await step("Keys", "A provider key past its limit is skipped; admins see it resting", page, async () => {
+  const ws = (await api(page, "GET", "/api/me")).json.workspaces[0].id;
+  const p = await api(page, "POST", "/api/admin/providers", { name: "Cloud with spare keys", type: "openai_compatible", baseUrl: `${FAKE}/v1`, apiKey: "exhausted-1\nspare-2" });
+  const m = await api(page, "POST", "/api/admin/models", { providerId: p.json.id, modelKey: "gemma3:12b", displayName: "Cloud model", sections: ["chat", "work"] });
+  const all = (await api(page, "GET", "/api/admin/models")).json.map((x) => x.id);
+  await api(page, "PUT", `/api/admin/workspaces/${ws}/models`, { modelIds: all, defaultModelId: m.json.id });
+  await page.goto(`${APP}/app/work`);
+  await send(page, "run: echo rotated");
+  await page.waitForURL(/\/app\/work\/[\w-]+$/);
+  await waitStatus(page, "completed");
+  await page.getByTestId("task-answer").filter({ hasText: "rotated" }).waitFor();
+  await page.goto(`${APP}/admin/models`);
+  const keys = page.getByTestId("provider-keys").filter({ hasText: "2 API keys" });
+  await keys.getByText("1 ready").waitFor();
+  await keys.getByText("#1 resting").waitFor();
+  await page.screenshot({ path: `${OUT}provider-keys.png` });
+  // Back to the default model for the remaining checks.
+  const def = (await api(page, "GET", "/api/admin/models")).json.find((x) => x.modelKey === "qwen3:8b");
+  await api(page, "PUT", `/api/admin/workspaces/${ws}/models`, { modelIds: all, defaultModelId: def.id });
+});
+
 /* ═════════════ Looks ═════════════ */
 await step("Looks", "Light theme and phone layout of a task", page, async () => {
   await page.goto(taskUrl);

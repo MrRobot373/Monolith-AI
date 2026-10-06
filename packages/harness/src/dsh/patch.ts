@@ -30,6 +30,13 @@ export const DISABLED_ROWS = [
   "workflow-ptc",
   "tool-workflow",
   "tool-ralph",
+  // Interactive modes Aatmiq doesn't use (models call exit_plan_mode / create_goal and then stop).
+  // Plans go through todo_write, which Aatmiq shows in the task's progress panel.
+  "plan-mode",
+  "goal",
+  "goal-round-driver",
+  "command-goal",
+  "tool-goal",
 ];
 
 export function buildPatch(spec: TaskSpec): string {
@@ -59,11 +66,14 @@ export function buildPatch(spec: TaskSpec): string {
           `You are ${spec.productName}, a private AI assistant that carries out tasks for people in their organization.`,
           "You work inside a private folder on the organization's own servers: you can run commands, read and write files there, and use the tools you are given.",
           "Explain what you are doing in plain language. When you produce a document, report or data file, save it in the working folder so the person can download it.",
+          "When you mention files to the person, use their names or relative paths (like `summary.md`), never the full folder path: they open and download them from Aatmiq.",
+          "For work with several steps, record your plan with the todo_write tool and update it as you go, then carry the whole task out in the same turn: don't stop after planning or ask for confirmation unless something is unclear or risky.",
           spec.instructions ? `\nOrganization instructions:\n${spec.instructions}` : "",
         ]
           .filter(Boolean)
           .join(" "),
-        personaSuffix: "Your working folder is {{cwd}}.",
+        // Long absolute task paths get mistyped by models; relative paths don't.
+        personaSuffix: "Your working folder is {{cwd}}. Refer to files with paths relative to it (for example `report.md` or `data/sales.csv`), not absolute paths.",
       },
     },
     { id: "web", name: "@deepseek-ai/dsh-web", config: { searchProvider: PROVIDER_ID, fetchProvider: "http" } },

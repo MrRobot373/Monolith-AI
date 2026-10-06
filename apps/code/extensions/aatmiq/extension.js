@@ -213,6 +213,7 @@ class AgentView {
               }
               if (payload.kind === "tool_result") void this.sendChanges();
             } else if (event === "delta") this.post({ type: "delta", text: payload.text });
+            else if (event === "reasoning") this.post({ type: "reasoning", text: payload.text });
           }
         }
       } catch {

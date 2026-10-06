@@ -1,14 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleCheck, CircleDashed, CircleX, Cpu, MoreHorizontal, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
+import { CircleCheck, CircleDashed, CircleX, Cpu, KeyRound, MoreHorizontal, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Section, Table, Td } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
-import { Badge, Card, EmptyState, Switch } from "@/components/ui/misc";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { Badge, Card, EmptyState, Switch, Tooltip } from "@/components/ui/misc";
 import { Dialog, Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/overlay";
 import { Spinner } from "@/components/ui/spinner";
 import { del, get, patch, post } from "@/lib/api";
@@ -22,6 +22,8 @@ interface Provider {
   baseUrl: string | null;
   hasApiKey: boolean;
   health: { ok: boolean; latencyMs?: number; error?: string; checkedAt: string } | null;
+  /** API keys: how many, how many usable now, and which rest after hitting a limit. */
+  keys?: { total: number; available: number; resting: { index: number; until: string; reason: string | null }[] };
 }
 interface ModelRow {
   id: string;
@@ -45,6 +47,7 @@ export default function ModelsPage() {
   const models = useQuery({ queryKey: ["admin-models"], queryFn: () => get<ModelRow[]>("/api/admin/models") });
   const [addProvider, setAddProvider] = useState(false);
   const [addModelFor, setAddModelFor] = useState<Provider | null>(null);
+  const [keysFor, setKeysFor] = useState<Provider | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["admin-models"] });
@@ -104,6 +107,20 @@ export default function ModelsPage() {
                       </span>
                       {p.health?.checkedAt && <span className="text-fg-subtle">· {timeAgo(p.health.checkedAt)}</span>}
                     </div>
+                    {p.keys && p.keys.total > 0 && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle" data-testid="provider-keys">
+                        <KeyRound className="size-3.5" />
+                        <span>
+                          {p.keys.total} {p.keys.total === 1 ? "API key" : "API keys"}
+                          {p.keys.total > 1 && ` · ${p.keys.available} ready`}
+                        </span>
+                        {p.keys.resting.map((r) => (
+                          <Tooltip key={r.index} content={`${r.reason ?? "Limit reached"} · back ${new Date(r.until).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })}`}>
+                            <span className="rounded border border-warning/40 px-1 text-[10.5px] text-warning">#{r.index} resting</span>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <Menu>
                     <MenuTrigger asChild>
@@ -113,6 +130,7 @@ export default function ModelsPage() {
                     </MenuTrigger>
                     <MenuContent align="end">
                       <MenuItem icon={<RefreshCw />} onSelect={() => test.mutate(p.id)}>Test connection</MenuItem>
+                      <MenuItem icon={<KeyRound />} onSelect={() => setKeysFor(p)}>Replace API keys</MenuItem>
                       <MenuItem icon={<Trash2 />} danger onSelect={() => removeProvider.mutate(p.id)}>Remove provider</MenuItem>
                     </MenuContent>
                   </Menu>
@@ -184,6 +202,7 @@ export default function ModelsPage() {
       </Section>
 
       <AddProviderDialog open={addProvider} onOpenChange={setAddProvider} onDone={invalidate} />
+      {keysFor && <ProviderKeysDialog provider={keysFor} onClose={() => setKeysFor(null)} onDone={invalidate} />}
       {addModelFor && <AddModelsDialog provider={addModelFor} onClose={() => setAddModelFor(null)} onDone={invalidate} />}
     </div>
   );
@@ -239,13 +258,62 @@ function AddProviderDialog({ open, onOpenChange, onDone }: { open: boolean; onOp
         <Field label="Name">
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Base URL" hint={type === "ollama" ? "Where Ollama listens, e.g. http://gpu-box:11434" : "Should end in /v1, e.g. http://gpu-box:8000/v1"}>
+        <Field label="Base URL" hint={type === "ollama" ? "Where Ollama listens, e.g. http://gpu-box:11434, or https://ollama.com for Ollama Cloud" : "Should end in /v1, e.g. http://gpu-box:8000/v1"}>
           <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="font-mono text-[13px]" />
         </Field>
-        <Field label="API key" hint="Optional. Stored encrypted.">
-          <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…" />
-        </Field>
+        <ApiKeysField value={apiKey} onChange={setApiKey} />
       </div>
+    </Dialog>
+  );
+}
+
+/** One API key per line; Aatmiq moves to the next when one reaches its usage limit. */
+function ApiKeysField({ value, onChange, hint }: { value: string; onChange: (v: string) => void; hint?: string }) {
+  const count = value.split(/[\n,]+/).filter((k) => k.trim()).length;
+  return (
+    <Field
+      label={count > 1 ? `API keys (${count})` : "API key"}
+      hint={hint ?? "Optional. Stored encrypted. Several keys? One per line: when one reaches its usage limit, Aatmiq uses the next and comes back to it later."}
+    >
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={count > 1 ? Math.min(6, count) : 2}
+        placeholder="sk-…"
+        spellCheck={false}
+        autoComplete="off"
+        className="font-mono text-[12px] [-webkit-text-security:disc]"
+        data-testid="provider-api-keys"
+      />
+    </Field>
+  );
+}
+
+function ProviderKeysDialog({ provider, onClose, onDone }: { provider: Provider; onClose: () => void; onDone: () => void }) {
+  const [keys, setKeys] = useState("");
+  const m = useMutation({
+    mutationFn: () => patch(`/api/admin/providers/${provider.id}`, { apiKey: keys.trim() }),
+    onSuccess: () => {
+      toast.success("API keys replaced");
+      onDone();
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={`API keys for ${provider.name}`}
+      description="The saved keys are never shown. Enter the full new list; leave it empty to remove all keys."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Save keys</Button>
+        </>
+      }
+    >
+      <ApiKeysField value={keys} onChange={setKeys} hint="One per line. Aatmiq uses them in order and moves on when one reaches its limit." />
     </Dialog>
   );
 }

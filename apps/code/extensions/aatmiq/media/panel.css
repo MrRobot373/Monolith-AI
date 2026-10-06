@@ -87,3 +87,4 @@ textarea { width: 100%; resize: none; background: var(--surface); border: 1px so
 textarea:focus { border-color: var(--vscode-focusBorder); }
 footer .row { margin-top: 6px; }
 .empty { padding: 16px; color: var(--muted); line-height: 1.5; }
+.thinking { color: var(--muted); font-style: italic; font-size: 12px; line-height: 1.5; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

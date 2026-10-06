@@ -13,7 +13,10 @@ export interface ChatMessage {
 export interface ProviderConfig {
   type: ProviderType;
   baseUrl?: string | null;
+  /** One key, or several (one per line or comma-separated): calls move to the next when one hits a limit. */
   apiKey?: string | null;
+  /** Identifies the provider for key rotation state (defaults to its base URL). */
+  id?: string;
 }
 
 export interface Usage {
@@ -61,10 +64,97 @@ export function openAiBase(cfg: ProviderConfig): string {
   return base;
 }
 
-function headers(cfg: ProviderConfig): Record<string, string> {
-  const h: Record<string, string> = { "content-type": "application/json" };
-  if (cfg.apiKey) h.authorization = `Bearer ${cfg.apiKey}`;
-  return h;
+/* ───────────── API keys and rotation ───────────── */
+
+/** The provider's keys, in order. */
+export function keysOf(cfg: ProviderConfig): string[] {
+  return (cfg.apiKey ?? "")
+    .split(/[\n,]+/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+interface PoolState {
+  current: number;
+  /** key → time it may be used again */
+  restUntil: Map<string, number>;
+  lastError: Map<string, string>;
+}
+const pools = new Map<string, PoolState>();
+const poolOf = (cfg: ProviderConfig) => {
+  const id = cfg.id ?? cfg.baseUrl ?? cfg.type;
+  let p = pools.get(id);
+  if (!p) pools.set(id, (p = { current: 0, restUntil: new Map(), lastError: new Map() }));
+  return p;
+};
+
+/** Statuses that mean "this key can't be used right now", so another key may work. */
+const KEY_PROBLEM = new Set([401, 402, 403, 429]);
+
+/** How long a key rests after a problem. */
+export function restFor(status: number, retryAfter: string | null, body: string): number {
+  const after = retryAfter ? (/^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now()) : NaN;
+  if (Number.isFinite(after) && after > 0) return Math.min(after, 7 * 86_400_000);
+  if (status === 429 || status === 402) return /week/i.test(body) ? 86_400_000 : /day|daily/i.test(body) ? 6 * 3_600_000 : 15 * 60_000;
+  return 6 * 3_600_000; // 401/403: wrong or revoked key
+}
+
+/** Key usage, for admins: how many keys, how many usable now, and why the others rest. */
+export function keyStatus(cfg: ProviderConfig) {
+  const keys = keysOf(cfg);
+  const pool = poolOf(cfg);
+  const now = Date.now();
+  return {
+    total: keys.length,
+    available: keys.filter((k) => (pool.restUntil.get(k) ?? 0) <= now).length,
+    resting: keys
+      .map((k, i) => ({ index: i + 1, until: pool.restUntil.get(k) ?? 0, reason: pool.lastError.get(k) ?? null }))
+      .filter((r) => r.until > now)
+      .map((r) => ({ index: r.index, until: new Date(r.until).toISOString(), reason: r.reason })),
+  };
+}
+
+/** Forget rotation state (tests). */
+export function resetKeyPools() {
+  pools.clear();
+}
+
+/**
+ * fetch() with the provider's keys: uses the current key and, when the provider answers that this
+ * key is out of quota or not accepted (401/402/403/429), rests it and tries the next. Status and
+ * headers arrive before the body, so streamed answers never mix keys. With no usable key left the
+ * last answer is returned as is.
+ */
+export async function fetchWithKeys(cfg: ProviderConfig, url: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
+  const keys = keysOf(cfg);
+  if (keys.length === 0) return fetch(url, init);
+  const pool = poolOf(cfg);
+  const now = Date.now();
+  // Start from the current key, skipping resting ones; if all rest, try the one that wakes first.
+  const order = keys.map((_, i) => (pool.current + i) % keys.length);
+  const ready = order.filter((i) => (pool.restUntil.get(keys[i]!) ?? 0) <= now);
+  const tryOrder = ready.length ? ready : [...order].sort((a, b) => (pool.restUntil.get(keys[a]!) ?? 0) - (pool.restUntil.get(keys[b]!) ?? 0)).slice(0, 1);
+  let last: Response | null = null;
+  for (const i of tryOrder) {
+    const key = keys[i]!;
+    const res = await fetch(url, { ...init, headers: { ...(init.headers ?? {}), authorization: `Bearer ${key}` } });
+    if (!KEY_PROBLEM.has(res.status)) {
+      pool.current = i;
+      pool.restUntil.delete(key);
+      return res;
+    }
+    const body = await res.clone().text().catch(() => "");
+    pool.restUntil.set(key, Date.now() + restFor(res.status, res.headers.get("retry-after"), body));
+    pool.lastError.set(key, `${res.status} ${body.replace(/\s+/g, " ").slice(0, 120)}`.trim());
+    pool.current = (i + 1) % keys.length;
+    if (last) await last.body?.cancel().catch(() => undefined);
+    last = res;
+  }
+  return last!;
+}
+
+function headers(_cfg: ProviderConfig): Record<string, string> {
+  return { "content-type": "application/json" };
 }
 
 /** Parse a server-sent-events body into JSON payloads of `data:` lines. */
@@ -99,7 +189,7 @@ async function* streamOpenAiCompatible(
   messages: ChatMessage[],
   opts: StreamOptions,
 ): AsyncGenerator<StreamEvent> {
-  const res = await fetch(`${openAiBase(cfg)}/chat/completions`, {
+  const res = await fetchWithKeys(cfg, `${openAiBase(cfg)}/chat/completions`, {
     method: "POST",
     headers: headers(cfg),
     signal: opts.signal,
@@ -266,7 +356,7 @@ export async function embed(
   if (cfg.type === "mock") {
     return { vectors: inputs.map((t) => mockEmbed(t)), inputTokens: inputs.reduce((n, t) => n + estimateTokens(t), 0) };
   }
-  const res = await fetch(`${openAiBase(cfg)}/embeddings`, {
+  const res = await fetchWithKeys(cfg, `${openAiBase(cfg)}/embeddings`, {
     method: "POST",
     headers: headers(cfg),
     signal,
@@ -288,12 +378,12 @@ export async function embed(
 export async function listModels(cfg: ProviderConfig, signal?: AbortSignal): Promise<string[]> {
   if (cfg.type === "mock") return ["aatmiq-demo", "aatmiq-embed"];
   if (cfg.type === "ollama" && cfg.baseUrl) {
-    const res = await fetch(`${trimSlash(cfg.baseUrl).replace(/\/v1$/, "")}/api/tags`, { signal });
+    const res = await fetchWithKeys(cfg, `${trimSlash(cfg.baseUrl).replace(/\/v1$/, "")}/api/tags`, { signal });
     if (!res.ok) throw new GatewayError(`Ollama returned ${res.status}`);
     const json = (await res.json()) as { models?: { name: string }[] };
     return (json.models ?? []).map((m) => m.name);
   }
-  const res = await fetch(`${openAiBase(cfg)}/models`, { headers: headers(cfg), signal });
+  const res = await fetchWithKeys(cfg, `${openAiBase(cfg)}/models`, { headers: headers(cfg), signal });
   if (!res.ok) throw new GatewayError(`Provider returned ${res.status}`);
   const json = (await res.json()) as { data?: { id: string }[] };
   return (json.data ?? []).map((m) => m.id);

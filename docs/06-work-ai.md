@@ -48,6 +48,19 @@ Who can use Work AI: it must be in the license (`work` section), the model must 
 the *Work AI* section and for the workspace, and members need Work AI enabled on their workspace
 membership (org admins always can).
 
+## Model providers and API keys
+
+Any provider in **Admin → Models** works for Work AI, including hosted ones such as **Ollama Cloud**
+(type *Ollama*, base URL `https://ollama.com`). A provider can hold **several API keys**, one per line.
+Aatmiq uses the current key and, when the provider answers that it has hit a usage limit or isn't
+accepted (HTTP 429, 402, 401, 403), rests that key and moves to the next, for chat, Work AI and Code
+alike. A rate limit rests a key for its `Retry-After` time (otherwise 15 minutes), a weekly limit for a
+day and a rejected key for 6 hours. The provider card shows how many keys are ready and which rest
+and why; **Replace API keys** swaps the list without touching models.
+
+Tested with gpt-oss:120b on Ollama Cloud: multi-step tasks with a plan, Python, files, approvals for
+package installs and deletions, and the Aatmiq panel writing and testing code.
+
 ## How it works
 
 ```

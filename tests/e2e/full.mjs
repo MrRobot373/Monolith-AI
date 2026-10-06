@@ -266,7 +266,7 @@ await step("Models", "Unreachable provider is added with a clear error", owner, 
   await owner.click('[role="dialog"] >> text=OpenAI-compatible');
   await owner.locator('[role="dialog"] input').nth(0).fill("Broken vLLM");
   await owner.locator('[role="dialog"] input').nth(1).fill("http://127.0.0.1:1/v1");
-  await owner.locator('[role="dialog"] input[type="password"]').fill("sk-test");
+  await owner.getByTestId("provider-api-keys").fill("sk-test");
   await owner.click('[role="dialog"] >> button:has-text("Connect")');
   await toast(owner, "isn't reachable");
   await owner.locator("span.font-medium", { hasText: "Broken vLLM" }).waitFor();

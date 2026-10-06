@@ -59,6 +59,7 @@ export async function resolveModel(
     .where(eq(model.id, chosen.id));
   const p = row!.provider;
   const cfg: ProviderConfig = {
+    id: p.id,
     type: p.type,
     baseUrl: p.baseUrl,
     apiKey: p.apiKeyEnc ? box.decrypt(p.apiKeyEnc) : null,

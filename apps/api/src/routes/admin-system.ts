@@ -16,7 +16,7 @@ import {
   workspace,
   workspaceMember,
 } from "@aatmiq/db";
-import { listModels, testProvider } from "@aatmiq/model-gateway";
+import { keyStatus, listModels, testProvider } from "@aatmiq/model-gateway";
 import {
   BUDGET_PERIODS,
   brandingSchema,
@@ -37,6 +37,7 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db, box, cfg } = ctx;
 
   const providerCfg = (p: typeof modelProvider.$inferSelect) => ({
+    id: p.id,
     type: p.type,
     baseUrl: p.baseUrl,
     apiKey: p.apiKeyEnc ? box.decrypt(p.apiKeyEnc) : null,
@@ -54,7 +55,8 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.providers.manage");
     const rows = await db.select().from(modelProvider).orderBy(asc(modelProvider.createdAt));
-    return rows.map(({ apiKeyEnc, ...p }) => ({ ...p, hasApiKey: !!apiKeyEnc }));
+    // Keys are never returned; admins see how many there are and which are resting after a limit.
+    return rows.map(({ apiKeyEnc, ...p }) => ({ ...p, hasApiKey: !!apiKeyEnc, keys: keyStatus(providerCfg({ ...p, apiKeyEnc })) }));
   });
 
   app.post("/api/admin/providers", async (req) => {

@@ -21,6 +21,11 @@ createServer(async (req, res) => {
   if (req.url === "/mcp") return fakeMcp(req, res);
   if (req.url === "/v1/chat/completions") {
     let body = ""; for await (const c of req) body += c;
+    // Keys named "exhausted-…" behave like a key past its usage limit (for key rotation tests).
+    if (/^Bearer exhausted-/.test(req.headers.authorization ?? "")) {
+      res.writeHead(429, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ error: "you've reached your weekly usage limit" }));
+    }
     const j = JSON.parse(body);
     if (Array.isArray(j.tools) && j.tools.length) return agentReply(j, res);
     const last = j.messages.at(-1).content;

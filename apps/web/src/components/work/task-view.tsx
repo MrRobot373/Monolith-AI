@@ -151,6 +151,7 @@ export function TaskView({ taskId }: { taskId: string }) {
   const files = useQuery({ queryKey: ["work-files", taskId], queryFn: () => get<{ files: WorkFile[]; truncated: boolean }>(`/api/work/tasks/${taskId}/files`) });
   const [events, setEvents] = useState<WorkEvent[]>([]);
   const [draft, setDraft] = useState("");
+  const [thinking, setThinking] = useState("");
   const [input, setInput] = useState("");
   const [panel, setPanel] = useState<"progress" | "files" | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -200,11 +201,16 @@ export function TaskView({ taskId }: { taskId: string }) {
               if (e.seq <= afterRef.current) continue;
               afterRef.current = e.seq;
               setEvents((prev) => [...prev, e]);
-              if (e.kind === "assistant" || e.kind === "tool_call") setDraft("");
+              if (e.kind === "assistant" || e.kind === "tool_call") {
+                setDraft("");
+                setThinking("");
+              }
               if (e.kind === "status" || e.kind === "approval") refreshMeta();
               if (e.kind === "tool_result") void qc.invalidateQueries({ queryKey: ["work-files", taskId] });
             } else if (ev.event === "delta") {
               setDraft((d) => d + ev.data.text);
+            } else if (ev.event === "reasoning") {
+              setThinking((t) => (t + ev.data.text).slice(-2000));
             } else if (ev.event === "files") {
               void qc.invalidateQueries({ queryKey: ["work-files", taskId] });
             }
@@ -376,7 +382,7 @@ export function TaskView({ taskId }: { taskId: string }) {
                 {items.map((it) => (
                   <TimelineItem key={it.key} item={it} active={active} onDecide={(id, decision) => decide.mutate({ id, decision })} deciding={decide.isPending ? decide.variables?.id : undefined} />
                 ))}
-                {active && <Working status={status} draft={draft} />}
+                {active && <Working status={status} draft={draft} thinking={thinking} />}
               </div>
             )}
           </div>
@@ -607,16 +613,22 @@ function ApprovalNote({ approval: a }: { approval: Approval }) {
   );
 }
 
-function Working({ status, draft }: { status: TaskStatus; draft: string }) {
+function Working({ status, draft, thinking }: { status: TaskStatus; draft: string; thinking: string }) {
   if (status === "needs_approval") return null;
+  const label = status === "queued" ? "Waiting for a free slot…" : draft ? "Writing…" : thinking ? "Thinking…" : "Working…";
   return (
     <div className="mb-5">
       <div className="mb-1.5 flex items-center gap-2 text-[12.5px]">
         <LogoMark className="size-4" />
         <span className="bg-[linear-gradient(90deg,var(--fg-subtle)_0%,var(--fg)_50%,var(--fg-subtle)_100%)] bg-[length:200%_100%] bg-clip-text text-transparent animate-shimmer">
-          {status === "queued" ? "Waiting for a free slot…" : draft ? "Writing…" : "Working…"}
+          {label}
         </span>
       </div>
+      {thinking && !draft && (
+        <p className="line-clamp-3 pl-6 text-[12.5px] leading-relaxed text-fg-subtle italic" data-testid="thinking">
+          {thinking.slice(-400)}
+        </p>
+      )}
       {draft && (
         <div className="pl-6">
           <Markdown content={draft} />

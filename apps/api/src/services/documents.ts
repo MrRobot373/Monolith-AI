@@ -42,6 +42,7 @@ export async function embeddingModelFor(db: DB, box: SecretBox, workspaceId: str
     .where(and(eq(workspace.id, workspaceId), eq(model.enabled, true), eq(model.kind, "embedding")));
   if (!row) return null;
   const cfg: ProviderConfig = {
+    id: row.provider.id,
     type: row.provider.type,
     baseUrl: row.provider.baseUrl,
     apiKey: row.provider.apiKeyEnc ? box.decrypt(row.provider.apiKeyEnc) : null,

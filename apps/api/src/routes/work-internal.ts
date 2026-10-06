@@ -7,7 +7,7 @@
  *   POST /api/internal/work/search                     private web search (self-hosted SearXNG)
  */
 import { eq, sql, usageEvent, workTask } from "@aatmiq/db";
-import { estimateUsage, openAiBase } from "@aatmiq/model-gateway";
+import { estimateUsage, fetchWithKeys, openAiBase } from "@aatmiq/model-gateway";
 import { estimateTokens } from "@aatmiq/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -26,7 +26,7 @@ function llmError(reply: FastifyReply, status: number, message: string, type = "
 }
 
 type OpenAiChunk = {
-  choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
+  choices?: { delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
 };
 
@@ -108,9 +108,10 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     const abort = new AbortController();
     let upstream: Response;
     try {
-      upstream = await fetch(`${openAiBase(provider)}/chat/completions`, {
+      // fetchWithKeys moves to the provider's next API key when one hits its limit.
+      upstream = await fetchWithKeys(provider, `${openAiBase(provider)}/chat/completions`, {
         method: "POST",
-        headers: { "content-type": "application/json", ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}) },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, model: m.modelKey, ...(body.stream ? { stream_options: { include_usage: true } } : {}) }),
         signal: abort.signal,
       });
@@ -154,11 +155,15 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
       if (!data || data === "[DONE]") return;
       try {
         const json = JSON.parse(data) as OpenAiChunk;
-        const text = json.choices?.[0]?.delta?.content;
+        const delta = json.choices?.[0]?.delta;
+        const text = delta?.content;
         if (text) {
           output += text;
           work.pulse(t.taskId, "delta", { text });
         }
+        // Reasoning models (gpt-oss, deepseek, qwen3…) think before answering; show that live too.
+        const thinking = delta?.reasoning ?? delta?.reasoning_content;
+        if (thinking) work.pulse(t.taskId, "reasoning", { text: thinking });
         if (json.usage && typeof json.usage.prompt_tokens === "number") {
           usage = { inputTokens: json.usage.prompt_tokens, outputTokens: json.usage.completion_tokens ?? 0, estimated: false };
         }

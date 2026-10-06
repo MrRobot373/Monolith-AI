@@ -114,9 +114,17 @@ export function useWorkInfo(workspaceId: string) {
   });
 }
 
+/** A task-folder path as the person thinks of it: relative to the task (or Code workspace) folder. */
+export function shortPath(p: unknown): string | undefined {
+  if (typeof p !== "string" || !p) return undefined;
+  const m = /\/(?:files|workspaces\/[^/]+)\/(.+)$/.exec(p);
+  return m ? m[1] : p;
+}
+
 /** One-line description of a tool call, for the timeline. */
 export function describeCall(name: string, args: any): { verb: string; target?: string } {
-  const a = (args ?? {}) as Record<string, any>;
+  const raw = (args ?? {}) as Record<string, any>;
+  const a: Record<string, any> = { ...raw, path: shortPath(raw.path), file_path: shortPath(raw.file_path) };
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (mcp) return { verb: `Used ${mcp[1]}`, target: mcp[2]!.replaceAll("_", " ") };
   switch (name) {
