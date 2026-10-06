@@ -604,6 +604,8 @@ export const workTask = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     scheduleId: text("schedule_id"),
     projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "set null" }),
+    /** Set when the agent works in a Code workspace (Aatmiq panel) instead of its own task folder. */
+    codeWorkspaceId: text("code_workspace_id").references((): AnyPgColumn => codeWorkspace.id, { onDelete: "cascade" }),
     pinned: boolean("pinned").notNull().default(false),
     /** The Unix user its runtime runs as (see workUidSeq). */
     runUid: integer("run_uid").notNull().default(sql`nextval('work_uid_seq')`),
@@ -713,3 +715,40 @@ export const connector = pgTable("connector", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/* ───────────── Code (Aatmiq IDE) ───────────── */
+
+export const codeWorkspaceStatusEnum = pgEnum("code_workspace_status", ["ready", "cloning", "failed"]);
+
+/** A person's Unix user for their IDE, terminals and in-IDE agent (same id space as task users). */
+export const codeUser = pgTable("code_user", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  uid: integer("uid").notNull().default(sql`nextval('work_uid_seq')`),
+  createdAt: createdAt(),
+});
+
+/** A folder of code a person works on in Aatmiq Code (empty or cloned from Git). Private to its owner. */
+export const codeWorkspace = pgTable(
+  "code_workspace",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Folder name under the person's code home; unique per person. */
+    slug: text("slug").notNull(),
+    gitUrl: text("git_url"),
+    status: codeWorkspaceStatusEnum("status").notNull().default("ready"),
+    error: text("error"),
+    lastOpenedAt: timestamp("last_opened_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("code_workspace_user_slug_idx").on(t.userId, t.slug), index("code_workspace_ws_idx").on(t.workspaceId, t.userId)],
+);

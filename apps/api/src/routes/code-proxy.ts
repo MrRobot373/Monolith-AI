@@ -1,0 +1,152 @@
+/**
+ * /code/ide/* → the signed-in person's own IDE server (HTTP and WebSocket).
+ *
+ * It sits in front of Fastify (raw Node handlers) so request bodies and upgrades pass through
+ * untouched. Every request is checked against the Aatmiq session; Aatmiq's cookies are removed
+ * before forwarding, so nothing running inside the IDE (extensions, terminals) can pick them up.
+ */
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { request } from "node:http";
+import { connect } from "node:net";
+import type { Duplex } from "node:stream";
+import type { FastifyRequest } from "fastify";
+import { getSessionUser, type AppContext, type SessionUser } from "../context";
+import { HttpError } from "../errors";
+import { IDE_BASE_PATH } from "../services/code";
+import { canUseCode } from "./code";
+
+const SESSION_TTL_MS = 30_000;
+
+/** Only the IDE's own cookies go through. */
+function ideCookies(cookie: string | undefined) {
+  if (!cookie) return undefined;
+  const kept = cookie
+    .split(";")
+    .map((c) => c.trim())
+    .filter((c) => c.startsWith("vscode"));
+  return kept.length ? kept.join("; ") : undefined;
+}
+
+export function createCodeProxy(ctx: AppContext) {
+  // Static assets come in bursts of hundreds; remember sessions briefly.
+  const cache = new Map<string, { user: SessionUser | null; allowed: boolean; at: number }>();
+
+  async function who(req: IncomingMessage): Promise<{ user: SessionUser | null; allowed: boolean }> {
+    const key = /(?:__Secure-)?better-auth\.session_token=([^;]+)/.exec(req.headers.cookie ?? "")?.[1] ?? "";
+    if (!key) return { user: null, allowed: false };
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit;
+    const user = await getSessionUser(ctx, { headers: req.headers } as FastifyRequest);
+    const allowed = user ? await canUseCode(ctx, user) : false;
+    const entry = { user, allowed, at: Date.now() };
+    cache.set(key, entry);
+    if (cache.size > 5000) cache.clear();
+    return entry;
+  }
+
+  function sameOrigin(req: IncomingMessage) {
+    const origin = req.headers.origin;
+    if (!origin) return true;
+    try {
+      const o = new URL(origin);
+      const app = new URL(ctx.cfg.appUrl);
+      return o.host === req.headers.host || o.host === app.host;
+    } catch {
+      return false;
+    }
+  }
+
+  async function http(req: IncomingMessage, res: ServerResponse) {
+    try {
+      const { user, allowed } = await who(req);
+      if (!user) {
+        const wantsPage = (req.headers.accept ?? "").includes("text/html");
+        res.writeHead(wantsPage ? 302 : 401, wantsPage ? { location: "/login?next=%2Fapp%2Fcode" } : { "content-type": "text/plain" });
+        return res.end(wantsPage ? undefined : "Please sign in");
+      }
+      if (!allowed) {
+        res.writeHead(403, { "content-type": "text/plain" });
+        return res.end("Code isn't enabled for you.");
+      }
+      const server = await ctx.code.ensure(user.id);
+      ctx.code.touch(server);
+      const headers = { ...req.headers, cookie: ideCookies(req.headers.cookie) };
+      if (!headers.cookie) delete headers.cookie;
+      const up = request({ socketPath: server.socket, method: req.method, path: req.url, headers }, (ur) => {
+        res.writeHead(ur.statusCode ?? 502, ur.headers);
+        ur.pipe(res);
+      });
+      up.on("error", () => {
+        if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" });
+        res.end("The IDE isn't responding.");
+      });
+      req.pipe(up);
+    } catch (e) {
+      const status = e instanceof HttpError ? e.statusCode : 500;
+      if (!res.headersSent) res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+      res.end(e instanceof Error ? e.message : "Something went wrong.");
+    }
+  }
+
+  // Upgraded sockets aren't tracked by the HTTP server; end them ourselves on shutdown.
+  const open = new Set<Duplex>();
+
+  async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    open.add(socket);
+    socket.on("close", () => open.delete(socket));
+    const fail = (code: number, text: string) => {
+      socket.end(`HTTP/1.1 ${code} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`, () => socket.destroy());
+    };
+    try {
+      if (!sameOrigin(req)) return fail(403, "Forbidden");
+      const { user, allowed } = await who(req);
+      if (!user) return fail(401, "Unauthorized");
+      if (!allowed) return fail(403, "Forbidden");
+      const server = await ctx.code.ensure(user.id);
+      const up = connect(server.socket, () => {
+        const lines = [`${req.method} ${req.url} HTTP/1.1`];
+        for (let i = 0; i < req.rawHeaders.length; i += 2) {
+          const k = req.rawHeaders[i]!;
+          if (k.toLowerCase() === "cookie") {
+            const c = ideCookies(req.rawHeaders[i + 1]);
+            if (c) lines.push(`${k}: ${c}`);
+          } else lines.push(`${k}: ${req.rawHeaders[i + 1]}`);
+        }
+        up.write(`${lines.join("\r\n")}\r\n\r\n`);
+        if (head.length) up.write(head);
+        socket.pipe(up).pipe(socket);
+      });
+      server.connections++;
+      let closed = false;
+      const done = () => {
+        if (closed) return;
+        closed = true;
+        server.connections--;
+        ctx.code.touch(server);
+        socket.destroy();
+        up.destroy();
+      };
+      up.on("error", done);
+      up.on("close", done);
+      socket.on("error", done);
+      socket.on("close", done);
+    } catch {
+      fail(502, "Bad Gateway");
+    }
+  }
+
+  return {
+    matches: (url: string | undefined) => !!url && (url === IDE_BASE_PATH || url.startsWith(`${IDE_BASE_PATH}/`) || url.startsWith(`${IDE_BASE_PATH}?`)),
+    http,
+    closeAll() {
+      for (const s of open) s.destroy();
+      open.clear();
+    },
+    attach(server: Server) {
+      server.on("upgrade", (req, socket, head) => {
+        if (this.matches(req.url)) void upgrade(req, socket, head);
+        else socket.destroy();
+      });
+    },
+  };
+}

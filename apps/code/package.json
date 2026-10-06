@@ -1,0 +1,14 @@
+{
+  "name": "@aatmiq/code",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aatmiq Code: the Code-OSS based IDE, built from a pinned upstream server build plus our branding, defaults and built-in extensions (VSCodium-style patch set).",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test scripts/*.test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.9"
+  }
+}

@@ -6,9 +6,13 @@ const config: NextConfig = {
   output: "standalone",
   transpilePackages: ["@aatmiq/shared", "@aatmiq/ui"],
   poweredByHeader: false,
-  // The browser talks to one origin; /api is proxied to the API service.
+  // The browser talks to one origin; /api and the IDE (/code/ide, incl. WebSockets) go to the API service.
   async rewrites() {
-    return [{ source: "/api/:path*", destination: `${API_URL}/api/:path*` }];
+    return [
+      { source: "/api/:path*", destination: `${API_URL}/api/:path*` },
+      { source: "/code/ide", destination: `${API_URL}/code/ide` },
+      { source: "/code/ide/:path*", destination: `${API_URL}/code/ide/:path*` },
+    ];
   },
 };
 

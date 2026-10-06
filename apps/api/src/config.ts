@@ -18,6 +18,10 @@ export interface Config {
   workSandbox?: "on" | "off";
   /** "auto": each task runs as its own Unix user when the API runs as root. "off": same user as the API. */
   workIsolation?: "auto" | "off";
+  /** Aatmiq Code homes (one per person). */
+  codeDir?: string;
+  /** Minutes an IDE without open windows keeps running. */
+  codeIdleMinutes?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -38,5 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workControlUrl: env.WORK_CONTROL_URL || null,
     workSandbox: env.WORK_SANDBOX === "off" ? "off" : "on",
     workIsolation: env.WORK_ISOLATION === "off" ? "off" : "auto",
+    codeDir: env.CODE_DIR ?? ".data/code",
+    codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
   };
 }

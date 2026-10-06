@@ -23,6 +23,10 @@ import { requestRoutes } from "./routes/requests";
 import { workRoutes } from "./routes/work";
 import { workConfigRoutes } from "./routes/work-config";
 import { startScheduler } from "./services/schedules";
+import { CodeServers } from "./services/code";
+import { codeRoutes } from "./routes/code";
+import { createCodeProxy } from "./routes/code-proxy";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { workInternalRoutes } from "./routes/work-internal";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
@@ -34,10 +38,20 @@ export async function buildApp(
   cfg: Config,
   opts: { logger?: boolean; storage?: Storage; fetch?: typeof fetch; workEngine?: HarnessEngine } = {},
 ): Promise<FastifyInstance> {
+  // The IDE proxy (/code/ide) handles its requests before Fastify, so bodies and WebSocket
+  // upgrades pass through untouched.
+  let ideProxy: ReturnType<typeof createCodeProxy> | null = null;
   const app = Fastify({
     logger: opts.logger ?? false,
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
+    // Live streams and IDE connections never go idle; close them on shutdown.
+    forceCloseConnections: true,
+    serverFactory: (handler) =>
+      createServer((req: IncomingMessage, res: ServerResponse) => {
+        if (ideProxy?.matches(req.url)) void ideProxy.http(req, res);
+        else handler(req, res);
+      }),
   });
   const ctx = {
     db,
@@ -58,6 +72,16 @@ export async function buildApp(
     },
     log: (msg, err) => app.log.warn(err, msg),
   });
+  ctx.code = new CodeServers(ctx, {
+    controlUrl: () => {
+      const a = app.server.address() as AddressInfo | null;
+      return a && typeof a !== "string" ? `http://127.0.0.1:${a.port}/api/internal/code` : "";
+    },
+    idleMinutes: cfg.codeIdleMinutes,
+    log: (msg, err) => app.log.warn(err, msg),
+  });
+  ideProxy = createCodeProxy(ctx);
+  ideProxy.attach(app.server);
 
   // Keyed by session when signed in, so colleagues behind one office IP don't share a bucket.
   await app.register(rateLimit, {
@@ -109,6 +133,7 @@ export async function buildApp(
   await workRoutes(app, ctx);
   await workInternalRoutes(app, ctx);
   await workConfigRoutes(app, ctx);
+  await codeRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));
@@ -127,11 +152,15 @@ export async function buildApp(
     timer = setInterval(purge, 60 * 60 * 1000);
     timer.unref();
   });
+  app.addHook("preClose", async () => {
+    ideProxy?.closeAll();
+  });
   app.addHook("onClose", async () => {
     clearInterval(timer);
     stopScheduler?.();
     ctx.license.stop();
     await ctx.work.stopAll();
+    await ctx.code.stopAll();
     await stopOcr();
   });
   return app;

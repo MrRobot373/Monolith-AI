@@ -1,0 +1,9 @@
+{
+  "//": "Upstream Code-OSS server build (MIT). Bump version and sha256 together; see docs/07-code.md.",
+  "name": "openvscode-server",
+  "version": "1.109.5",
+  "url": "https://github.com/gitpod-io/openvscode-server/releases/download/openvscode-server-v{version}/openvscode-server-v{version}-linux-{arch}.tar.gz",
+  "sha256": {
+    "x64": "b433bf4f0227321a7014d8460d10a8f958adc0f45aa79bd889e84e65e8f88363"
+  }
+}

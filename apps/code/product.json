@@ -1,0 +1,40 @@
+{
+  "//": "Merged over the upstream product.json. null removes a key.",
+  "nameShort": "Aatmiq Code",
+  "nameLong": "Aatmiq Code",
+  "applicationName": "aatmiq-code",
+  "dataFolderName": ".aatmiq-code",
+  "serverApplicationName": "aatmiq-code-server",
+  "serverDataFolderName": ".aatmiq-code-server",
+  "tunnelApplicationName": null,
+  "serverGreeting": [],
+  "serverLicense": [],
+  "serverLicensePrompt": null,
+  "licenseName": "MIT",
+  "licenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
+  "serverLicenseUrl": null,
+  "reportIssueUrl": null,
+  "requestFeatureUrl": null,
+  "twitterUrl": null,
+  "sendASmile": null,
+  "urlProtocol": "aatmiq-code",
+  "linuxIconName": "aatmiq-code",
+  "enableTelemetry": false,
+  "webviewContentExternalBaseUrlTemplate": null,
+  "extensionRecommendations": {},
+  "keymapExtensionTips": [],
+  "configBasedExtensionTips": {},
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "resourceUrlTemplate": "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
+    "extensionUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
+    "controlUrl": "",
+    "recommendationsUrl": "",
+    "nlsBaseUrl": "",
+    "publisherUrl": ""
+  },
+  "linkProtectionTrustedDomains": [
+    "https://open-vsx.org"
+  ]
+}

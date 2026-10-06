@@ -1,0 +1,28 @@
+{
+  "name": "aatmiq-theme",
+  "displayName": "Aatmiq Theme",
+  "description": "The Aatmiq look for Aatmiq Code.",
+  "publisher": "aatmiq",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Aatmiq Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/aatmiq-dark.json"
+      },
+      {
+        "label": "Aatmiq Light",
+        "uiTheme": "vs",
+        "path": "./themes/aatmiq-light.json"
+      }
+    ]
+  }
+}
