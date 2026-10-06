@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aatmiq/db": "workspace:*",
+    "@aatmiq/harness": "workspace:*",
     "@aatmiq/license": "workspace:*",
     "@aatmiq/model-gateway": "workspace:*",
     "@aatmiq/shared": "workspace:*",

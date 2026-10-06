@@ -10,6 +10,10 @@ export interface Config {
   /** Where check-ins go. Empty turns check-ins off (air-gapped installs). */
   licenseServerUrl?: string | null;
   version?: string;
+  /** Where Work AI task folders live. */
+  workDir?: string;
+  /** How the agent runtime reaches this API (default: this server on 127.0.0.1). */
+  workControlUrl?: string | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -26,5 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     licensePublicKey: env.LICENSE_PUBLIC_KEY || null,
     licenseServerUrl: env.LICENSE_SERVER_URL === undefined ? "https://license.aatmiq.com" : env.LICENSE_SERVER_URL || null,
     version: env.APP_VERSION ?? "0.1.0",
+    workDir: env.WORK_DIR ?? ".data/work",
+    workControlUrl: env.WORK_CONTROL_URL || null,
   };
 }

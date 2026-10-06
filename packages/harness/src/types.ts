@@ -44,7 +44,7 @@ export type HarnessEvent =
   | { type: "tool_result"; callId: string; text: string; isError: boolean }
   | { type: "plan"; items: { content: string; status: string }[] }
   | { type: "title"; title: string }
-  | { type: "turn_end"; reason: string }
+  | { type: "turn_end"; reason: string; error?: string }
   | { type: "status"; status: "running" | "idle" }
   | { type: "exit"; code: number | null; error?: string };
 

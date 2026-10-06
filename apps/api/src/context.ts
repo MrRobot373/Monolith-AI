@@ -26,6 +26,7 @@ import type { Config } from "./config";
 import type { SecretBox } from "./crypto";
 import type { LicenseService } from "./services/license";
 import type { Storage } from "./services/storage";
+import type { WorkRunner } from "./services/work";
 import { badRequest, forbidden, notFound, unauthorized } from "./errors";
 
 export interface AppContext {
@@ -35,6 +36,7 @@ export interface AppContext {
   box: SecretBox;
   storage: Storage;
   license: LicenseService;
+  work: WorkRunner;
 }
 
 export interface SessionUser {

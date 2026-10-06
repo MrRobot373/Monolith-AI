@@ -23,6 +23,9 @@ importers:
       '@aatmiq/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aatmiq/harness':
+        specifier: workspace:*
+        version: link:../../packages/harness
       '@aatmiq/license':
         specifier: workspace:*
         version: link:../../packages/license

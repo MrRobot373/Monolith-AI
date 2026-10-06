@@ -85,8 +85,8 @@ export function mapEvent(ev: DshSessionEvent): HarnessEvent | null {
     case "session/title":
       return typeof d.title === "string" ? { type: "title", title: d.title } : null;
     case "turn/end": {
-      const r = d.reason as { kind?: string } | undefined;
-      return { type: "turn_end", reason: r?.kind ?? "completed" };
+      const r = d.reason as { kind?: string; error?: { message?: string } } | undefined;
+      return { type: "turn_end", reason: r?.kind ?? "completed", ...(r?.error?.message ? { error: r.error.message } : {}) };
     }
     default:
       return null;

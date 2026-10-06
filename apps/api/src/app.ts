@@ -20,25 +20,41 @@ import { ssoRoutes } from "./routes/sso";
 import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
 import { requestRoutes } from "./routes/requests";
+import { workRoutes } from "./routes/work";
+import { workInternalRoutes } from "./routes/work-internal";
+import { WorkRunner } from "./services/work";
+import type { HarnessEngine } from "@aatmiq/harness";
+import type { AddressInfo } from "node:net";
 
 export async function buildApp(
   db: DB,
   cfg: Config,
-  opts: { logger?: boolean; storage?: Storage; fetch?: typeof fetch } = {},
+  opts: { logger?: boolean; storage?: Storage; fetch?: typeof fetch; workEngine?: HarnessEngine } = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: opts.logger ?? false,
     trustProxy: true,
     bodyLimit: 2 * 1024 * 1024,
   });
-  const ctx: AppContext = {
+  const ctx = {
     db,
     cfg,
     auth: createAuth(db, cfg, sha256),
     box: createSecretBox(cfg.secret),
     storage: opts.storage ?? createLocalStorage(cfg.storageDir),
     license: new LicenseService(db, cfg, opts.fetch),
-  };
+  } as AppContext;
+  // The agent runtime calls back into this server (models, approvals, search).
+  ctx.work = new WorkRunner(ctx, {
+    engine: opts.workEngine,
+    controlUrl: () => {
+      if (cfg.workControlUrl) return cfg.workControlUrl.replace(/\/$/, "");
+      const a = app.server.address() as AddressInfo | null;
+      if (!a || typeof a === "string") throw new Error("The API isn't listening yet, so Work AI can't start.");
+      return `http://127.0.0.1:${a.port}/api/internal/work`;
+    },
+    log: (msg, err) => app.log.warn(err, msg),
+  });
 
   // Keyed by session when signed in, so colleagues behind one office IP don't share a bucket.
   await app.register(rateLimit, {
@@ -87,6 +103,8 @@ export async function buildApp(
   await adminOrgRoutes(app, ctx);
   await adminSystemRoutes(app, ctx);
   await licenseRoutes(app, ctx);
+  await workRoutes(app, ctx);
+  await workInternalRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));
@@ -94,12 +112,14 @@ export async function buildApp(
   app.addHook("onReady", async () => {
     ctx.license.start();
     purge();
+    void ctx.work.recover().catch((e) => app.log.warn(e, "recovering Work AI tasks failed"));
     timer = setInterval(purge, 60 * 60 * 1000);
     timer.unref();
   });
   app.addHook("onClose", async () => {
     clearInterval(timer);
     ctx.license.stop();
+    await ctx.work.stopAll();
     await stopOcr();
   });
   return app;
