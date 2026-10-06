@@ -11,6 +11,7 @@ import {
   ChevronsUpDown,
   Code2,
   FileText,
+  Folder,
   LogOut,
   MessageSquare,
   MoreHorizontal,
@@ -42,6 +43,7 @@ import { SearchPalette } from "./search-palette";
 import { useSession } from "./session";
 import { StatusIcon } from "@/components/work/parts";
 import { usePendingApprovals, useWorkTasks } from "@/lib/work";
+import { useCodeWorkspaces } from "@/lib/code";
 
 export function useChats(workspaceId: string) {
   return useQuery({
@@ -169,9 +171,11 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
 
   const sections = workspace?.sections ?? ["chat"];
   const inWork = pathname.startsWith("/app/work");
+  const inCode = pathname.startsWith("/app/code");
   // A section shows when the license includes it and the person (or an admin) has it enabled.
   const can = (s: "chat" | "work" | "code") => (me.license?.sections.includes(s) ?? true) && (sections.includes(s) || me.isAdmin);
   const workTasks = useWorkTasks(can("work") ? workspaceId : "");
+  const codeWorkspaces = useCodeWorkspaces(inCode && can("code") ? workspaceId : "");
   const approvalsQ = usePendingApprovals(can("work") ? workspaceId : "");
   const pendingApprovals = approvalsQ.data?.length ?? 0;
 
@@ -292,7 +296,7 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
           </NavItem>
         )}
         {can("code") && (
-          <NavItem href="/app/code" icon={<Code2 />} active={pathname.startsWith("/app/code")} soon>
+          <NavItem href="/app/code" icon={<Code2 />} active={pathname.startsWith("/app/code")}>
             Code
           </NavItem>
         )}
@@ -379,19 +383,42 @@ export function Sidebar({ onCollapse }: { onCollapse: () => void }) {
               {workTasks.data?.length === 0 && <p className="px-2 py-2 text-[12.5px] text-fg-subtle">Your tasks will appear here.</p>}
             </div>
           </div>
+        ) : inCode ? (
+          <div className="mb-3">
+            <SectionLabel>Workspaces</SectionLabel>
+            <div className="space-y-px">
+              {(codeWorkspaces.data ?? []).map((w) => {
+                const active = pathname === `/app/code/${w.id}`;
+                return (
+                  <Link
+                    key={w.id}
+                    href={`/app/code/${w.id}`}
+                    className={cn(
+                      "flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors",
+                      active ? "bg-surface-2 text-fg" : "text-fg-muted hover:bg-surface-2/70 hover:text-fg",
+                    )}
+                  >
+                    <Folder className="size-3.5 shrink-0 text-fg-subtle" />
+                    <span className="min-w-0 flex-1 truncate">{w.name}</span>
+                  </Link>
+                );
+              })}
+              {codeWorkspaces.data?.length === 0 && <p className="px-2 py-2 text-[12.5px] text-fg-subtle">Your workspaces will appear here.</p>}
+            </div>
+          </div>
         ) : null}
-        {!inWork && pinned.length > 0 && (
+        {!inWork && !inCode && pinned.length > 0 && (
           <div className="mb-3">
             <SectionLabel>Pinned</SectionLabel>
             <div className="space-y-px">{pinned.map(chatRow)}</div>
           </div>
         )}
-        {!inWork && (
+        {!inWork && !inCode && (
         <SectionLabel open={recentsOpen} onToggle={() => setRecentsOpen((o) => !o)}>
           Recents
         </SectionLabel>
         )}
-        {!inWork && recentsOpen && (
+        {!inWork && !inCode && recentsOpen && (
           <div className="space-y-px">
             {chats.isLoading &&
               [70, 90, 60].map((w) => (

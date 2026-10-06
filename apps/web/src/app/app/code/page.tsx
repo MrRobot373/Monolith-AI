@@ -1,179 +1,246 @@
 "use client";
 
-import {
-  ChevronDown,
-  ChevronRight,
-  Code2,
-  File,
-  Files,
-  Folder,
-  GitBranch,
-  Monitor,
-  Play,
-  Puzzle,
-  Search,
-  Terminal,
-  X,
-} from "lucide-react";
-import { TopBar, TopBarButton } from "@/components/app/frame";
-import { LogoMark } from "@/components/ui/logo";
-import { cn } from "@/lib/cn";
-
-const TREE: [number, string, "dir" | "open" | "file", boolean?][] = [
-  [0, "billing-service", "open"],
-  [1, "node_modules", "dir"],
-  [1, "public", "dir"],
-  [1, "src", "open"],
-  [2, "components", "dir"],
-  [2, "lib", "open"],
-  [3, "invoices.ts", "file", true],
-  [3, "customers.ts", "file"],
-  [3, "db.ts", "file"],
-  [2, "index.ts", "file"],
-  [1, "tests", "dir"],
-  [1, "package.json", "file"],
-];
-
-type Line = { n: number; t: React.ReactNode; kind?: "add" | "del" };
-const k = (s: string) => <span className="text-[#c792ea]">{s}</span>;
-const f = (s: string) => <span className="text-[#82aaff]">{s}</span>;
-const str = (s: string) => <span className="text-[#c3e88d]">{s}</span>;
-const ty = (s: string) => <span className="text-[#ffcb6b]">{s}</span>;
-const c = (s: string) => <span className="text-fg-subtle italic">{s}</span>;
-
-const CODE: Line[] = [
-  { n: 1, t: <>{k("import")} {"{ db }"} {k("from")} {str('"./db"')};</> },
-  { n: 2, t: <>{k("import type")} {"{ "}{ty("Invoice")}{" }"} {k("from")} {str('"./types"')};</> },
-  { n: 3, t: "" },
-  { n: 4, t: c("/** Unpaid invoices for a customer, newest first. */") },
-  { n: 5, t: <>{k("export async function")} {f("getInvoices")}(customerId: {ty("string")}) {"{"}</> },
-  { n: 6, t: <>{"  "}{k("const")} rows = {k("await")} db.invoice.{f("findMany")}({"{ where: { customerId } }"});</>, kind: "del" },
-  { n: 6, t: <>{"  "}{k("const")} rows = {k("await")} db.invoice.{f("findMany")}({"{"}</>, kind: "add" },
-  { n: 7, t: <>{"    where: { customerId, status: "}{str('"unpaid"')}{" },"}</>, kind: "add" },
-  { n: 8, t: <>{"    orderBy: { issuedAt: "}{str('"desc"')}{" },"}</>, kind: "add" },
-  { n: 9, t: <>{"    take: "}<span className="text-[#f78c6c]">50</span>,</>, kind: "add" },
-  { n: 10, t: "  });", kind: "add" },
-  { n: 11, t: <>{"  "}{k("return")} rows {k("as")} {ty("Invoice")}[];</> },
-  { n: 12, t: "}" },
-];
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Code2, FolderGit2, Folder, Loader2, MoreHorizontal, Pencil, Plus, Sparkles, Terminal, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
+import { TopBar } from "@/components/app/frame";
+import { useSession } from "@/components/app/session";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/field";
+import { EmptyState } from "@/components/ui/misc";
+import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
+import { Skeleton } from "@/components/ui/spinner";
+import { del, patch, post } from "@/lib/api";
+import { useCodeStatus, useCodeWorkspaces, type CodeWorkspace } from "@/lib/code";
+import { timeAgo } from "@/lib/format";
 
 export default function CodePage() {
+  const { workspaceId } = useSession();
+  const qc = useQueryClient();
+  const router = useRouter();
+  const status = useCodeStatus();
+  const list = useCodeWorkspaces(workspaceId);
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState<CodeWorkspace | null>(null);
+  const [removing, setRemoving] = useState<CodeWorkspace | null>(null);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["code-workspaces", workspaceId] });
+  const remove = useMutation({
+    mutationFn: (w: CodeWorkspace) => del(`/api/code/workspaces/${w.id}`),
+    onSuccess: () => {
+      refresh();
+      setRemoving(null);
+      toast("Workspace deleted");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rows = list.data ?? [];
+  const notInstalled = status.data && !status.data.installed;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar
         icon={<Code2 />}
-        title={
-          <span className="flex items-center gap-2">
-            Code <span className="rounded border border-border px-1.5 text-[11px] text-fg-subtle">Preview</span>
-          </span>
-        }
+        title="Code"
         actions={
-          <>
-            <TopBarButton disabled>
-              <Monitor /> Open desktop app
-            </TopBarButton>
-            <TopBarButton disabled>
-              <Play /> Run
-            </TopBarButton>
-          </>
+          <Button variant="primary" size="sm" onClick={() => setCreating(true)} disabled={notInstalled} data-testid="new-code-workspace">
+            <Plus className="size-3.5" /> New workspace
+          </Button>
         }
       />
-      <div className="border-b border-border px-4 py-2 text-center text-[12.5px] text-fg-subtle">
-        A preview of Aatmiq Code: the full VS Code editor with a built-in agent. It arrives after Work AI.
-      </div>
-      <div className="flex min-h-0 flex-1 font-mono text-[12.5px]">
-        {/* Activity bar */}
-        <div className="flex w-11 shrink-0 flex-col items-center gap-4 border-r border-border py-3 text-fg-subtle">
-          <Files className="size-[18px] text-fg" />
-          <Search className="size-[18px]" />
-          <GitBranch className="size-[18px]" />
-          <Puzzle className="size-[18px]" />
-          <LogoMark className="size-[18px]" />
-        </div>
-        {/* Explorer */}
-        <div className="hidden w-56 shrink-0 border-r border-border py-2 font-sans text-[13px] md:block">
-          <div className="px-3 pb-2 text-[11px] tracking-wide text-fg-subtle uppercase">Explorer</div>
-          {TREE.map(([d, name, kind, active], i) => (
-            <div
-              key={i}
-              className={cn("flex h-6 items-center gap-1 pr-2", active ? "bg-surface-2 text-fg" : "text-fg-muted")}
-              style={{ paddingLeft: 8 + d * 12 }}
-            >
-              {kind === "file" ? (
-                <File className="ml-4 size-3.5 text-fg-subtle" />
-              ) : (
-                <>
-                  {kind === "open" ? <ChevronDown className="size-3.5 text-fg-subtle" /> : <ChevronRight className="size-3.5 text-fg-subtle" />}
-                  <Folder className="size-3.5 text-fg-subtle" />
-                </>
-              )}
-              <span className="truncate">{name}</span>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
+          <h1 className="font-serif text-[30px] leading-tight tracking-[-0.02em]">Code</h1>
+          <p className="mt-1 max-w-2xl text-[13px] text-fg-subtle">
+            Aatmiq Code is a full VS Code–based editor running on your organization&apos;s servers, with terminals, Git and Open VSX extensions. The Aatmiq panel on the right is a coding agent that works in your workspace.
+          </p>
+
+          {notInstalled && (
+            <div className="mt-6 flex items-start gap-3 rounded-xl border border-warning/40 bg-surface px-4 py-3 text-[13px]">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+              <div>
+                <div className="text-fg">Aatmiq Code isn&apos;t installed on this server yet.</div>
+                <div className="text-fg-subtle">An administrator can build it with <code className="font-mono text-[12px]">pnpm --filter @aatmiq/code build</code> (the Docker image includes it).</div>
+              </div>
             </div>
-          ))}
-        </div>
-        {/* Editor */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-9 shrink-0 items-stretch border-b border-border font-sans text-[12.5px]">
-            <div className="flex items-center gap-2 border-r border-border bg-surface px-3 text-fg">
-              invoices.ts <X className="size-3 text-fg-subtle" />
+          )}
+
+          {list.isLoading ? (
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-[124px] rounded-xl" />
+              ))}
             </div>
-            <div className="flex items-center gap-2 border-r border-border px-3 text-fg-subtle">
-              customers.ts <X className="size-3" />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              className="mt-6 rounded-xl border border-dashed border-border"
+              icon={<Code2 className="size-5" />}
+              title="No workspaces yet"
+              description="Start an empty workspace or clone a Git repository. Each workspace is a folder only you can open."
+              action={
+                !notInstalled && (
+                  <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                    <Plus className="size-3.5" /> New workspace
+                  </Button>
+                )
+              }
+            />
+          ) : (
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="code-workspaces">
+              {rows.map((w) => (
+                <div key={w.id} className="group relative flex min-w-0 flex-col rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-strong" data-testid="code-workspace">
+                  <Link href={w.status === "ready" ? `/app/code/${w.id}` : "#"} className="absolute inset-0 rounded-xl" aria-label={`Open ${w.name}`} onClick={(e) => w.status !== "ready" && e.preventDefault()} />
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex size-8 items-center justify-center rounded-lg border border-border bg-bg">
+                      {w.status === "cloning" ? <Loader2 className="size-4 animate-spin text-fg-subtle" /> : w.gitUrl ? <FolderGit2 className="size-4 text-fg-muted" /> : <Folder className="size-4 text-fg-muted" />}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] text-fg">{w.name}</span>
+                    <Menu>
+                      <MenuTrigger asChild>
+                        <button className="relative z-10 rounded p-1 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface-2 hover:text-fg focus:opacity-100" aria-label={`Options for ${w.name}`}>
+                          <MoreHorizontal className="size-4" />
+                        </button>
+                      </MenuTrigger>
+                      <MenuContent align="end">
+                        <MenuItem icon={<Pencil />} onSelect={() => setRenaming(w)}>Rename</MenuItem>
+                        <MenuSeparator />
+                        <MenuItem icon={<Trash2 />} danger onSelect={() => setRemoving(w)}>Delete</MenuItem>
+                      </MenuContent>
+                    </Menu>
+                  </div>
+                  <p className="mt-2.5 truncate font-mono text-[11.5px] text-fg-subtle">{w.gitUrl ?? `~/workspaces/${w.slug}`}</p>
+                  <div className="mt-auto pt-3 text-[12px]">
+                    {w.status === "cloning" ? (
+                      <span className="text-fg-muted">Cloning…</span>
+                    ) : w.status === "failed" ? (
+                      <span className="line-clamp-2 text-danger">{w.error ?? "Couldn't create this workspace."}</span>
+                    ) : (
+                      <span className="text-fg-subtle">{w.lastOpenedAt ? `Opened ${timeAgo(w.lastOpenedAt)}` : "Not opened yet"}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto bg-surface py-2 leading-6">
-            {CODE.map((l, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "flex gap-4 border-l-2 pr-4",
-                  l.kind === "add" && "border-success bg-success-soft",
-                  l.kind === "del" && "border-danger bg-danger-soft line-through decoration-danger/40",
-                  !l.kind && "border-transparent",
-                )}
-              >
-                <span className="w-8 shrink-0 text-right text-fg-subtle select-none">{l.n}</span>
-                <span className="text-fg whitespace-pre">{l.t}</span>
+          )}
+
+          <div className="mt-10 grid gap-3 sm:grid-cols-3">
+            {[
+              { icon: Terminal, title: "Terminals and Git", text: "A real shell on the server, Git with your name on commits, and extensions from Open VSX." },
+              { icon: Sparkles, title: "Aatmiq panel", text: "Ask the agent to explain, change or test code. It edits your files and asks before anything risky." },
+              { icon: Folder, title: "Private to you", text: "Your workspaces run as your own user on the server. Nobody else can open them." },
+            ].map((f) => (
+              <div key={f.title} className="rounded-xl border border-border p-4">
+                <f.icon className="size-4 text-fg-subtle" />
+                <div className="mt-2 text-[13px] text-fg">{f.title}</div>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-fg-subtle">{f.text}</p>
               </div>
             ))}
           </div>
-          <div className="h-32 shrink-0 border-t border-border p-3 leading-6">
-            <div className="mb-1 flex items-center gap-2 font-sans text-[11px] tracking-wide text-fg-subtle uppercase">
-              <Terminal className="size-3.5" /> Terminal
-            </div>
-            <div className="text-fg-muted">$ pnpm test invoices</div>
-            <div className="text-success">✓ 8 passed (412ms)</div>
-          </div>
-        </div>
-        {/* Agent panel */}
-        <div className="hidden w-80 shrink-0 flex-col border-l border-border font-sans lg:flex">
-          <div className="flex h-9 items-center gap-2 border-b border-border px-3 text-[13px]">
-            <LogoMark className="size-4" /> Aatmiq
-          </div>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-[13px]">
-            <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">Only return unpaid invoices, newest first, max 50. Add tests.</div>
-            <div className="space-y-1.5 text-fg-muted">
-              <div>› Thought for 4s</div>
-              <div>› Read src/lib/invoices.ts</div>
-              <div>› Edited 2 files</div>
-              <div>› Ran pnpm test invoices</div>
-            </div>
-            <div className="rounded-lg border border-border">
-              <div className="flex items-center justify-between px-3 py-2">
-                <span>2 files changed</span>
-                <span>
-                  <span className="text-success">+14</span> <span className="text-danger">−1</span>
-                </span>
-              </div>
-              <div className="flex gap-2 border-t border-border px-3 py-2">
-                <span className="rounded-md bg-primary px-2.5 py-1 text-[12.5px] font-medium text-primary-fg">Accept</span>
-                <span className="rounded-md border border-border px-2.5 py-1 text-[12.5px] text-fg-muted">Review</span>
-              </div>
-            </div>
-          </div>
-          <div className="m-3 rounded-lg border border-border-strong px-3 py-2.5 text-[13px] text-fg-subtle">Ask Aatmiq to change code…</div>
         </div>
       </div>
+
+      {creating && (
+        <NewWorkspaceDialog
+          workspaceId={workspaceId}
+          onClose={() => setCreating(false)}
+          onCreated={(w) => {
+            refresh();
+            setCreating(false);
+            if (w.status === "ready") router.push(`/app/code/${w.id}`);
+            else toast("Cloning the repository. It opens when it's ready.");
+          }}
+        />
+      )}
+      {renaming && <RenameDialog w={renaming} onClose={() => setRenaming(null)} onSaved={refresh} />}
+      <Dialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={`Delete “${removing?.name}”?`}
+        description="The folder and everything in it is deleted from the server, including changes you haven't pushed. This can't be undone."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRemoving(null)}>Cancel</Button>
+            <Button variant="danger" loading={remove.isPending} onClick={() => removing && remove.mutate(removing)}>Delete workspace</Button>
+          </>
+        }
+      />
     </div>
+  );
+}
+
+function NewWorkspaceDialog({ workspaceId, onClose, onCreated }: { workspaceId: string; onClose: () => void; onCreated: (w: CodeWorkspace) => void }) {
+  const [name, setName] = useState("");
+  const [gitUrl, setGitUrl] = useState("");
+  const create = useMutation({
+    mutationFn: () => post<CodeWorkspace>("/api/code/workspaces", { workspaceId, name: name.trim(), gitUrl: gitUrl.trim() }),
+    onSuccess: onCreated,
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const guess = (url: string) => url.replace(/\.git$/, "").split(/[/:]/).filter(Boolean).pop() ?? "";
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="New workspace"
+      description="Start empty, or clone a repository. Private repositories work over https with a token in the address, for now."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!name.trim()} loading={create.isPending} onClick={() => create.mutate()} data-testid="create-code-workspace">
+            {gitUrl.trim() ? "Clone" : "Create"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Git repository (optional)">
+          <Input
+            value={gitUrl}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (!name || name === guess(gitUrl)) setName(guess(v));
+              setGitUrl(v);
+            }}
+            placeholder="https://github.com/acme/billing-service.git"
+            className="font-mono text-[12.5px]"
+            data-testid="code-git-url"
+          />
+        </Field>
+        <Field label="Name">
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="billing-service" data-testid="code-workspace-name" />
+        </Field>
+      </div>
+    </Dialog>
+  );
+}
+
+function RenameDialog({ w, onClose, onSaved }: { w: CodeWorkspace; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(w.name);
+  const save = useMutation({
+    mutationFn: () => patch(`/api/code/workspaces/${w.id}`, { name: name.trim() }),
+    onSuccess: () => {
+      onSaved();
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="Rename workspace"
+      description="The folder name stays the same."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!name.trim()} loading={save.isPending} onClick={() => save.mutate()}>Save</Button>
+        </>
+      }
+    >
+      <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+    </Dialog>
   );
 }

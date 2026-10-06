@@ -226,11 +226,11 @@ await step("Chat", "Sidebar collapses with button and Ctrl+B", owner, async () =
   await owner.keyboard.press("Control+b");
   await owner.locator('button[aria-label="Collapse sidebar"]').waitFor();
 });
-await step("Chat", "Work AI and the Code preview open", owner, async () => {
+await step("Chat", "Work AI and Code open", owner, async () => {
   await owner.click("aside a:has-text('Work AI')");
   await owner.getByText(/What should I work on/).waitFor();
   await owner.click("aside a:has-text('Code')");
-  await owner.getByText("invoices.ts").first().waitFor();
+  await owner.getByText(/Aatmiq Code is a full VS Code/).waitFor();
 });
 
 /* ═════════════ D. Models & providers ═════════════ */

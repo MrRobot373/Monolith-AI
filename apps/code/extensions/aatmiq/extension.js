@@ -130,11 +130,18 @@ class AgentView {
       case "diff": {
         if (!this.folder) return;
         const uri = vscode.Uri.file(path.join(this.folder, m.path));
+        // Last commit ↔ working copy, through the built-in Git extension; new files just open.
         try {
-          await vscode.commands.executeCommand("git.openChange", uri);
+          const ext = vscode.extensions.getExtension("vscode.git");
+          const git = (ext?.isActive ? ext.exports : await ext?.activate())?.getAPI(1);
+          if (git && m.status !== "??" && m.status !== "A") {
+            await vscode.commands.executeCommand("vscode.diff", git.toGitUri(uri, "HEAD"), uri, `${path.basename(m.path)} (changes)`);
+            return;
+          }
         } catch {
-          await vscode.window.showTextDocument(uri, { preview: true });
+          /* fall back to opening the file */
         }
+        await vscode.window.showTextDocument(uri, { preview: true });
         return;
       }
       case "scm":

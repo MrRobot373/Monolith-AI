@@ -186,7 +186,7 @@
     const changes = state.changes.length
       ? `<div class="changes"><div class="changes-head"><span>${state.changes.length} changed ${state.changes.length === 1 ? "file" : "files"}</span><a href="#" data-scm>Review</a></div>${state.changes
           .slice(0, 12)
-          .map((f) => `<a href="#" class="change" data-diff="${esc(f.path)}"><span class="st st-${esc(f.status[0])}">${esc(f.status)}</span>${esc(f.path)}</a>`)
+          .map((f) => `<a href="#" class="change" data-diff="${esc(f.path)}" data-status="${esc(f.status)}"><span class="st st-${esc(f.status[0])}">${esc(f.status)}</span>${esc(f.path)}</a>`)
           .join("")}</div>`
       : "";
     const models = state.models.length > 1 && !state.task ? `<select id="model">${state.models.map((m) => `<option value="${m.id}" ${m.id === state.modelId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select>` : "";
@@ -238,7 +238,7 @@
     else if (t.hasAttribute("data-new")) vscode.postMessage({ type: "new" });
     else if (t.dataset.decide) vscode.postMessage({ type: "decide", id: t.dataset.id, decision: t.dataset.decide });
     else if (t.dataset.open) vscode.postMessage({ type: "open", path: t.dataset.open });
-    else if (t.dataset.diff) vscode.postMessage({ type: "diff", path: t.dataset.diff });
+    else if (t.dataset.diff) vscode.postMessage({ type: "diff", path: t.dataset.diff, status: t.dataset.status });
     else if (t.hasAttribute("data-scm")) vscode.postMessage({ type: "scm" });
     else if (t.dataset.link) vscode.postMessage({ type: "link", url: t.dataset.link });
     else if (t.dataset.chip) {
