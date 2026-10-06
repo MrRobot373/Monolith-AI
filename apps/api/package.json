@@ -22,6 +22,7 @@
     "@napi-rs/canvas": "^1.0.9",
     "@tesseract.js-data/eng": "^1.0.0",
     "better-auth": "^1.7.6",
+    "cron-parser": "^5.10.1",
     "docx": "^9.8.1",
     "drizzle-orm": "^0.45.3",
     "exceljs": "^4.4.0",

@@ -26,6 +26,7 @@ export const ORG_CAPABILITIES = [
   "org.branding.manage",
   "org.license.view",
   "org.license.manage",
+  "org.work.manage",
 ] as const;
 export type OrgCapability = (typeof ORG_CAPABILITIES)[number];
 

@@ -21,6 +21,8 @@ import { meRoutes } from "./routes/me";
 import { projectRoutes } from "./routes/projects";
 import { requestRoutes } from "./routes/requests";
 import { workRoutes } from "./routes/work";
+import { workConfigRoutes } from "./routes/work-config";
+import { startScheduler } from "./services/schedules";
 import { workInternalRoutes } from "./routes/work-internal";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
@@ -105,19 +107,23 @@ export async function buildApp(
   await licenseRoutes(app, ctx);
   await workRoutes(app, ctx);
   await workInternalRoutes(app, ctx);
+  await workConfigRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));
   let timer: NodeJS.Timeout | undefined;
+  let stopScheduler: (() => void) | undefined;
   app.addHook("onReady", async () => {
     ctx.license.start();
     purge();
     void ctx.work.recover().catch((e) => app.log.warn(e, "recovering Work AI tasks failed"));
+    stopScheduler = startScheduler(ctx, (msg, err) => app.log.warn(err, msg));
     timer = setInterval(purge, 60 * 60 * 1000);
     timer.unref();
   });
   app.addHook("onClose", async () => {
     clearInterval(timer);
+    stopScheduler?.();
     ctx.license.stop();
     await ctx.work.stopAll();
     await stopOcr();

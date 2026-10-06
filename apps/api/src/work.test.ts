@@ -23,6 +23,8 @@ let fake: Server;
 let fakeUrl = "";
 let apiUrl = "";
 const modelRequests: { role: string; content: unknown }[][] = [];
+const mcpCalls: { name: string; arguments?: Record<string, unknown> }[] = [];
+let lastTools: string[] = [];
 
 /* ───────────── Fake model + SearXNG ───────────── */
 
@@ -34,18 +36,21 @@ function sse(res: import("node:http").ServerResponse, chunks: unknown[]) {
   res.end("data: [DONE]\n\n");
 }
 
-function fakeModel(body: { messages: { role: string; content: unknown }[] }, res: import("node:http").ServerResponse) {
+function fakeModel(body: { messages: { role: string; content: unknown }[]; tools?: { function: { name: string } }[] }, res: import("node:http").ServerResponse) {
   modelRequests.push(body.messages);
+  lastTools = (body.tools ?? []).map((t) => t.function.name);
   const last = body.messages.at(-1)!;
   const usage = { choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } };
   const say = (t: string) => sse(res, [{ choices: [{ index: 0, delta: { content: t } }] }, { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }, usage]);
   if (last.role === "tool") return say(`Result: ${textOf(last.content).trim().slice(0, 300)}`);
-  const ask = textOf([...body.messages].reverse().find((m) => m.role === "user" && !/^Current runtime context/.test(textOf(m.content)))?.content);
+  const userText = (m: { content: unknown }) => textOf(m.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+  const ask = [...body.messages].reverse().filter((m) => m.role === "user").map(userText).find((t) => t && !/^Current runtime context/.test(t)) ?? "";
   const asked = ask.split("</earlier-conversation>").at(-1)!;
   let call: [string, unknown] | null = null;
   let m: RegExpExecArray | null;
   if ((m = /run: (.+)/s.exec(asked))) call = ["bash", { description: "Run it", command: m[1]!.trim() }];
   else if ((m = /search: (.+)/.exec(asked))) call = ["web_search", { queries: [m[1]!.trim()] }];
+  else if ((m = /use (\S+) (\{.*\})/.exec(asked))) call = [m[1]!, JSON.parse(m[2]!)];
   if (!call) return say(`Hello! You said: ${asked.trim().slice(0, 100)}`);
   return sse(res, [
     { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call_${Date.now()}`, type: "function", function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] },
@@ -104,6 +109,28 @@ d("Work AI", () => {
       if (req.url?.startsWith("/searx/search")) {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ results: [{ url: "https://intranet.example/travel", title: "Travel policy", content: "Economy under 6 hours." }] }));
+      }
+      if (req.url === "/mcp") {
+        if (req.method !== "POST") return res.writeHead(405).end();
+        const msg = JSON.parse(raw);
+        if (msg.id === undefined) return res.writeHead(202).end();
+        const reply = (result: unknown) => {
+          res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "s1" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }));
+        };
+        if (msg.method === "initialize") return reply({ protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "notes", version: "1" } });
+        if (msg.method === "tools/list")
+          return reply({
+            tools: [
+              { name: "create_note", description: "Save a note", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+              { name: "list_notes", description: "List notes", inputSchema: { type: "object", properties: {} } },
+            ],
+          });
+        if (msg.method === "tools/call") {
+          mcpCalls.push(msg.params);
+          return reply({ content: [{ type: "text", text: `Saved note: ${msg.params.arguments?.text ?? ""}` }] });
+        }
+        return reply({});
       }
       if (req.url === "/v1/models") {
         res.writeHead(200, { "content-type": "application/json" });
@@ -241,6 +268,74 @@ d("Work AI", () => {
     const seeded = JSON.stringify(modelRequests.at(-1));
     expect(seeded).toContain("earlier-conversation");
     expect(seeded).toContain("hello-work");
+  }, 60_000);
+
+  it("lets admins set the Work AI policy", async () => {
+    const r = await call("GET", "/api/admin/work");
+    expect(r.json.settings.searxngUrl).toContain("/searx");
+    expect(r.json.licensed).toBe(true);
+    const put = await call("PUT", "/api/admin/work", { maxConcurrentPerUser: 3, idleMinutes: 30 });
+    expect(put.json).toMatchObject({ maxConcurrentPerUser: 3, idleMinutes: 30, approvals: "risky" });
+    expect((await call("PUT", "/api/admin/work", { approvals: "sometimes" })).status).toBe(400);
+    expect((await call("GET", "/api/work/info")).json).toMatchObject({ webSearch: true, approvals: "risky" });
+  });
+
+  it("gives the agent org and personal skills", async () => {
+    const org = await call("POST", "/api/work/skills", { name: "Quarterly report", description: "Use when writing a quarterly report", body: "Always include a summary table.", scope: "org" });
+    expect(org.status).toBe(200);
+    expect(org.json).toMatchObject({ slug: "quarterly-report", editable: true });
+    const mine = await call("POST", "/api/work/skills", { name: "Quarterly report", description: "My own variant", body: "Use bullet points." });
+    expect(mine.json.scope).toBe("personal");
+    expect((await call("GET", "/api/work/skills")).json).toHaveLength(2);
+
+    const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: "hello skills" });
+    await waitStatus(t.json.id, "completed");
+    const seen = JSON.stringify(modelRequests.at(-1));
+    expect(seen).toContain("Use when writing a quarterly report");
+    expect(seen).toContain("My own variant");
+    expect((await call("DELETE", `/api/work/skills/${mine.json.id}`)).status).toBe(200);
+  }, 60_000);
+
+  it("connects MCP servers and asks before matching tools", async () => {
+    const c = await call("POST", "/api/admin/connectors", { name: "notes", displayName: "Notes", url: `${fakeUrl}/mcp`, headers: { authorization: "Bearer notes-secret" }, approveTools: "create_*" });
+    expect(c.status).toBe(200);
+    expect(c.json.headerNames).toEqual(["authorization"]);
+    expect(JSON.stringify((await call("GET", "/api/admin/connectors")).json)).not.toContain("notes-secret");
+    const probe = await call("POST", `/api/admin/connectors/${c.json.id}/test`);
+    expect(probe.json).toMatchObject({ ok: true, serverName: "notes" });
+    expect(probe.json.tools.map((x: { name: string }) => x.name)).toEqual(["create_note", "list_notes"]);
+
+    const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: 'use mcp__notes__create_note {"text":"buy milk"}' });
+    await waitStatus(t.json.id, "needs_approval", "completed", "failed");
+    expect(lastTools).toContain("mcp__notes__create_note");
+    const pending = (await call("GET", "/api/work/approvals")).json;
+    expect(pending[0]).toMatchObject({ toolName: "mcp__notes__create_note" });
+    await call("POST", `/api/work/approvals/${pending[0].id}`, { decision: "approve" });
+    const done = await waitStatus(t.json.id, "completed", "failed");
+    expect(done.task.error).toBeNull();
+    expect(mcpCalls.at(-1)).toMatchObject({ name: "create_note", arguments: { text: "buy milk" } });
+    expect(done.events.find((e) => e.kind === "tool_result")?.data.text).toContain("Saved note: buy milk");
+    await call("PATCH", `/api/admin/connectors/${c.json.id}`, { enabled: false });
+  }, 60_000);
+
+  it("schedules recurring tasks", async () => {
+    expect((await call("POST", "/api/work/schedules", { workspaceId, name: "Too often", prompt: "x", cron: "* * * * *" })).status).toBe(400);
+    expect((await call("POST", "/api/work/schedules", { workspaceId, name: "Bad", prompt: "x", cron: "0 9 * *" })).status).toBe(400);
+    expect((await call("POST", "/api/work/schedules", { workspaceId, name: "Bad tz", prompt: "x", cron: "0 9 * * *", timezone: "Mars/Olympus" })).status).toBe(400);
+    const s = await call("POST", "/api/work/schedules", { workspaceId, name: "Morning brief", prompt: "good morning", cron: "0 9 * * 1-5", timezone: "Asia/Kolkata" });
+    expect(s.status).toBe(200);
+    expect(new Date(s.json.nextRunAt).getUTCHours()).toBe(3);
+    expect(new Date(s.json.nextRunAt).getUTCMinutes()).toBe(30);
+    const preview = await call("GET", "/api/work/schedules/preview?cron=0%209%20*%20*%201-5&timezone=UTC");
+    expect(preview.json.runs).toHaveLength(3);
+
+    const run = await call("POST", `/api/work/schedules/${s.json.id}/run`);
+    const t = await waitStatus(run.json.taskId, "completed", "failed");
+    expect(t.task.result).toContain("good morning");
+    const list = await call("GET", `/api/work/schedules?workspaceId=${workspaceId}`);
+    expect(list.json[0]).toMatchObject({ lastTaskId: run.json.taskId, lastStatus: "completed" });
+    const off = await call("PATCH", `/api/work/schedules/${s.json.id}`, { enabled: false });
+    expect(off.json.nextRunAt).toBeNull();
   }, 60_000);
 
   it("guards the internal API and cancels running work", async () => {
