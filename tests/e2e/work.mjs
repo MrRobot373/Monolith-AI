@@ -300,6 +300,21 @@ await step("Connectors", "Gmail from the catalog asks the admin for an OAuth app
   await shot(page, "connector-gmail-setup");
   await page.keyboard.press("Escape");
 });
+await step("Connectors", "GitLab needs no OAuth app, says what GitLab must allow, and takes a self-managed URL", page, async () => {
+  await page.goto(`${APP}/admin/work`);
+  await page.getByTestId("add-connector").click();
+  await page.getByTestId("catalog-search").fill("gitlab");
+  await page.getByTestId("catalog-gitlab").click();
+  await page.getByTestId("connector-prerequisite").filter({ hasText: "allows MCP access" }).waitFor();
+  if (await page.getByTestId("redirect-uri").count()) throw new Error("GitLab asked for an OAuth app");
+  const url = page.getByTestId("connector-url");
+  if ((await url.inputValue()) !== "https://gitlab.com/api/v4/mcp") throw new Error(`default URL ${await url.inputValue()}`);
+  if (await url.isDisabled()) throw new Error("URL can't be changed for a self-managed GitLab");
+  await url.fill("https://gitlab.acme.test/api/v4/mcp");
+  if (await page.getByTestId("save-connector").isDisabled()) throw new Error("can't save");
+  await shot(page, "connector-gitlab");
+  await page.keyboard.press("Escape");
+});
 await step("Connectors", "A person connects their own account (OAuth) and a task uses it", page, async () => {
   await page.goto(`${APP}/admin/work`);
   await page.getByTestId("add-connector").click();

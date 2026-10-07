@@ -391,8 +391,8 @@ function ConnectorForm({
             <Input value={form.name} disabled={!!connector} onChange={(e) => setForm({ ...form, name: e.target.value })} className="font-mono" data-testid="connector-name" />
           </Field>
         </div>
-        <Field label="Server URL">
-          <Input value={form.url} disabled={!custom && !connector} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="http://jira-mcp:3000/mcp" data-testid="connector-url" />
+        <Field label="Server URL" hint={source?.urlHint}>
+          <Input value={form.url} disabled={!custom && !connector && !source?.urlHint} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="http://jira-mcp:3000/mcp" data-testid="connector-url" />
         </Field>
         {custom && (
           <Field label="Sign-in">
@@ -410,6 +410,11 @@ function ConnectorForm({
               Each person connects their own account in Work AI → Connections; the agent acts with their access only.
               {!needsClient && " Aatmiq registers itself with the service automatically, so there's nothing to set up."}
             </p>
+            {!needsClient && !custom && connector?.oauthClient !== "admin" && source?.setup && (
+              <p className="text-[12.5px] leading-relaxed text-fg-subtle" data-testid="connector-prerequisite">
+                {source.setup}
+              </p>
+            )}
             {(needsClient || custom || connector?.oauthClient === "admin") && (
               <>
                 {source?.setup && <p className="text-[12.5px] leading-relaxed text-fg-subtle">{source.setup}</p>}

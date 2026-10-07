@@ -17,6 +17,8 @@ export interface CatalogConnector {
   category: CatalogCategory;
   description: string;
   url: string;
+  /** Set when the address differs per customer (a self-hosted service): the admin may change the URL. */
+  urlHint?: string;
   auth: ConnectorAuth;
   /** For oauth: register automatically, or the admin brings an OAuth app. */
   client?: "dynamic" | "admin";
@@ -284,6 +286,19 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     tokenHeader: { name: "Authorization", prefix: "Bearer ", label: "Personal access token" },
     setup: "Create a fine-grained personal access token with access to the repositories the agent may use.",
     docsUrl: "https://github.com/github/github-mcp-server",
+  },
+  {
+    id: "gitlab",
+    name: "GitLab",
+    category: "Developer",
+    description: "Projects, issues, merge requests, pipelines and code, on GitLab.com or your own GitLab.",
+    url: "https://gitlab.com/api/v4/mcp",
+    urlHint: "For your own GitLab (18.6 or later), use https://<your GitLab>/api/v4/mcp.",
+    auth: "oauth",
+    client: "dynamic",
+    scopes: "mcp",
+    setup: "A GitLab admin allows MCP access first: on GitLab.com for the top-level group (Settings → General → Permissions), on your own GitLab for the instance (Admin → Settings → General → Visibility and access controls).",
+    docsUrl: "https://docs.gitlab.com/user/model_context_protocol/mcp_server/",
   },
   { id: "sentry", name: "Sentry", category: "Developer", description: "Errors, issues and releases.", url: "https://mcp.sentry.dev/mcp", auth: "oauth", client: "dynamic" },
   { id: "vercel", name: "Vercel", category: "Developer", description: "Projects, deployments and logs.", url: "https://mcp.vercel.com/", auth: "oauth", client: "dynamic" },

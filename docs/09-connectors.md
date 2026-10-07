@@ -10,7 +10,7 @@ real services.
 
 | Kind | Examples | What the admin does |
 |---|---|---|
-| **Automatic** (OAuth, Aatmiq registers itself) | Notion, Canva, Linear, Atlassian, Figma, Stripe… (29) | Nothing. Add it from the catalog; each person clicks **Connect**. |
+| **Automatic** (OAuth, Aatmiq registers itself) | Notion, Canva, Linear, Atlassian, Figma, GitLab, Stripe… (30) | Nothing. Add it from the catalog; each person clicks **Connect**. |
 | **Admin's OAuth app** | Gmail, Google Calendar/Drive/Docs/Sheets/Slides, Slack, GitHub, Box, Zoom, Asana, HubSpot (12) | Create an OAuth app at the service once, with Aatmiq's redirect URI, and paste its client ID and secret. |
 | **Shared token** or **open** | GitHub (token); DeepWiki, Microsoft Learn, AWS Knowledge, Hugging Face (open) | Paste a token, or nothing. |
 
@@ -39,6 +39,12 @@ and secret.
 **GitHub.** Settings → Developer settings → OAuth Apps → New OAuth App. Use the redirect URI as
 the *Authorization callback URL*. Paste the client ID and a client secret. (For a shared bot
 account instead, use **GitHub (token)** with a fine-grained personal access token.)
+
+**GitLab** (automatic, nothing to register). A GitLab admin allows MCP access first: on GitLab.com
+for the top-level group (*Settings → General → Permissions*), on your own GitLab for the instance
+(*Admin → Settings → General → Visibility and access controls*). For your own GitLab (18.6 or
+later), change the server URL to `https://<your GitLab>/api/v4/mcp` when adding it; it must be
+reachable from the Aatmiq server.
 
 **Box, Zoom, Asana, HubSpot.** Create an OAuth app in the service's developer console (Box
 Developer Console; Zoom App Marketplace, *General app*; Asana developer console; HubSpot,
@@ -78,12 +84,14 @@ It never registers clients or signs anyone in, so it creates nothing at the serv
 cd apps/api && NODE_USE_ENV_PROXY=1 npx tsx ../../tests/connectors/check.mts
 ```
 
-**Result on 2026-10-07: 44/44 passed.**
+**Result on 2026-10-07: 44/44 passed.** GitLab was added later the same day and passes (signs in
+at gitlab.com, registers itself). On that rerun, Netlify's MCP host reset connections from our test
+machine while netlify.com itself answered; the entry is unchanged.
 
 | | Result |
 |---|---|
 | Open (4) | DeepWiki, Microsoft Learn, AWS Knowledge, Hugging Face: connected, tools listed, a real tool call answered |
-| Automatic sign-in (29) | All publish OAuth metadata and accept self-registration (dynamic client registration) |
+| Automatic sign-in (30) | All publish OAuth metadata and accept self-registration (dynamic client registration) |
 | Admin's OAuth app (12) | All six Google connectors sign in at accounts.google.com; Slack, GitHub, Box, Zoom, Asana and HubSpot at their own sign-in servers |
 | Token (1) | GitHub refuses requests without a token (401), as expected |
 

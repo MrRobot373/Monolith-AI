@@ -33,7 +33,7 @@
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
 | License server + Super Admin console: customers, issue/change/revoke licenses, check-ins, release channel | ✅ `apps/license-server`, `apps/license-console` |
 | Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), MCP connectors, skills, schedules, per-task isolation, metering ([details](docs/06-work-ai.md)) | ✅ |
-| Connectors: catalog of 44 apps (Gmail, Google Calendar/Drive/Docs, Slack, GitHub, Notion, Canva, Jira…), each person signs in to their own account, checked against the real services ([setup](docs/09-connectors.md)) | ✅ |
+| Connectors: catalog of 45 apps (Gmail, Google Calendar/Drive/Docs, Slack, GitHub, GitLab, Notion, Canva, Jira…), each person signs in to their own account, checked against the real services ([setup](docs/09-connectors.md)) | ✅ |
 | Built-in skill library: 59 skills for software, data, documents and business work, admins switch each on or off ([list](docs/08-skills.md)) | ✅ |
 | Code: Aatmiq Code (Code-OSS) in the browser, per-person IDE as your own user, terminals, Git (clone, your name on commits), Open VSX extensions, and the Aatmiq panel: a coding agent with approvals and diffs ([details](docs/07-code.md)) | ✅ (desktop app next) |
 
