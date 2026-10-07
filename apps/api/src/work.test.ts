@@ -522,6 +522,81 @@ d("Work AI", () => {
     expect(off.json.nextRunAt).toBeNull();
   }, 60_000);
 
+  it("runs tasks in a project: its instructions, files and connectors; shared tasks are read-only", async () => {
+    const proj = (await call("POST", "/api/projects", { workspaceId, name: "Launch", instructions: "Answer like a ship captain." })).json;
+    const budget = await call("POST", `/api/projects/${proj.id}/sources/note`, { title: "Budget", content: "The budget is 42 lakh." });
+    await call("POST", `/api/projects/${proj.id}/sources/note`, { title: "Dates", content: "Launch in March." }).then((r) =>
+      call("PATCH", `/api/projects/${proj.id}/sources/${r.json.id}`, { label: "assumption" }),
+    );
+    const t = await call("POST", "/api/work/tasks", { workspaceId, projectId: proj.id, prompt: "run: cat project/README.md project/Budget.md; echo findings > out.md" });
+    const done = await waitStatus(t.json.id, "completed", "failed");
+    const out = String(done.events.find((e) => e.kind === "tool_result")?.data.text);
+    expect(out).toContain("# Project: Launch");
+    expect(out).toMatch(/\| Dates\.md \| Note \| Assumption \|/);
+    expect(out).toContain("The budget is 42 lakh.");
+    const system = JSON.stringify(modelRequests.at(-1)?.find((m) => m.role === "system"));
+    expect(system).toContain('belongs to the project \\"Launch\\"');
+    expect(system).toContain("Answer like a ship captain.");
+    expect((await call("GET", `/api/work/tasks?workspaceId=${workspaceId}`)).json[0]).toMatchObject({ id: t.json.id, projectName: "Launch", sharedToProject: false });
+    expect((await call("GET", `/api/projects/${proj.id}`)).json.tasks.map((x: { id: string }) => x.id)).toEqual([t.json.id]);
+
+    // Results go back to the project as sources; the copies in project/ don't.
+    const saved = await call("POST", `/api/work/tasks/${t.json.id}/save-to-project`, { path: "out.md" });
+    expect(saved.status).toBe(200);
+    expect((await call("POST", `/api/work/tasks/${t.json.id}/save-to-project`, { path: "project/Budget.md" })).status).toBe(400);
+    const sources = (await call("GET", `/api/projects/${proj.id}`)).json.sources.map((x: { name: string }) => x.name);
+    expect(sources).toEqual(["Budget.md", "Dates.md", "out.md"]);
+
+    // Someone else in the project reads it only once it's shared, and can't change it.
+    const maya = { cookie: "" };
+    const as = async (method: "GET" | "POST" | "PATCH", path: string, body?: unknown) => {
+      const res = await app.inject({ method, url: path, headers: { origin: APP_URL, ...(maya.cookie ? { cookie: maya.cookie } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) }, payload: body !== undefined ? JSON.stringify(body) : undefined });
+      const set = res.headers["set-cookie"];
+      if (set) maya.cookie = (Array.isArray(set) ? set : [set]).map((c) => c.split(";")[0]).join("; ");
+      return { status: res.statusCode, json: (() => { try { return res.json(); } catch { return null; } })() };
+    };
+    const inv = await call("POST", "/api/admin/invites", { email: "maya@acme.test", workspaces: [{ workspaceId, role: "member" }] });
+    await as("POST", `/api/invites/${inv.json.link.split("/invite/")[1]}/accept`, { name: "Maya Member", password: "a-good-password-1" });
+    const mayaId = (await as("GET", "/api/me")).json.user.id;
+    await call("PUT", `/api/projects/${proj.id}/members`, { userId: mayaId, role: "chat" });
+    expect((await as("GET", `/api/work/tasks/${t.json.id}`)).status).toBe(404);
+    expect((await call("PATCH", `/api/work/tasks/${t.json.id}`, { sharedToProject: true })).json.sharedToProject).toBe(true);
+    const seen = await as("GET", `/api/work/tasks/${t.json.id}`);
+    expect(seen.status).toBe(200);
+    expect(seen.json).toMatchObject({ own: false, ownerName: "Asha Owner", project: { id: proj.id, canEdit: false } });
+    expect((await as("GET", `/api/work/tasks/${t.json.id}/files/content?path=out.md`)).status).toBe(200);
+    expect((await as("GET", `/api/projects/${proj.id}`)).json.tasks).toHaveLength(1);
+    expect((await as("POST", `/api/work/tasks/${t.json.id}/messages`, { prompt: "hi" })).status).toBe(404);
+    expect((await as("POST", `/api/work/tasks/${t.json.id}/cancel`)).status).toBe(404);
+    expect((await as("POST", `/api/work/tasks/${t.json.id}/save-to-project`, { path: "out.md" })).status).toBe(403);
+    await call("DELETE", `/api/projects/${proj.id}/members/${mayaId}`);
+    expect((await as("GET", `/api/work/tasks/${t.json.id}`)).status).toBe(404);
+    expect((await call("PATCH", `/api/work/tasks/${taskId}`, { sharedToProject: true })).status).toBe(400);
+
+    // The project picks its connectors: none, then just this one.
+    const wiki = (await call("POST", "/api/admin/connectors", { name: "wiki", displayName: "Wiki", url: `${fakeUrl}/mcp`, approveTools: "" })).json;
+    expect((await call("PATCH", `/api/projects/${proj.id}`, { connectorIds: ["nope"] })).status).toBe(400);
+    await call("PATCH", `/api/projects/${proj.id}`, { connectorIds: [] });
+    await waitStatus((await call("POST", "/api/work/tasks", { workspaceId, projectId: proj.id, prompt: "hello" })).json.id, "completed", "failed");
+    expect(lastTools.some((x) => x.startsWith("mcp__wiki__"))).toBe(false);
+    await call("PATCH", `/api/projects/${proj.id}`, { connectorIds: [wiki.id] });
+    const listed = await call("POST", "/api/work/tasks", { workspaceId, projectId: proj.id, prompt: "use mcp__wiki__list_notes {}" });
+    const r = await waitStatus(listed.json.id, "completed", "failed");
+    expect(lastTools).toContain("mcp__wiki__list_notes");
+    expect(r.task.status).toBe("completed");
+    await call("PATCH", `/api/admin/connectors/${wiki.id}`, { enabled: false });
+
+    // Scheduled runs become tasks in the project.
+    const sch = await call("POST", "/api/work/schedules", { workspaceId, projectId: proj.id, name: "Weekly", prompt: "run: ls project", cron: "0 9 * * 1" });
+    expect(sch.status).toBe(200);
+    const run = await call("POST", `/api/work/schedules/${sch.json.id}/run`);
+    const ran = await waitStatus(run.json.taskId, "completed", "failed");
+    expect(String(ran.events.find((e) => e.kind === "tool_result")?.data.text)).toContain("out.md");
+    expect((await call("GET", `/api/work/schedules?workspaceId=${workspaceId}`)).json.find((x: { id: string }) => x.id === sch.json.id)).toMatchObject({ projectName: "Launch" });
+    await call("DELETE", `/api/work/schedules/${sch.json.id}`);
+    expect(budget.status).toBe(200);
+  }, 120_000);
+
   it.runIf(process.getuid?.() === 0)("isolates tasks: own Unix user, no access to other tasks or documents", async () => {
     const other = join(workDir, taskId, "files");
     const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: `run: id -u; ls ${other}; ls ${storageDir}` });

@@ -38,6 +38,7 @@ import { chmod, chown, cp, mkdir, readdir, rm, writeFile } from "node:fs/promise
 import { join, resolve } from "node:path";
 import type { AppContext } from "../context";
 import { resolveModel } from "./models";
+import { PROJECT_FOLDER, projectFor, projectInstructions, writeProjectFiles } from "./project-work";
 
 export type TaskStatus = (typeof workTask.$inferSelect)["status"];
 export interface WorkStreamEvent {
@@ -67,6 +68,8 @@ interface Live {
   runUid?: number;
   /** Container mode: the task may use the egress proxy (Admin → Work AI → Containers → Internet). */
   internet?: boolean;
+  /** The connectors its project allows (null: all). */
+  connectorIds?: string[] | null;
   idleTimer?: NodeJS.Timeout;
 }
 
@@ -354,6 +357,16 @@ export class WorkRunner {
       await this.prepareFolder(taskId, runUid);
       if (code) await this.ctx.code.prepare(task.userId, workdir);
       const [org] = await db.select({ productName: organization.productName }).from(organization).limit(1);
+      // A task in a project (that its owner can still open): its instructions, files and connectors.
+      let instructions: string | undefined;
+      const proj = task.projectId && !code ? await projectFor(db, task.userId, task.projectId) : null;
+      if (proj) {
+        const dir = join(workdir, PROJECT_FOLDER);
+        const { copied } = await writeProjectFiles(db, this.ctx.storage, proj, dir);
+        await this.chownTree(dir, runUid);
+        instructions = projectInstructions(proj, copied);
+        l.connectorIds = proj.connectorIds ?? null;
+      }
       // Container mode: Work AI tasks get their own container; the container is their sandbox.
       const inContainer = !code && !!this.containerEngine;
       const engine = inContainer ? this.containerEngine! : this.engine;
@@ -371,7 +384,7 @@ export class WorkRunner {
           webSearch: !!settings.searxngUrl,
           browser: settings.browser && !!this.ctx.browser?.available,
           skillsDir,
-          connectors: await this.connectorSpecs(task.userId, token),
+          connectors: await this.connectorSpecs(task.userId, token, l.connectorIds ?? null),
           productName: org?.productName ?? PRODUCT_NAME,
           sandbox: inContainer ? "off" : (this.ctx.cfg.workSandbox ?? "on"),
           ...(inContainer
@@ -386,7 +399,9 @@ export class WorkRunner {
                   "The person sees your edits in their editor and in Source Control; summarize what you changed and why at the end.",
                 ].join(" "),
               }
-            : {}),
+            : instructions
+              ? { instructions }
+              : {}),
         },
         (e) => void this.onEvent(l, e).catch((err) => this.opts.log?.("work: handling an event failed", err)),
       );
@@ -583,6 +598,12 @@ export class WorkRunner {
     return l && !l.cancelled ? { taskId: l.taskId, userId: l.userId, workspaceId: l.workspaceId } : null;
   }
 
+  /** Whether a running task may use a connector (its project may allow only some). */
+  connectorAllowed(taskId: string, connectorId: string): boolean {
+    const only = this.live.get(taskId)?.connectorIds;
+    return !only || only.includes(connectorId);
+  }
+
   /** Where a running task's browser lives: its folder, a private profile, and its Unix user. */
   browserTarget(taskId: string): { workdir: string; profileDir: string; uid?: number } {
     const l = this.live.get(taskId);
@@ -727,8 +748,8 @@ export class WorkRunner {
    * The connectors this person's task can use: open and shared-token ones, plus OAuth ones they've
    * connected. All go through Aatmiq's MCP proxy with the task token, which adds the credentials.
    */
-  private async connectorSpecs(userId: string, token: string): Promise<ConnectorSpec[]> {
-    const rows = await this.ctx.db.select().from(connector).where(eq(connector.enabled, true));
+  private async connectorSpecs(userId: string, token: string, only: string[] | null): Promise<ConnectorSpec[]> {
+    const rows = (await this.ctx.db.select().from(connector).where(eq(connector.enabled, true))).filter((c) => !only || only.includes(c.id));
     const accounts = new Map(
       (
         await this.ctx.db

@@ -1,7 +1,7 @@
 /**
  * Work AI configuration: skills (org + personal), schedules and the org policy. Connectors: routes/connectors.ts.
  */
-import { and, asc, eq, ne, or, organization, skill, sql, workSchedule, workTask } from "@aatmiq/db";
+import { and, asc, eq, ne, or, organization, project, skill, sql, workSchedule, workTask } from "@aatmiq/db";
 import { librarySkill, librarySkills } from "@aatmiq/skills";
 import { DEFAULT_WORK_SETTINGS, orgCan, scheduleSchema, skillSchema, workSettingsSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
@@ -9,6 +9,7 @@ import { z } from "zod";
 import { audit, parse, requireOrgCap, requireUser, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, notFound } from "../errors";
 import { resolveModel } from "../services/models";
+import { getProjectAccess } from "../services/projects";
 import { assertReasonable, nextRun, runSchedule } from "../services/schedules";
 import { getWorkSettings, slugify } from "../services/work";
 import { requireWorkSection } from "./work";
@@ -152,13 +153,23 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
         lastRunAt: workSchedule.lastRunAt,
         lastTaskId: workSchedule.lastTaskId,
         lastStatus: workTask.status,
+        projectId: workSchedule.projectId,
+        projectName: project.name,
         createdAt: workSchedule.createdAt,
       })
       .from(workSchedule)
       .leftJoin(workTask, eq(workTask.id, workSchedule.lastTaskId))
+      .leftJoin(project, eq(project.id, workSchedule.projectId))
       .where(and(eq(workSchedule.workspaceId, wsId), eq(workSchedule.userId, u.id)))
       .orderBy(asc(workSchedule.name));
   });
+
+  /** A schedule's project must be one the person can open, in the schedule's workspace. */
+  async function checkProject(u: SessionUser, workspaceId: string, projectId: string | null | undefined) {
+    if (!projectId) return;
+    const { project: p } = await getProjectAccess(ctx, u, projectId);
+    if (p.workspaceId !== workspaceId) throw badRequest("That project is in another workspace.");
+  }
 
   async function loadOwnSchedule(u: SessionUser, id: string) {
     const [s] = await db.select().from(workSchedule).where(eq(workSchedule.id, id));
@@ -171,10 +182,11 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     const b = parse(scheduleSchema, req.body);
     await requireWorkSection(ctx, u, b.workspaceId);
     if (b.modelId) await resolveModel(db, box, b.workspaceId, "work", b.modelId, u.id);
+    await checkProject(u, b.workspaceId, b.projectId);
     assertReasonable(b.cron, b.timezone);
     const [s] = await db
       .insert(workSchedule)
-      .values({ ...b, modelId: b.modelId ?? null, userId: u.id, nextRunAt: b.enabled ? nextRun(b.cron, b.timezone) : null })
+      .values({ ...b, modelId: b.modelId ?? null, projectId: b.projectId ?? null, userId: u.id, nextRunAt: b.enabled ? nextRun(b.cron, b.timezone) : null })
       .returning();
     return s;
   });
@@ -184,6 +196,7 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     const s = await loadOwnSchedule(u, req.params.id);
     const b = parse(scheduleSchema.omit({ workspaceId: true }).partial(), req.body);
     if (b.modelId) await resolveModel(db, box, s.workspaceId, "work", b.modelId, u.id);
+    if (b.projectId !== s.projectId) await checkProject(u, s.workspaceId, b.projectId);
     const next = { ...s, ...b };
     assertReasonable(next.cron, next.timezone);
     const [row] = await db

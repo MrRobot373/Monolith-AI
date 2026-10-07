@@ -1,14 +1,15 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart3, CalendarClock, FileSearch, FileSpreadsheet, Globe, Pin, ShieldAlert, Workflow } from "lucide-react";
+import { BarChart3, CalendarClock, FileSearch, FileSpreadsheet, Globe, Pin, ShieldAlert, Workflow, X } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { TopBar } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
+import { ProjectIcon, useProject } from "@/components/projects/projects";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/spinner";
 import { ApiError, get, post } from "@/lib/api";
@@ -42,6 +43,10 @@ export function WorkHome() {
   const [modelId, setModelId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const composerRef = useRef<WorkComposerHandle>(null);
+  // Started from a project (/app/work?project=…): the task works with its instructions, files and connectors.
+  const params = useSearchParams();
+  const [projectId, setProjectId] = useState<string | null>(params.get("project"));
+  const project = useProject(projectId ?? undefined);
   const model = useMemo(() => {
     const list = models.data ?? [];
     return list.find((m) => m.id === modelId) ?? list.find((m) => m.isDefault) ?? list[0];
@@ -53,7 +58,8 @@ export function WorkHome() {
     setSending(true);
     try {
       // With files, the task is created first, the files go into its folder, then it starts.
-      const task = await post<{ id: string }>("/api/work/tasks", { workspaceId, prompt, modelId: model?.id, start: files.length === 0 });
+      const inProject = projectId && project.data ? project.data.id : undefined;
+      const task = await post<{ id: string }>("/api/work/tasks", { workspaceId, prompt, modelId: model?.id, projectId: inProject, start: files.length === 0 });
       if (files.length) {
         for (const f of files) {
           const form = new FormData();
@@ -65,6 +71,7 @@ export function WorkHome() {
         await post(`/api/work/tasks/${task.id}/messages`, { prompt: `${prompt}\n\n(Files in your working folder: ${names})` });
       }
       void qc.invalidateQueries({ queryKey: ["work-tasks", workspaceId] });
+      if (inProject) void qc.invalidateQueries({ queryKey: ["project", inProject] });
       router.push(`/app/work/${task.id}`);
     } catch (e) {
       toast.error(e instanceof ApiError && e.code === "quota_exceeded" ? "You've used your token allowance for this period." : (e as Error).message);
@@ -88,7 +95,26 @@ export function WorkHome() {
               Give {me.org.productName} a goal. It plans, runs tools in a private folder and asks you before anything risky.
             </p>
           </motion.div>
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08, duration: 0.45 }} className="mt-7">
+          {projectId && project.data && (
+            <div className="mt-6 flex justify-center">
+              <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-surface pr-1 pl-2.5 text-[12.5px] text-fg-muted" data-testid="task-project-chip">
+                <ProjectIcon color={project.data.color} className="size-3.5" />
+                In <span className="text-fg">{project.data.name}</span>: its instructions, files and connectors
+                <button
+                  type="button"
+                  aria-label="Not in this project"
+                  onClick={() => {
+                    setProjectId(null);
+                    router.replace("/app/work");
+                  }}
+                  className="ml-0.5 rounded-full p-1 text-fg-subtle hover:bg-surface-2 hover:text-fg"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            </div>
+          )}
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08, duration: 0.45 }} className={projectId && project.data ? "mt-3" : "mt-7"}>
             {noModel ? (
               <div className="rounded-xl border border-border bg-surface px-4 py-6 text-center text-[13px] text-fg-muted">
                 No model is enabled for Work AI in this workspace yet. Ask your admin to enable one under Admin → Models.
@@ -201,6 +227,7 @@ function TaskRow({ t }: { t: WorkTaskSummary }) {
           <span className="truncate">{t.title}</span>
           {t.pinned && <Pin className="size-3 shrink-0 text-fg-subtle" />}
           {t.scheduleId && <CalendarClock className="size-3 shrink-0 text-fg-subtle" aria-label="Scheduled" />}
+          {t.projectName && <span className="shrink-0 truncate rounded border border-border px-1.5 text-[11px] text-fg-subtle">{t.projectName}</span>}
         </div>
         {sub && <div className={cn("truncate text-[12px]", t.status === "failed" ? "text-danger" : "text-fg-subtle")}>{sub.replace(/[*_`#>|]+/g, "").replace(/\s+/g, " ")}</div>}
       </div>

@@ -14,6 +14,9 @@ export interface WorkTaskSummary {
   pinned: boolean;
   modelId: string | null;
   scheduleId: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+  sharedToProject?: boolean;
   inputTokens: number;
   outputTokens: number;
   createdAt: string;
@@ -29,9 +32,14 @@ export interface WorkEvent {
 }
 
 export interface WorkTaskDetail {
-  task: WorkTaskSummary & { workspaceId: string; sessionId: string | null; projectId: string | null };
+  task: WorkTaskSummary & { workspaceId: string; sessionId: string | null; projectId: string | null; sharedToProject: boolean };
   events: WorkEvent[];
   live: boolean;
+  /** False for a colleague's task shared to a project (read-only). */
+  own: boolean;
+  ownerName: string | null;
+  /** Its project, when the reader can open it. */
+  project: { id: string; name: string; color: string; canEdit: boolean } | null;
 }
 
 export interface PendingApproval {
@@ -82,6 +90,8 @@ export interface Schedule {
   lastRunAt: string | null;
   lastTaskId: string | null;
   lastStatus: TaskStatus | null;
+  projectId: string | null;
+  projectName: string | null;
 }
 
 export const ACTIVE: TaskStatus[] = ["queued", "running", "needs_approval"];

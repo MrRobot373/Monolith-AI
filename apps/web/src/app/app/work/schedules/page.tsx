@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { TopBar } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
+import { useProjects } from "@/components/projects/projects";
 import { StatusIcon, WorkTabs } from "@/components/work/parts";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
@@ -150,6 +151,7 @@ export default function SchedulesPage() {
                       <span>
                         {describeCron(s.cron)} ({s.timezone})
                       </span>
+                      {s.projectName && <span>· in {s.projectName}</span>}
                       {s.enabled && s.nextRunAt && <span>· next {new Date(s.nextRunAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" })}</span>}
                       {s.lastTaskId && s.lastStatus && s.lastRunAt && (
                         <Link href={`/app/work/${s.lastTaskId}`} className="inline-flex items-center gap-1 hover:text-fg">
@@ -209,6 +211,8 @@ function ScheduleDialog({ schedule, workspaceId, onClose, onSaved }: { schedule?
   const [custom, setCustom] = useState(schedule?.cron ?? "0 9 * * 1-5");
   const [timezone, setTimezone] = useState(schedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"));
   const [modelId, setModelId] = useState(schedule?.modelId ?? "");
+  const [projectId, setProjectId] = useState(schedule?.projectId ?? "");
+  const projects = useProjects(workspaceId);
   const cron = toCron(freq, time, day, custom);
   const [debounced, setDebounced] = useState(cron);
   useEffect(() => {
@@ -226,7 +230,7 @@ function ScheduleDialog({ schedule, workspaceId, onClose, onSaved }: { schedule?
   });
   const save = useMutation({
     mutationFn: () => {
-      const body = { name, prompt, cron, timezone, modelId: modelId || null };
+      const body = { name, prompt, cron, timezone, modelId: modelId || null, projectId: projectId || null };
       return schedule ? patch(`/api/work/schedules/${schedule.id}`, body) : post("/api/work/schedules", { ...body, workspaceId });
     },
     onSuccess: () => {
@@ -311,6 +315,16 @@ function ScheduleDialog({ schedule, workspaceId, onClose, onSaved }: { schedule?
             </Select>
           </Field>
         </div>
+        {(projects.data?.length ?? 0) > 0 && (
+          <Field label="Project" hint="Runs follow the project's instructions, get its files and connectors, and appear in the project.">
+            <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} data-testid="schedule-project">
+              <option value="">None</option>
+              {projects.data!.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <div className="rounded-lg border border-border bg-bg px-3 py-2.5 text-[12.5px]" data-testid="schedule-preview">
           {preview.error ? (
             <span className="text-danger">{(preview.error as Error).message}</span>

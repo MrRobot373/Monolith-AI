@@ -1,18 +1,22 @@
 /**
  * Work AI for people: tasks, their live timeline, approvals and the files the agent works on.
- * Tasks are private to the person who started them.
+ * Tasks are private to the person who started them; a task in a project can be shared to it,
+ * which lets the project's people read (not change) it.
  */
-import { and, asc, desc, eq, ilike, isNull, workApproval, workEvent, workTask } from "@aatmiq/db";
+import { and, asc, desc, document, eq, ilike, isNull, project, projectSource, user, workApproval, workEvent, workTask } from "@aatmiq/db";
 import { isOrgAdmin, workMessageSchema, workTaskCreateSchema } from "@aatmiq/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { createReadStream } from "node:fs";
-import { lstat, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, sep } from "node:path";
 import { z } from "zod";
 import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
 import { resolveModel } from "../services/models";
-import { getProjectAccess } from "../services/projects";
+import { randomToken } from "../crypto";
+import { isSupported, SUPPORTED_HINT } from "../services/extract";
+import { PROJECT_FOLDER } from "../services/project-work";
+import { getProjectAccess, requireProjectEdit } from "../services/projects";
 import { quotaFor } from "../services/quota";
 import { getWorkSettings, titleFrom, type WorkStreamEvent } from "../services/work";
 
@@ -39,6 +43,18 @@ async function loadOwnTask(ctx: AppContext, u: SessionUser, id: string) {
   const [t] = await ctx.db.select().from(workTask).where(eq(workTask.id, id));
   if (!t || t.userId !== u.id) throw notFound("Task not found");
   return t;
+}
+
+/** The person's own task, or one shared to a project they can open (read-only). */
+async function loadReadableTask(ctx: AppContext, u: SessionUser, id: string) {
+  const [t] = await ctx.db.select().from(workTask).where(eq(workTask.id, id));
+  if (!t) throw notFound("Task not found");
+  if (t.userId === u.id) return { task: t, own: true };
+  if (!t.sharedToProject || !t.projectId) throw notFound("Task not found");
+  await getProjectAccess(ctx, u, t.projectId).catch(() => {
+    throw notFound("Task not found");
+  });
+  return { task: t, own: false };
 }
 
 /** Budget check for the model a task will use (the workspace's, or the group's that gives it). */
@@ -110,6 +126,9 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
         pinned: workTask.pinned,
         modelId: workTask.modelId,
         scheduleId: workTask.scheduleId,
+        projectId: workTask.projectId,
+        projectName: project.name,
+        sharedToProject: workTask.sharedToProject,
         inputTokens: workTask.inputTokens,
         outputTokens: workTask.outputTokens,
         createdAt: workTask.createdAt,
@@ -117,6 +136,7 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
         finishedAt: workTask.finishedAt,
       })
       .from(workTask)
+      .leftJoin(project, eq(project.id, workTask.projectId))
       .where(and(eq(workTask.workspaceId, wsId), eq(workTask.userId, u.id), isNull(workTask.codeWorkspaceId), q ? ilike(workTask.title, `%${q.replace(/[%_\\]/g, "\\$&")}%`) : undefined))
       .orderBy(desc(workTask.pinned), desc(workTask.updatedAt))
       .limit(200);
@@ -142,20 +162,30 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get<{ Params: { id: string } }>("/api/work/tasks/:id", async (req) => {
     const u = await requireUser(ctx, req);
-    const t = await loadOwnTask(ctx, u, req.params.id);
+    const { task: t, own } = await loadReadableTask(ctx, u, req.params.id);
     const events = await db
       .select({ seq: workEvent.seq, kind: workEvent.kind, data: workEvent.data, at: workEvent.createdAt })
       .from(workEvent)
       .where(eq(workEvent.taskId, t.id))
       .orderBy(asc(workEvent.seq))
       .limit(10_000);
-    return { task: t, events, live: work.isLive(t.id) };
+    // Its project, if the reader can open it (to link back and save results to it).
+    const access = t.projectId ? await getProjectAccess(ctx, u, t.projectId).catch(() => null) : null;
+    const [owner] = own ? [] : await db.select({ name: user.name }).from(user).where(eq(user.id, t.userId));
+    return {
+      task: t,
+      events,
+      live: work.isLive(t.id),
+      own,
+      ownerName: owner?.name ?? null,
+      project: access ? { id: access.project.id, name: access.project.name, color: access.project.color, canEdit: access.canEdit } : null,
+    };
   });
 
   /** Live timeline (see streamTask). */
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>("/api/work/tasks/:id/stream", async (req, reply) => {
     const u = await requireUser(ctx, req);
-    const t = await loadOwnTask(ctx, u, req.params.id);
+    const { task: t } = await loadReadableTask(ctx, u, req.params.id);
     await streamTask(ctx, t.id, Number(req.query.after ?? 0) || 0, reply);
   });
 
@@ -176,11 +206,27 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
-  const taskUpdateSchema = z.object({ title: z.string().trim().min(1).max(200).optional(), pinned: z.boolean().optional() });
+  const taskUpdateSchema = z.object({
+    title: z.string().trim().min(1).max(200).optional(),
+    pinned: z.boolean().optional(),
+    sharedToProject: z.boolean().optional(),
+  });
   app.patch<{ Params: { id: string } }>("/api/work/tasks/:id", async (req) => {
     const u = await requireUser(ctx, req);
     const t = await loadOwnTask(ctx, u, req.params.id);
     const b = parse(taskUpdateSchema, req.body);
+    if (b.sharedToProject !== undefined && b.sharedToProject !== t.sharedToProject) {
+      if (!t.projectId) throw badRequest("Only tasks in a project can be shared to it.");
+      if (b.sharedToProject) await getProjectAccess(ctx, u, t.projectId);
+      await audit(ctx, {
+        actor: u,
+        action: b.sharedToProject ? "work.task.shared" : "work.task.unshared",
+        workspaceId: t.workspaceId,
+        targetType: "work_task",
+        targetId: t.id,
+        meta: { projectId: t.projectId },
+      });
+    }
     const [row] = await db.update(workTask).set(b).where(eq(workTask.id, t.id)).returning();
     return row;
   });
@@ -248,13 +294,13 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get<{ Params: { id: string } }>("/api/work/tasks/:id/files", async (req) => {
     const u = await requireUser(ctx, req);
-    const t = await loadOwnTask(ctx, u, req.params.id);
+    const { task: t } = await loadReadableTask(ctx, u, req.params.id);
     return listFiles(work.filesDir(t.id));
   });
 
   app.get<{ Params: { id: string }; Querystring: { path?: string; download?: string } }>("/api/work/tasks/:id/files/content", async (req, reply) => {
     const u = await requireUser(ctx, req);
-    const t = await loadOwnTask(ctx, u, req.params.id);
+    const { task: t } = await loadReadableTask(ctx, u, req.params.id);
     const full = await safePath(work.filesDir(t.id), req.query.path ?? "");
     const s = await stat(full).catch(() => null);
     if (!s?.isFile()) throw notFound("File not found");
@@ -289,6 +335,35 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     if (!saved) throw badRequest("No file was uploaded");
     work.pulse(t.id, "files", {});
     return { path: saved };
+  });
+
+  /** Add a file the task made to its project's sources (needs edit access to the project). */
+  app.post<{ Params: { id: string } }>("/api/work/tasks/:id/save-to-project", async (req) => {
+    const u = await requireUser(ctx, req);
+    const { task: t } = await loadReadableTask(ctx, u, req.params.id);
+    if (!t.projectId) throw badRequest("This task isn't in a project.");
+    const { project: p } = await requireProjectEdit(ctx, u, t.projectId);
+    const { path } = parse(z.object({ path: z.string().min(1).max(1000) }), req.body);
+    if (path === PROJECT_FOLDER || path.startsWith(`${PROJECT_FOLDER}/`)) throw badRequest("That file is already one of the project's sources.");
+    const full = await safePath(work.filesDir(t.id), path);
+    const s = await stat(full).catch(() => null);
+    if (!s?.isFile()) throw notFound("File not found");
+    if (s.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "Files can be up to 25 MB.", "too_large");
+    if (s.size === 0) throw badRequest("The file is empty");
+    const name = basename(full).slice(0, 200);
+    if (!isSupported(name)) throw new HttpError(415, `This file type can't be a project source. Sources can be ${SUPPORTED_HINT}.`, "unsupported");
+    const data = await readFile(full);
+    const storageKey = `${p.workspaceId}/${randomToken(18)}`;
+    await ctx.storage.put(storageKey, data);
+    const [doc] = await db
+      .insert(document)
+      .values({ workspaceId: p.workspaceId, projectId: p.id, ownerId: u.id, name, mimeType: INLINE[extname(name).toLowerCase()] ?? "application/octet-stream", sizeBytes: data.length, storageKey })
+      .returning();
+    await db.insert(projectSource).values({ projectId: p.id, documentId: doc!.id, addedBy: u.id }).onConflictDoNothing();
+    await db.update(project).set({ updatedAt: new Date() }).where(eq(project.id, p.id));
+    await audit(ctx, { actor: u, action: "project.source_added", workspaceId: p.workspaceId, targetType: "document", targetId: doc!.id, meta: { projectId: p.id, name, fromTask: t.id } });
+    await ctx.jobs.document(doc!.id);
+    return { id: doc!.id, name };
   });
 }
 

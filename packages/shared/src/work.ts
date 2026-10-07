@@ -69,6 +69,8 @@ export const scheduleSchema = z.object({
   cron: cronSchema,
   timezone: z.string().trim().min(1).max(64).default("UTC"),
   modelId: z.string().nullable().optional(),
+  /** Runs become tasks in this project. */
+  projectId: z.string().nullable().optional(),
   enabled: z.boolean().default(true),
 });
 

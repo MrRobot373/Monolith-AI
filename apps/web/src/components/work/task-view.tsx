@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BookmarkPlus,
   Bot,
   ChevronRight,
   CircleCheck,
@@ -21,6 +22,7 @@ import {
   PinOff,
   Plug,
   Search,
+  Share2,
   ShieldAlert,
   Sparkles,
   Terminal,
@@ -32,12 +34,14 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { TopBar, TopBarButton } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
 import { Markdown } from "@/components/chat/markdown";
 import { FileIcon } from "@/components/documents/use-documents";
+import { ProjectIcon } from "@/components/projects/projects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
 import { AppLogo } from "@/components/org-logo";
@@ -143,6 +147,9 @@ function toolIcon(name: string) {
 
 /* ───────────── Task view ───────────── */
 
+/** Set when someone else's task (shared to a project) is open: their name, for "waiting for …". */
+const ReadOnly = createContext<string | null>(null);
+
 export function TaskView({ taskId }: { taskId: string }) {
   const { workspaceId } = useSession();
   const router = useRouter();
@@ -231,6 +238,8 @@ export function TaskView({ taskId }: { taskId: string }) {
   const { items, plan, status: liveStatus } = useMemo(() => buildTimeline(events), [events]);
   const task = detail.data?.task;
   const status: TaskStatus = liveStatus ?? task?.status ?? "queued";
+  // The latest answer, which can be saved to the task's project.
+  const lastAnswerKey = items.findLast((i) => i.kind === "assistant")?.key;
   const active = ACTIVE.includes(status);
 
   // Keep the newest step in view unless the person scrolled up.
@@ -238,6 +247,9 @@ export function TaskView({ taskId }: { taskId: string }) {
     const el = scrollRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [items.length, draft, status]);
+
+  const own = detail.data?.own ?? true;
+  const proj = detail.data?.project ?? null;
 
   const send = useMutation({
     mutationFn: (prompt: string) => post(`/api/work/tasks/${taskId}/messages`, { prompt }),
@@ -260,11 +272,33 @@ export function TaskView({ taskId }: { taskId: string }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ["work-approvals", workspaceId] }),
   });
   const update = useMutation({
-    mutationFn: (body: { title?: string; pinned?: boolean }) => patch(`/api/work/tasks/${taskId}`, body),
-    onSuccess: () => {
+    mutationFn: (body: { title?: string; pinned?: boolean; sharedToProject?: boolean }) => patch(`/api/work/tasks/${taskId}`, body),
+    onSuccess: (_d, body) => {
       void qc.invalidateQueries({ queryKey: ["work-task", taskId] });
       void qc.invalidateQueries({ queryKey: ["work-tasks", workspaceId] });
+      if (body.sharedToProject !== undefined) {
+        if (proj) void qc.invalidateQueries({ queryKey: ["project", proj.id] });
+        toast(body.sharedToProject ? `Shared to ${proj?.name ?? "the project"}` : "No longer shared to the project");
+      }
     },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  // Results back into the project: a file from the folder, or an answer as a saved answer.
+  const saveFile = useMutation({
+    mutationFn: (path: string) => post<{ name: string }>(`/api/work/tasks/${taskId}/save-to-project`, { path }),
+    onSuccess: (d) => {
+      if (proj) void qc.invalidateQueries({ queryKey: ["project", proj.id] });
+      toast.success(`Saved ${d.name} to ${proj?.name ?? "the project"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const saveAnswer = useMutation({
+    mutationFn: (text: string) => post(`/api/projects/${proj!.id}/sources/note`, { title: detail.data?.task.title ?? "Task result", content: text, kind: "answer" }),
+    onSuccess: () => {
+      if (proj) void qc.invalidateQueries({ queryKey: ["project", proj.id] });
+      toast.success(`Saved to ${proj?.name ?? "the project"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
   const remove = useMutation({
     mutationFn: () => del(`/api/work/tasks/${taskId}`),
@@ -306,6 +340,13 @@ export function TaskView({ taskId }: { taskId: string }) {
         icon={<Workflow />}
         title={
           <span className="flex min-w-0 items-center gap-2.5">
+            {proj && (
+              <Link href={`/app/projects/${proj.id}`} className="hidden shrink-0 items-center gap-1.5 text-fg-subtle hover:text-fg sm:flex" data-testid="task-project">
+                <ProjectIcon color={proj.color} className="size-3.5" />
+                <span className="max-w-40 truncate">{proj.name}</span>
+                <span>/</span>
+              </Link>
+            )}
             <span className="truncate" data-testid="task-title">{task?.title ?? "Task"}</span>
             {task && <StatusPill status={status} />}
           </span>
@@ -321,30 +362,37 @@ export function TaskView({ taskId }: { taskId: string }) {
                 <PanelRight />
               </TopBarButton>
             </Tooltip>
-            <Menu>
-              <MenuTrigger asChild>
-                <TopBarButton aria-label="Task options">
-                  <MoreHorizontal />
-                </TopBarButton>
-              </MenuTrigger>
-              <MenuContent align="end" className="min-w-44">
-                <MenuItem
-                  icon={<Pencil />}
-                  onSelect={() => {
-                    setNewTitle(task?.title ?? "");
-                    setRenaming(true);
-                  }}
-                >
-                  Rename
-                </MenuItem>
-                <MenuItem icon={task?.pinned ? <PinOff /> : <Pin />} onSelect={() => update.mutate({ pinned: !task?.pinned })}>
-                  {task?.pinned ? "Unpin" : "Pin"}
-                </MenuItem>
-                <MenuItem icon={<Upload />} onSelect={() => uploadRef.current?.click()}>Add files</MenuItem>
-                <MenuSeparator />
-                <MenuItem icon={<Trash2 />} danger onSelect={() => setConfirmDelete(true)}>Delete task</MenuItem>
-              </MenuContent>
-            </Menu>
+            {own && (
+              <Menu>
+                <MenuTrigger asChild>
+                  <TopBarButton aria-label="Task options">
+                    <MoreHorizontal />
+                  </TopBarButton>
+                </MenuTrigger>
+                <MenuContent align="end" className="min-w-44">
+                  <MenuItem
+                    icon={<Pencil />}
+                    onSelect={() => {
+                      setNewTitle(task?.title ?? "");
+                      setRenaming(true);
+                    }}
+                  >
+                    Rename
+                  </MenuItem>
+                  <MenuItem icon={task?.pinned ? <PinOff /> : <Pin />} onSelect={() => update.mutate({ pinned: !task?.pinned })}>
+                    {task?.pinned ? "Unpin" : "Pin"}
+                  </MenuItem>
+                  <MenuItem icon={<Upload />} onSelect={() => uploadRef.current?.click()}>Add files</MenuItem>
+                  {task?.projectId && proj && (
+                    <MenuItem icon={<Share2 />} onSelect={() => update.mutate({ sharedToProject: !task.sharedToProject })}>
+                      {task.sharedToProject ? "Stop sharing to project" : "Share to project"}
+                    </MenuItem>
+                  )}
+                  <MenuSeparator />
+                  <MenuItem icon={<Trash2 />} danger onSelect={() => setConfirmDelete(true)}>Delete task</MenuItem>
+                </MenuContent>
+              </Menu>
+            )}
           </>
         }
       />
@@ -379,26 +427,42 @@ export function TaskView({ taskId }: { taskId: string }) {
               </div>
             ) : (
               <div className="mx-auto max-w-[760px] px-4 pt-8 pb-10 sm:px-6" data-testid="timeline">
-                {items.map((it) => (
-                  <TimelineItem key={it.key} item={it} active={active} onDecide={(id, decision) => decide.mutate({ id, decision })} deciding={decide.isPending ? decide.variables?.id : undefined} />
-                ))}
+                <ReadOnly.Provider value={own ? null : (detail.data?.ownerName ?? "its owner")}>
+                  {items.map((it) => (
+                    <TimelineItem
+                      key={it.key}
+                      item={it}
+                      active={active}
+                      onDecide={(id, decision) => decide.mutate({ id, decision })}
+                      deciding={decide.isPending ? decide.variables?.id : undefined}
+                      onSaveAnswer={proj?.canEdit && !active && it.key === lastAnswerKey ? (text) => saveAnswer.mutate(text) : undefined}
+                    />
+                  ))}
+                </ReadOnly.Provider>
                 {active && <Working status={status} draft={draft} thinking={thinking} />}
               </div>
             )}
           </div>
           <div className="px-4 pb-3 sm:px-6">
             <div className="mx-auto max-w-[760px]">
-              <WorkComposer
-                ref={composerRef}
-                value={input}
-                onChange={setInput}
-                onSubmit={() => send.mutate(input.trim())}
-                placeholder={active ? "Add to the task while it works…" : "Ask for changes or a next step…"}
-                busy={active}
-                onStop={() => stop.mutate()}
-                sending={send.isPending}
-                onFiles={(list) => void upload(list)}
-              />
+              {!own ? (
+                <div className="rounded-xl border border-border bg-surface px-4 py-3 text-center text-[13px] text-fg-muted" data-testid="shared-task-note">
+                  Shared by {detail.data?.ownerName ?? "a colleague"}
+                  {proj ? ` in ${proj.name}` : ""}. You can read it and its files; only they can continue it.
+                </div>
+              ) : (
+                <WorkComposer
+                  ref={composerRef}
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={() => send.mutate(input.trim())}
+                  placeholder={active ? "Add to the task while it works…" : "Ask for changes or a next step…"}
+                  busy={active}
+                  onStop={() => stop.mutate()}
+                  sending={send.isPending}
+                  onFiles={(list) => void upload(list)}
+                />
+              )}
               <div className="mt-2 flex flex-wrap justify-center gap-x-3 text-[11.5px] text-fg-subtle">
                 <span>Runs in a private folder on your organization&apos;s servers.</span>
                 {task && task.inputTokens + task.outputTokens > 0 && <span className="tabular-nums">{formatTokens(task.inputTokens + task.outputTokens)} tokens</span>}
@@ -432,7 +496,15 @@ export function TaskView({ taskId }: { taskId: string }) {
                 {panel === "progress" ? (
                   <ProgressPanel plan={plan} task={task} status={status} steps={items.reduce((n, i) => n + (i.kind === "steps" ? i.steps.length : 0), 0)} />
                 ) : (
-                  <FilesPanel taskId={taskId} files={files.data?.files} truncated={files.data?.truncated} onPreview={setPreview} onUpload={() => uploadRef.current?.click()} />
+                  <FilesPanel
+                    taskId={taskId}
+                    files={files.data?.files}
+                    truncated={files.data?.truncated}
+                    onPreview={setPreview}
+                    onUpload={own ? () => uploadRef.current?.click() : undefined}
+                    onSave={proj?.canEdit ? (f) => saveFile.mutate(f.path) : undefined}
+                    projectName={proj?.name}
+                  />
                 )}
               </div>
             </motion.aside>
@@ -481,7 +553,19 @@ export function TaskView({ taskId }: { taskId: string }) {
 
 /* ───────────── Timeline items ───────────── */
 
-function TimelineItem({ item, active, onDecide, deciding }: { item: Item; active: boolean; onDecide: (id: string, d: "approve" | "reject") => void; deciding?: string }) {
+function TimelineItem({
+  item,
+  active,
+  onDecide,
+  deciding,
+  onSaveAnswer,
+}: {
+  item: Item;
+  active: boolean;
+  onDecide: (id: string, d: "approve" | "reject") => void;
+  deciding?: string;
+  onSaveAnswer?: (text: string) => void;
+}) {
   switch (item.kind) {
     case "user":
       return (
@@ -497,6 +581,11 @@ function TimelineItem({ item, active, onDecide, deciding }: { item: Item; active
           </div>
           <div className="pl-6">
             <Markdown content={item.text} />
+            {onSaveAnswer && (
+              <Button variant="ghost" size="sm" className="mt-1 -ml-2 text-fg-subtle" onClick={() => onSaveAnswer(item.text)} data-testid="save-answer">
+                <BookmarkPlus className="size-3.5" /> Save to project
+              </Button>
+            )}
           </div>
         </motion.div>
       );
@@ -570,12 +659,13 @@ function Pre({ label, children, danger }: { label: string; children: ReactNode; 
 }
 
 function ApprovalCard({ approval: a, onDecide, deciding }: { approval: Approval; onDecide: (id: string, d: "approve" | "reject") => void; deciding?: string }) {
+  const readOnlyOwner = useContext(ReadOnly);
   const { verb, target } = describeCall(a.toolName, a.detail);
   const command = a.toolName === "bash" ? String(a.detail?.command ?? "") : null;
   return (
     <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="my-2 ml-6 rounded-xl border border-warning/40 bg-surface p-4" data-testid="approval-card">
       <div className="flex items-center gap-2 text-[13px] text-fg">
-        <ShieldAlert className="size-4 text-warning" /> Waiting for your approval
+        <ShieldAlert className="size-4 text-warning" /> {readOnlyOwner ? `Waiting for ${readOnlyOwner}'s approval` : "Waiting for your approval"}
       </div>
       <p className="mt-1.5 text-[13px] text-fg-muted">
         {a.reason ?? "This action needs a person to allow it."}
@@ -592,14 +682,16 @@ function ApprovalCard({ approval: a, onDecide, deciding }: { approval: Approval;
       ) : a.detail && Object.keys(a.detail).length > 0 ? (
         <pre className="mt-2.5 max-h-48 overflow-auto rounded-lg border border-border bg-bg px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-fg-muted">{JSON.stringify(a.detail, null, 2)}</pre>
       ) : null}
-      <div className="mt-3 flex gap-2">
-        <Button variant="primary" size="sm" loading={deciding === a.id} onClick={() => onDecide(a.id, "approve")} data-testid="approve">
-          Approve
-        </Button>
-        <Button variant="outline" size="sm" disabled={deciding === a.id} onClick={() => onDecide(a.id, "reject")} data-testid="reject">
-          Reject
-        </Button>
-      </div>
+      {!readOnlyOwner && (
+        <div className="mt-3 flex gap-2">
+          <Button variant="primary" size="sm" loading={deciding === a.id} onClick={() => onDecide(a.id, "approve")} data-testid="approve">
+            Approve
+          </Button>
+          <Button variant="outline" size="sm" disabled={deciding === a.id} onClick={() => onDecide(a.id, "reject")} data-testid="reject">
+            Reject
+          </Button>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -691,15 +783,33 @@ function ProgressPanel({ plan, task, status, steps }: { plan: { content: string;
   );
 }
 
-function FilesPanel({ taskId, files, truncated, onPreview, onUpload }: { taskId: string; files?: WorkFile[]; truncated?: boolean; onPreview: (f: WorkFile) => void; onUpload: () => void }) {
+function FilesPanel({
+  taskId,
+  files,
+  truncated,
+  onPreview,
+  onUpload,
+  onSave,
+  projectName,
+}: {
+  taskId: string;
+  files?: WorkFile[];
+  truncated?: boolean;
+  onPreview: (f: WorkFile) => void;
+  onUpload?: () => void;
+  onSave?: (f: WorkFile) => void;
+  projectName?: string;
+}) {
   if (!files) return <Skeleton className="h-24 rounded-lg" />;
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex h-8 items-center justify-between">
         <span className="text-[12px] text-fg-subtle">Task folder</span>
-        <Button variant="ghost" size="sm" onClick={onUpload}>
-          <Upload className="size-3.5" /> Add
-        </Button>
+        {onUpload && (
+          <Button variant="ghost" size="sm" onClick={onUpload}>
+            <Upload className="size-3.5" /> Add
+          </Button>
+        )}
       </div>
       {files.length === 0 ? (
         <p className="mt-2 text-[12.5px] leading-relaxed text-fg-subtle">Files the agent creates appear here. You can also add files for it to work on.</p>
@@ -712,6 +822,19 @@ function FilesPanel({ taskId, files, truncated, onPreview, onUpload }: { taskId:
                 {f.path}
               </button>
               <span className="shrink-0 text-[11.5px] text-fg-subtle tabular-nums">{formatBytes(f.size)}</span>
+              {onSave && !f.path.startsWith("project/") && (
+                <Tooltip content={`Save to ${projectName ?? "the project"}`}>
+                  <button
+                    type="button"
+                    onClick={() => onSave(f)}
+                    aria-label={`Save ${f.path} to the project`}
+                    className="rounded p-0.5 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100 hover:text-fg focus:opacity-100"
+                    data-testid="save-file"
+                  >
+                    <BookmarkPlus className="size-3.5" />
+                  </button>
+                </Tooltip>
+              )}
               <a
                 href={`/api/work/tasks/${taskId}/files/content?path=${encodeURIComponent(f.path)}&download=1`}
                 aria-label={`Download ${f.path}`}

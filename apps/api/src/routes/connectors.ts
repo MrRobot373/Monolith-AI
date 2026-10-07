@@ -264,6 +264,7 @@ export async function connectorRoutes(app: FastifyInstance, ctx: AppContext) {
     const rpcId = body && typeof body === "object" && !Array.isArray(body) ? (body as { id?: unknown }).id : undefined;
     const [c] = await db.select().from(connector).where(and(eq(connector.name, req.params.name), eq(connector.enabled, true)));
     if (!c) return rpcError(reply, rpcId, "This connector isn't available any more.", 404);
+    if (!work.connectorAllowed(t.taskId, c.id)) return rpcError(reply, rpcId, `${c.displayName} isn't available in this task's project.`, 403);
 
     const abort = new AbortController();
     req.raw.on("close", () => {

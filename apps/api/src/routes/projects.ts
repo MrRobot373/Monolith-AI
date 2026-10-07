@@ -15,6 +15,8 @@ import {
   sql,
   user,
   workspaceMember,
+  workTask,
+  connector,
 } from "@aatmiq/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -39,6 +41,8 @@ const updateSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   instructions: z.string().max(8000).nullable().optional(),
   visibility: z.enum(["private", "workspace"]).optional(),
+  /** Connectors Work AI tasks in the project may use; null: all the organization's. */
+  connectorIds: z.array(z.string()).max(200).nullable().optional(),
 });
 const memberSchema = z.object({ userId: z.string(), role: z.enum(["chat", "edit"]).default("chat") });
 const sourceUpdateSchema = z.object({
@@ -101,7 +105,7 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
   app.get<{ Params: { id: string } }>("/api/projects/:id", async (req) => {
     const u = await requireUser(ctx, req);
     const { project: p, role, canEdit } = await getProjectAccess(ctx, u, req.params.id);
-    const [sources, members, chats, owner] = await Promise.all([
+    const [sources, members, chats, owner, tasks] = await Promise.all([
       db
         .select({
           id: document.id,
@@ -146,14 +150,35 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
       p.ownerId
         ? db.select({ id: user.id, name: user.name, email: user.email }).from(user).where(eq(user.id, p.ownerId)).then((r) => r[0] ?? null)
         : null,
+      // Work AI tasks: the person's own, and those others shared to the project.
+      db
+        .select({
+          id: workTask.id,
+          title: workTask.title,
+          status: workTask.status,
+          updatedAt: workTask.updatedAt,
+          userId: workTask.userId,
+          userName: user.name,
+          sharedToProject: workTask.sharedToProject,
+          scheduleId: workTask.scheduleId,
+        })
+        .from(workTask)
+        .innerJoin(user, eq(user.id, workTask.userId))
+        .where(and(eq(workTask.projectId, p.id), or(eq(workTask.userId, u.id), eq(workTask.sharedToProject, true))))
+        .orderBy(desc(workTask.updatedAt))
+        .limit(200),
     ]);
-    return { ...p, role, canEdit, owner, sources, members, chats };
+    return { ...p, role, canEdit, owner, sources, members, chats, tasks };
   });
 
   app.patch<{ Params: { id: string } }>("/api/projects/:id", async (req) => {
     const u = await requireUser(ctx, req);
     const { project: p } = await requireProjectEdit(ctx, u, req.params.id);
     const body = parse(updateSchema, req.body);
+    if (body.connectorIds?.length) {
+      const known = new Set((await db.select({ id: connector.id }).from(connector).where(inArray(connector.id, body.connectorIds))).map((c) => c.id));
+      if (body.connectorIds.some((id) => !known.has(id))) throw badRequest("One of those connectors doesn't exist any more.");
+    }
     const [updated] = await db.update(project).set(body).where(eq(project.id, p.id)).returning();
     await audit(ctx, {
       actor: u,

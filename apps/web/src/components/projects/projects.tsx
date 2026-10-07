@@ -5,7 +5,7 @@ import { Check, Folder, Globe, Lock, Trash2, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useSession } from "@/components/app/session";
+import { useCanUse, useSession } from "@/components/app/session";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Avatar } from "@/components/ui/misc";
@@ -137,16 +137,32 @@ export function ProjectSettingsDialog({ project, open, onOpenChange }: { project
   const [color, setColor] = useState(project.color);
   const [description, setDescription] = useState(project.description ?? "");
   const [instructions, setInstructions] = useState(project.instructions ?? "");
+  // Which connectors the project's Work AI tasks get (null: all of them).
+  const canWork = useCanUse("work");
+  const connectors = useQuery({
+    queryKey: ["connectors"],
+    queryFn: () => get<{ id: string; displayName: string; connected: boolean }[]>("/api/connectors"),
+    enabled: open && canWork,
+  });
+  const [connectorIds, setConnectorIds] = useState<string[] | null>(project.connectorIds);
   useEffect(() => {
     if (!open) return;
     setName(project.name);
     setColor(project.color);
     setDescription(project.description ?? "");
     setInstructions(project.instructions ?? "");
+    setConnectorIds(project.connectorIds);
   }, [open, project]);
   const save = useMutation({
     mutationFn: () =>
-      patch(`/api/projects/${project.id}`, { name: name.trim(), color, description: description.trim() || null, instructions: instructions.trim() || null }),
+      patch(`/api/projects/${project.id}`, {
+        name: name.trim(),
+        color,
+        description: description.trim() || null,
+        instructions: instructions.trim() || null,
+        // Only once the list has loaded, so a quick save never clears the choice.
+        ...(canWork && connectors.data ? { connectorIds: connectorIds?.filter((id) => connectors.data.some((c) => c.id === id)) ?? null } : {}),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["project", project.id] });
       qc.invalidateQueries({ queryKey: ["projects", workspaceId] });
@@ -178,7 +194,7 @@ export function ProjectSettingsDialog({ project, open, onOpenChange }: { project
         <Field label="Description">
           <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this project about?" />
         </Field>
-        <Field label="Instructions" hint="Chats in this project follow these instead of each person's own custom instructions.">
+        <Field label="Instructions" hint="Chats and Work AI tasks in this project follow these instead of each person's own custom instructions.">
           <Textarea
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
@@ -187,6 +203,35 @@ export function ProjectSettingsDialog({ project, open, onOpenChange }: { project
             data-testid="project-instructions"
           />
         </Field>
+        {canWork && (connectors.data?.length ?? 0) > 0 && (
+          <Field label="Connectors for Work AI tasks" hint="Tasks in this project can use only the apps chosen here (each person still signs in to their own).">
+            <div className="space-y-2" data-testid="project-connectors">
+              <Select value={connectorIds === null ? "all" : "some"} onChange={(e) => setConnectorIds(e.target.value === "all" ? null : [])} data-testid="project-connectors-mode">
+                <option value="all">All the organization&apos;s connectors</option>
+                <option value="some">Only the ones chosen below</option>
+              </Select>
+              {connectorIds !== null && (
+                <div className="grid max-h-48 gap-1.5 overflow-y-auto sm:grid-cols-2">
+                  {connectors.data!.map((c) => {
+                    const on = connectorIds.includes(c.id);
+                    return (
+                      <label key={c.id} className={cn("flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-[13px] transition-colors", on ? "border-border-strong bg-surface-2" : "border-border hover:border-border-strong")}>
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--accent)]"
+                          checked={on}
+                          onChange={() => setConnectorIds(on ? connectorIds.filter((x) => x !== c.id) : [...connectorIds, c.id])}
+                          data-testid={`project-connector-${c.displayName}`}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{c.displayName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </Field>
+        )}
       </div>
     </Dialog>
   );

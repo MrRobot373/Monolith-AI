@@ -35,7 +35,7 @@ export async function runSchedule(ctx: AppContext, s: typeof workSchedule.$infer
   const model = models.find((x) => x.id === s.modelId) ?? models.find((x) => x.isDefault) ?? models[0];
   const [t] = await db
     .insert(workTask)
-    .values({ workspaceId: s.workspaceId, userId: s.userId, title: s.name, modelId: model?.id ?? null, scheduleId: s.id })
+    .values({ workspaceId: s.workspaceId, userId: s.userId, title: s.name, modelId: model?.id ?? null, scheduleId: s.id, projectId: s.projectId })
     .returning();
   await db.update(workSchedule).set({ lastRunAt: new Date(), lastTaskId: t!.id }).where(eq(workSchedule.id, s.id));
   if (!model || (m && !m.sections.includes("work") && m.role !== "admin")) {

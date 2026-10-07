@@ -21,11 +21,13 @@ beyond that package.
 | **Scheduled** | A prompt on a schedule (weekdays at 9:00, every Monday, monthly, hourly or any cron) in your time zone. Each run is a new task. "Run now" for a test. |
 | **Skills** | Reusable instructions ("how we write the weekly report"). The agent reads each skill's description and follows it when it fits. Personal skills are yours; organization skills are shared by admins; the **Library** has 59 built-in skills for software, data, documents and business work ([08-skills.md](08-skills.md)). |
 | **Connections** | Your own accounts in apps your admin added (Gmail, Calendar, Canva, GitHub…). Connect once; your tasks then act with your access. |
+| **In a project** | **New task** on a project page (or a schedule with a project): the task follows the project's instructions, gets a copy of its current sources in `project/` (with a README listing their Confirmed/Assumption/TBD labels), and uses only the connectors the project allows. Save a file or an answer back as a project source; **Share to project** lets the project's people read the task ([03-projects.md](03-projects.md#phase-c-done-work-ai-in-projects)). |
 
 Stopping a task ends its runtime immediately. Sending another message continues the task: the
 conversation so far is handed to a fresh runtime and the files are still in the folder.
 
-Tasks are private to the person who started them. Usage counts against the same token allowance as
+Tasks are private to the person who started them, unless shared to their project (read-only for
+the project's people: they can't send messages, approve, stop or add files). Usage counts against the same token allowance as
 Chat (section `work` in usage reports).
 
 ## For admins
@@ -306,12 +308,14 @@ Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/appro
   corporate proxy, running as the task's user from a deep folder).
 - `apps/api/src/work.test.ts`: the whole flow through the API with the real runtime: metering,
   follow-ups, approvals, SSE, restart from history, skills, MCP connector with approval, schedules,
+  project tasks (instructions, files, sharing, saving results, connector choice, project schedules),
   isolation, cancel.
 - `tests/e2e/run-containers.sh`: container mode on the Compose stack: the task's user, limits and
   folder from inside its container, a read-only system, the network (an allowed internal host through
   the proxy, the database refused, nothing direct, *none* refused even by hand), new limits for the
   next task, and clean-up on stop and after an API restart.
-- `tests/e2e/run-work.sh`: 27 browser checks (task timeline, plan, files, approvals, search, the
+- `tests/e2e/run-work.sh`: 31 browser checks (task timeline, plan, files, approvals, search, the
   agent's browser on an internal site before and after the admin allows it, uploads, stop and
-  continue, isolation, skills, schedules, connectors, light theme, phone layout).
+  continue, isolation, skills, schedules, connectors, project tasks with a colleague reading a shared
+  one, light theme, phone layout).
   `API_IMAGE=<tag>` runs the same checks against the API's Docker image.

@@ -233,7 +233,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 ### Still open (2026-10-07)
 - **Before wide release:** a `main` branch and CI on every push; a real sign-in once per connector a
   customer turns on ([09-connectors.md](09-connectors.md)).
-- **Planned features:** desktop IDE (P3), project tasks with Work AI (Projects phase C).
+- **Planned features:** desktop IDE (P3).
 - **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.

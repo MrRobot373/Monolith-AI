@@ -26,6 +26,12 @@ export function useSession(): SessionValue {
   return v;
 }
 
+/** Whether a section shows here: the license includes it and the person has it in this workspace (admins always do). */
+export function useCanUse(section: "chat" | "work" | "code"): boolean {
+  const { me, workspace } = useSession();
+  return (me.license?.sections.includes(section) ?? true) && ((workspace?.sections ?? ["chat"]).includes(section) || me.isAdmin);
+}
+
 export function useMe() {
   return useQuery({ queryKey: ["me"], queryFn: () => get<Me>("/api/me"), staleTime: 30_000 });
 }

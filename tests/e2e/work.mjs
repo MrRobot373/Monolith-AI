@@ -368,6 +368,80 @@ await step("Connectors", "A person connects their own account (OAuth) and a task
   await page.getByTestId("task-answer").filter({ hasText: "3 unread emails for asha@acme.test (via mail-token-1)" }).waitFor();
 });
 
+/* ═════════════ Projects ═════════════ */
+let projectId = "";
+let projectTaskUrl = "";
+await step("Projects", "Start a task from a project: it follows the instructions and gets the project's files", page, async () => {
+  const ws = (await api(page, "GET", "/api/me")).json.workspaces[0].id;
+  const p = await api(page, "POST", "/api/projects", { workspaceId: ws, name: "Launch plan", instructions: "Keep answers short." });
+  projectId = p.json.id;
+  await api(page, "POST", `/api/projects/${projectId}/sources/note`, { title: "Budget", content: "The launch budget is 42 lakh." });
+  await page.goto(`${APP}/app/projects/${projectId}`);
+  await page.getByTestId("project-new-task").click();
+  await page.waitForURL(/\/app\/work\?project=/);
+  await page.getByTestId("task-project-chip").getByText("Launch plan").waitFor();
+  await shot(page, "project-task-start");
+  await send(page, 'run: cat project/README.md project/Budget.md; echo "Launch findings" > findings.md');
+  await page.waitForURL(/\/app\/work\/[\w-]+$/);
+  projectTaskUrl = page.url();
+  await waitStatus(page, "completed");
+  await page.getByTestId("task-project").getByText("Launch plan").waitFor();
+  await page.getByTestId("task-step").first().click();
+  await page.getByText("The launch budget is 42 lakh.").first().waitFor();
+});
+
+await step("Projects", "Save a result to the project and share the task with it", page, async () => {
+  await page.goto(projectTaskUrl);
+  await page.getByTestId("files-toggle").click();
+  const row = page.getByTestId("files").locator("li").filter({ hasText: "findings.md" });
+  await page.getByTestId("files").getByText("project/Budget.md").waitFor();
+  await row.hover();
+  await row.getByTestId("save-file").click();
+  await page.getByText("Saved findings.md to Launch plan").waitFor();
+  expect((await page.getByTestId("save-answer").count()) === 1, "save offered on more than the final answer");
+  await page.getByTestId("save-answer").click();
+  await page.getByText("Saved to Launch plan").waitFor();
+  await page.getByLabel("Task options").click();
+  await page.getByRole("menuitem", { name: "Share to project" }).click();
+  await page.getByText("Shared to Launch plan").waitFor();
+  await page.goto(`${APP}/app/projects/${projectId}`);
+  await page.getByTestId("project-tasks").getByText("Shared").waitFor();
+  await page.getByText("findings.md").first().waitFor();
+  await shot(page, "project-tasks");
+});
+
+await step("Projects", "A colleague in the project reads the shared task but can't change it", page, async () => {
+  const ws = (await api(page, "GET", "/api/me")).json.workspaces[0].id;
+  const inv = await api(page, "POST", "/api/admin/invites", { email: "ravi@acme.test", workspaces: [{ workspaceId: ws, role: "member" }] });
+  const { page: ravi } = await newUser("ravi");
+  await ravi.goto(`${APP}/login`);
+  const acc = await api(ravi, "POST", `/api/invites/${inv.json.link.split("/invite/")[1]}/accept`, { name: "Ravi Member", password: "a-good-password-1" });
+  expect(acc.status === 200, `accept ${acc.status}`);
+  const raviId = (await api(ravi, "GET", "/api/me")).json.user.id;
+  await api(page, "PUT", `/api/projects/${projectId}/members`, { userId: raviId, role: "chat" });
+  await ravi.goto(`${APP}/app/projects/${projectId}`);
+  await ravi.getByTestId("project-title").waitFor();
+  await ravi.goto(projectTaskUrl);
+  await ravi.getByTestId("shared-task-note").getByText("Shared by Asha Owner in Launch plan").waitFor();
+  expect((await ravi.getByTestId("work-input").count()) === 0, "colleague can type into the task");
+  expect((await ravi.getByLabel("Task options").count()) === 0, "colleague has the task menu");
+  await shot(ravi, "project-task-shared");
+  await ravi.context().close();
+});
+
+await step("Projects", "Project settings: choose the connectors its tasks may use", page, async () => {
+  await page.goto(`${APP}/app/projects/${projectId}`);
+  await page.getByLabel("Project options").click();
+  await page.getByText("Project settings").click();
+  await page.getByTestId("project-connectors-mode").selectOption("some");
+  await page.getByTestId("project-connector-Notes").check();
+  await shot(page, "project-connectors");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText("Project saved").waitFor();
+  const p = await api(page, "GET", `/api/projects/${projectId}`);
+  expect(p.json.connectorIds?.length === 1, `connectors ${JSON.stringify(p.json.connectorIds)}`);
+});
+
 await step("Keys", "A provider key past its limit is skipped; admins see it resting", page, async () => {
   const ws = (await api(page, "GET", "/api/me")).json.workspaces[0].id;
   const p = await api(page, "POST", "/api/admin/providers", { name: "Cloud with spare keys", type: "openai_compatible", baseUrl: `${FAKE}/v1`, apiKey: "exhausted-1\nspare-2" });

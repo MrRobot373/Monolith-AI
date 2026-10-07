@@ -132,6 +132,10 @@ export interface ProjectDetail {
   sources: ProjectSource[];
   members: { userId: string; name: string; email: string; image: string | null; role: "chat" | "edit" }[];
   chats: { id: string; title: string; updatedAt: string; userId: string; userName: string; sharedToProject: boolean; pinned: boolean }[];
+  /** Work AI tasks in the project: the reader's own and those shared to it. */
+  tasks: { id: string; title: string; status: import("./work").TaskStatus; updatedAt: string; userId: string; userName: string; sharedToProject: boolean; scheduleId: string | null }[];
+  /** Connectors its Work AI tasks may use; null: all. */
+  connectorIds: string[] | null;
 }
 
 export interface Person {

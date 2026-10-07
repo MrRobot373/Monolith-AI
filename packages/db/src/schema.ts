@@ -603,6 +603,8 @@ export const project = pgTable(
     /** Rules every chat in the project follows; they win over personal custom instructions. */
     instructions: text("instructions"),
     visibility: projectVisibilityEnum("visibility").notNull().default("private"),
+    /** Connectors Work AI tasks in the project may use (ids); null: all the organization's. */
+    connectorIds: text("connector_ids").array(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -699,6 +701,8 @@ export const workTask = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     scheduleId: text("schedule_id"),
     projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "set null" }),
+    /** Readable (not changeable) by everyone with access to its project. */
+    sharedToProject: boolean("shared_to_project").notNull().default(false),
     /** Set when the agent works in a Code workspace (Aatmiq panel) instead of its own task folder. */
     codeWorkspaceId: text("code_workspace_id").references((): AnyPgColumn => codeWorkspace.id, { onDelete: "cascade" }),
     pinned: boolean("pinned").notNull().default(false),
@@ -708,7 +712,7 @@ export const workTask = pgTable(
     updatedAt: updatedAt(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("work_task_user_idx").on(t.userId, t.updatedAt), index("work_task_status_idx").on(t.status)],
+  (t) => [index("work_task_user_idx").on(t.userId, t.updatedAt), index("work_task_status_idx").on(t.status), index("work_task_project_idx").on(t.projectId)],
 );
 
 /** The task timeline, normalized from harness events. `seq` orders events within a task. */
@@ -785,6 +789,8 @@ export const workSchedule = pgTable(
     cron: text("cron").notNull(),
     timezone: text("timezone").notNull().default("UTC"),
     modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
+    /** Runs become tasks in this project (its instructions, files and connectors). */
+    projectId: text("project_id").references(() => project.id, { onDelete: "set null" }),
     enabled: boolean("enabled").notNull().default(true),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),

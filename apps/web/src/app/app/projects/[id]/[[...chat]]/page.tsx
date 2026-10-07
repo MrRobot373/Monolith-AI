@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   BookmarkCheck,
+  CalendarClock,
   Check,
   FileUp,
   History,
@@ -23,13 +24,15 @@ import {
   Trash2,
   Upload,
   Users,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { TopBar } from "@/components/app/frame";
-import { useSession } from "@/components/app/session";
+import { useCanUse, useSession } from "@/components/app/session";
+import { StatusIcon } from "@/components/work/parts";
 import { ChatView } from "@/components/chat/chat-view";
 import { ACCEPT, FileIcon, useDocuments } from "@/components/documents/use-documents";
 import {
@@ -113,6 +116,7 @@ function ProjectHome({ project: p, composer, notices }: { project: ProjectDetail
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isMember = p.members.some((m) => m.userId === me.user.id);
+  const canWork = useCanUse("work");
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ["projects", workspaceId] });
@@ -215,6 +219,40 @@ function ProjectHome({ project: p, composer, notices }: { project: ProjectDetail
               </div>
             )}
           </section>
+
+          {canWork && (
+            <section className="mt-8">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-[13px] text-fg">
+                  Tasks <span className="text-fg-subtle">({p.tasks.length})</span>
+                </h2>
+                <Button variant="outline" size="sm" onClick={() => router.push(`/app/work?project=${p.id}`)} data-testid="project-new-task">
+                  <Workflow className="size-3.5" /> New task
+                </Button>
+              </div>
+              {p.tasks.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-[13px] text-fg-subtle">
+                  Work AI tasks started here follow the project&apos;s instructions, get a copy of its files and can save results back to it.
+                </div>
+              ) : (
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface" data-testid="project-tasks">
+                  {p.tasks.map((t) => (
+                    <Link key={t.id} href={`/app/work/${t.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/50">
+                      <StatusIcon status={t.status} />
+                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-fg">{t.title}</span>
+                      {t.scheduleId && <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-label="Scheduled" />}
+                      {t.userId !== me.user.id ? (
+                        <span className="shrink-0 text-[12px] text-fg-subtle">Shared by {t.userName}</span>
+                      ) : t.sharedToProject ? (
+                        <span className="shrink-0 text-[12px] text-fg-subtle">Shared</span>
+                      ) : null}
+                      <span className="w-16 shrink-0 text-right text-[12px] text-fg-subtle">{timeAgo(t.updatedAt)}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         </div>
 
         <aside className="space-y-4">

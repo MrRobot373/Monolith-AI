@@ -26,6 +26,7 @@
 | Chat: streaming, Markdown/code, history, rename/pin/delete, model picker | ✅ |
 | Documents: library per workspace (private/shared), PDF/Word/text/code upload, attach in chat (+ upload, @ library), answers with numbered sources and passage preview, keyword + optional vector search (pgvector) | ✅ |
 | Projects: instructions, sources (files, pasted text, saved answers, library links), project memory across chats, sharing (private/workspace, chat/edit roles, chats private unless shared), move/archive chats, ⌘K search over messages ([spec](docs/03-projects.md)) | ✅ |
+| Projects with Work AI (Phase C): tasks and schedules in a project get its instructions, a copy of its sources and only the connectors it allows; results saved back as sources; tasks shared to the project read-only | ✅ |
 | Chat Phase B: edit & branch (versions), temporary chats, source labels (Confirmed/Assumption/TBD) and versions, Excel and OCR (images, scanned PDFs), export to Word/PDF/Markdown | ✅ |
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
 | Compliance recording notice, branding (name, accent color, logo on sign-in, app, emails and tab icon), dark/light themes | ✅ |
