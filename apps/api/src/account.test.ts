@@ -263,4 +263,89 @@ d("Email, password reset and two-step sign-in", () => {
     expect((await call(maya, "POST", "/api/auth/two-factor/disable", { password: "fourth-password-000" })).status).toBe(200);
     expect((await call(maya, "GET", "/api/me/security")).json.twoFactorEnabled).toBe(false);
   });
+
+  it("email confirmation: a link from the signed-in person's own request confirms the address", async () => {
+    // Setup and a hand-passed invite link don't confirm the address; an emailed invitation does.
+    expect((await call(owner, "GET", "/api/me")).json.user.emailVerified).toBe(false);
+    const users = (await call(owner, "GET", "/api/admin/users")).json as { email: string; emailVerified: boolean }[];
+    expect(users.find((u) => u.email === "maya@acme.test")!.emailVerified).toBe(false);
+    expect(users.find((u) => u.email === "ravi@acme.test")!.emailVerified).toBe(true);
+
+    // Better Auth's public sender is closed; links come only from the signed-in endpoint.
+    expect((await call(null, "POST", "/api/auth/send-verification-email", { email: "maya@acme.test" })).status).toBe(403);
+    expect((await call(null, "POST", "/api/me/email/verify")).status).toBe(401);
+
+    const maya = jar();
+    await signIn(maya, "maya@acme.test", "fourth-password-000");
+    expect((await call(maya, "GET", "/api/me")).json).toMatchObject({ emailEnabled: true, user: { emailVerified: false } });
+    expect((await call(maya, "POST", "/api/me/email/verify")).json).toMatchObject({ ok: true, to: "maya@acme.test", expiresInHours: 24 });
+    const m = await sink.next("maya@acme.test", "Confirm your email");
+    const link = m.links.find((l) => l.startsWith("http://localhost:3000/api/auth/verify-email?token="))!;
+    expect(link).toBeTruthy();
+
+    // A tampered link fails and confirms nothing.
+    const u = new URL(link);
+    const bad = await app.inject({ method: "GET", url: `${u.pathname}?token=${u.searchParams.get("token")}x&callbackURL=${encodeURIComponent(u.searchParams.get("callbackURL")!)}` });
+    expect(bad.statusCode).toBe(302);
+    expect(String(bad.headers.location)).toContain("error=INVALID_TOKEN");
+    expect((await call(maya, "GET", "/api/me")).json.user.emailVerified).toBe(false);
+
+    // Opened in a browser that isn't signed in: confirms the address but doesn't sign anyone in.
+    const ok = await app.inject({ method: "GET", url: u.pathname + u.search });
+    expect(ok.statusCode).toBe(302);
+    expect(ok.headers.location).toBe("/app?email_verified=1");
+    expect(String(ok.headers["set-cookie"] ?? "")).not.toContain("session_token=");
+    expect((await call(maya, "GET", "/api/me")).json.user.emailVerified).toBe(true);
+    expect((await call(maya, "GET", "/api/me/security")).json).toMatchObject({ email: "maya@acme.test", emailVerified: true });
+    expect((await call(maya, "POST", "/api/me/email/verify")).json).toEqual({ ok: true, alreadyVerified: true });
+  });
+
+  it("required two-step sign-in: password users get only the setup until they turn it on", async () => {
+    // The admin has to have it first.
+    const first = await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: true });
+    expect(first.status).toBe(400);
+    expect(first.json.error).toContain("your own account first");
+    const en = await call(owner, "POST", "/api/auth/two-factor/enable", { password: "correct-horse-battery" });
+    await call(owner, "POST", "/api/auth/two-factor/verify-totp", { code: totpCode(en.json.totpURI) });
+    const on = await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: true });
+    expect(on.json).toMatchObject({ twoFactorRequired: true, withoutTwoStep: 2 });
+    expect((await call(owner, "GET", "/api/notifications")).status).toBe(200);
+
+    const maya = jar();
+    expect((await signIn(maya, "maya@acme.test", "fourth-password-000")).status).toBe(200);
+    expect((await call(maya, "GET", "/api/me")).json.user.twoFactorSetupRequired).toBe(true);
+    expect((await call(maya, "GET", "/api/me/security")).json).toMatchObject({ twoFactorRequired: true, twoFactorEnabled: false });
+    const blocked = await call(maya, "GET", "/api/notifications");
+    expect(blocked.status).toBe(403);
+    expect(blocked.json.code).toBe("two_factor_required");
+    expect((await call(maya, "GET", `/api/workspaces/${workspaceId}/models`)).status).toBe(403);
+
+    const mine = await call(maya, "POST", "/api/auth/two-factor/enable", { password: "fourth-password-000" });
+    await call(maya, "POST", "/api/auth/two-factor/verify-totp", { code: totpCode(mine.json.totpURI) });
+    expect((await call(maya, "GET", "/api/me")).json.user.twoFactorSetupRequired).toBe(false);
+    expect((await call(maya, "GET", "/api/notifications")).status).toBe(200);
+    expect((await call(owner, "GET", "/api/admin/auth")).json.withoutTwoStep).toBe(1);
+
+    // While the rule is on, it can't be turned off by the person.
+    const off = await call(maya, "POST", "/api/auth/two-factor/disable", { password: "fourth-password-000" });
+    expect(off.status).toBe(403);
+    expect(off.json.code).toBe("two_factor_required");
+
+    // With single sign-on required, people who can't use a password aren't asked.
+    const ravi = jar();
+    await signIn(ravi, "ravi@acme.test", "first-password-123");
+    expect((await call(ravi, "GET", "/api/me")).json.user.twoFactorSetupRequired).toBe(true);
+    await db.execute(sql`update organization set sso_required = true`);
+    expect((await call(ravi, "GET", "/api/me")).json.user.twoFactorSetupRequired).toBe(false);
+    expect((await call(ravi, "GET", "/api/notifications")).status).toBe(200);
+    expect((await call(owner, "GET", "/api/admin/auth")).json.withoutTwoStep).toBe(0);
+    await db.execute(sql`update organization set sso_required = false`);
+
+    expect((await call(maya, "PUT", "/api/admin/auth", { twoFactorRequired: false })).status).toBe(403);
+    expect((await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: false })).json.twoFactorRequired).toBe(false);
+    expect((await call(ravi, "GET", "/api/notifications")).status).toBe(200);
+    expect((await call(maya, "POST", "/api/auth/two-factor/disable", { password: "fourth-password-000" })).status).toBe(200);
+    const actions = (await db.execute(sql`select action from audit_log`)) as unknown as { action: string }[];
+    expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(["user.email_verified", "auth.two_factor_required_on", "auth.two_factor_required_off"]));
+  });
 });

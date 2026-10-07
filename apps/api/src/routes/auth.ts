@@ -16,6 +16,7 @@ import {
 import { acceptInviteSchema, DEFAULT_ACCENT, PRODUCT_NAME, setupSchema } from "@aatmiq/shared";
 import { fromNodeHeaders } from "better-auth/node";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { VERIFY_CALLBACK } from "../auth";
 import { audit, getOrg, parse, type AppContext } from "../context";
 import { sha256 } from "../crypto";
 import { badRequest, conflict, HttpError, notFound } from "../errors";
@@ -48,6 +49,13 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     async handler(req, reply) {
       if (req.url.startsWith("/api/auth/sign-up")) {
         throw new HttpError(403, "Accounts are created by invitation. Ask your admin for an invite.", "signup_disabled");
+      }
+      // Confirmation emails go out only through POST /api/me/email/verify (signed in, rate limited).
+      if (req.url.startsWith("/api/auth/send-verification-email")) {
+        throw new HttpError(403, "Sign in to get a new confirmation link.", "forbidden");
+      }
+      if (req.method === "POST" && req.url.startsWith("/api/auth/two-factor/disable") && (await getOrg(db))?.twoFactorRequired) {
+        throw new HttpError(403, "Your organization requires two-step sign-in, so it can't be turned off.", "two_factor_required");
       }
       if (req.method === "POST" && req.url.startsWith("/api/auth/request-password-reset") && !(await ctx.mail.configured())) {
         throw new HttpError(503, "Email isn't set up on this server, so we can't send a reset link. Ask your admin for one.", "email_off");
@@ -85,6 +93,14 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       return reply.send(res.body ? await res.text() : null);
     },
   });
+
+  /** Sends a confirmation link in the background when email is set up; failures only reach the log. */
+  function sendConfirmation(email: string) {
+    void (async () => {
+      if (!(await ctx.mail.configured())) return;
+      await auth.api.sendVerificationEmail({ body: { email, callbackURL: VERIFY_CALLBACK } });
+    })().catch((e: Error) => app.log.warn({ err: e.message }, "confirmation email failed"));
+  }
 
   /** Public: install status + branding for the login page. */
   app.get("/api/public/status", async () => {
@@ -131,7 +147,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       returnHeaders: true,
     });
     const ownerId = response.user.id;
-    await db.update(user).set({ orgRole: "owner", emailVerified: true }).where(eq(user.id, ownerId));
+    // The address is only typed in here, so it isn't confirmed until the link in the email is used.
+    await db.update(user).set({ orgRole: "owner" }).where(eq(user.id, ownerId));
 
     const [ws] = await db.insert(workspace).values({ name: "General", icon: "✦" }).returning();
     await db.insert(workspaceMember).values({
@@ -166,6 +183,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       ip: req.ip,
     });
     forwardCookies(reply, headers);
+    sendConfirmation(body.email);
     if (claims) void ctx.license.checkIn().catch(() => {});
     return { ok: true };
   });
@@ -211,7 +229,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
           throw badRequest(e instanceof Error ? e.message : "Could not create account");
         });
       const uid = response.user.id;
-      await db.update(user).set({ orgRole: inv.orgRole, emailVerified: true }).where(eq(user.id, uid));
+      // An emailed invitation proves the address; a link the admin passed on some other way doesn't.
+      await db.update(user).set({ orgRole: inv.orgRole, emailVerified: inv.emailed }).where(eq(user.id, uid));
       for (const w of inv.workspaces) {
         await db
           .insert(workspaceMember)
@@ -227,6 +246,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
         ip: req.ip,
       });
       forwardCookies(reply, headers);
+      if (!inv.emailed) sendConfirmation(inv.email);
       return { ok: true };
     },
   );

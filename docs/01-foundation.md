@@ -88,9 +88,16 @@ other sessions; confirmation email; nothing is sent to deactivated accounts or, 
 to anyone but the owner); admin reset links from Users (emailed to the person when email is on,
 otherwise shown to the admin); two-step sign-in with an authenticator app and 10 backup codes,
 "trust this device" for 30 days, admin can turn it off for a person; Settings → Security (change
-password, sign out other devices). Not yet: email verification, an org rule that *requires*
-two-step sign-in, a list of individual devices. SSO sign-ins skip Aatmiq's two-step check; the
-identity provider applies its own MFA.
+password, sign out other devices). Email confirmation: a 24-hour link (Better Auth) sent from a
+banner in the app or Settings → Security; opening it confirms the address but never signs anyone
+in. Accepting an *emailed* invitation confirms the address; the owner's setup address and invite
+links passed on by hand don't (those people are sent a link when email is on). SSO addresses count
+as confirmed. Admins see unconfirmed addresses in Users. Nothing is blocked for an unconfirmed
+address. Require two-step sign-in (Admin → Authentication): the admin must have it on first;
+anyone who signs in with a password and hasn't set it up gets only a setup page (the API answers
+`403 two_factor_required` to everything else) and can't turn it off while the rule is on. People
+who sign in with SSO aren't asked (the identity provider applies its own MFA). Not yet: a list of
+individual devices, a grace period before the rule applies.
 
 ### Security defaults
 Login rate limiting and lockout, CSRF protection, secure headers, 12h idle / 30d absolute session limits (configurable), and every auth event written to the audit log.

@@ -10,7 +10,12 @@ export interface Me {
     jobTitle: string | null;
     customInstructions: string | null;
     createdAt: string;
+    emailVerified: boolean;
+    /** The org requires two-step sign-in and it isn't set up yet: only the setup page works. */
+    twoFactorSetupRequired: boolean;
   };
+  /** Outgoing email is set up, so confirmation links can be sent. */
+  emailEnabled: boolean;
   isAdmin: boolean;
   isWorkspaceAdmin: boolean;
   org: { name: string; productName: string; accentColor: string; promptLogging: boolean };

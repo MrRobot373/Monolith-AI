@@ -27,6 +27,10 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   }
   if (!res.ok) {
     const d = (data ?? {}) as { error?: string; message?: string; code?: string; details?: unknown };
+    // The org started requiring two-step sign-in while this page was open: go set it up.
+    if (d.code === "two_factor_required" && res.status === 403 && typeof window !== "undefined" && !path.startsWith("/api/auth/")) {
+      window.location.assign("/two-step-setup");
+    }
     throw new ApiError(res.status, d.error ?? d.message ?? `Request failed (${res.status})`, d.code, d.details);
   }
   return data as T;

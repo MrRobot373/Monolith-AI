@@ -74,6 +74,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         lastActiveAt: user.lastActiveAt,
         createdAt: user.createdAt,
         twoFactorEnabled: user.twoFactorEnabled,
+        emailVerified: user.emailVerified,
         tokensThisPeriod: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.userId} = ${OUTER_USER_ID} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
       })
       .from(user)
@@ -194,6 +195,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
           return false;
         },
       );
+    if (emailed) await db.update(invitation).set({ emailed: true }).where(eq(invitation.id, inv!.id));
     return { ...inv, email, link, emailed };
   });
 

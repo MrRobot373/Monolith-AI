@@ -14,6 +14,8 @@
 | First-run setup wizard, email/password sign-in, invitations | ✅ |
 | Email (SMTP, from Admin → Settings → Email or `SMTP_URL`): emailed invitations, forgot-password links, security notices; admins can send a reset link from Users | ✅ |
 | Two-step sign-in with an authenticator app and backup codes; Settings → Security (change password, sign out other devices); admins can turn it off for someone who lost their phone | ✅ |
+| Email confirmation links (banner and Settings → Security); admins see unconfirmed addresses | ✅ |
+| Admins can require two-step sign-in for everyone who uses a password (Admin → Authentication) | ✅ |
 | Roles: org owner/admin, workspace admin, member | ✅ enforced in the API |
 | Workspaces (teams) with their own members, models and budget | ✅ |
 | Model providers: Ollama, any OpenAI-compatible server (vLLM, LM Studio…), demo model | ✅ health checks, model discovery, keys encrypted at rest |
@@ -79,7 +81,7 @@ pnpm --filter @aatmiq/license test
 pnpm --filter @aatmiq/harness test   # runs the real agent runtime against a fake model
 LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
 # Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI; E2E_SCRIPT=code.mjs for Code,
-#   account.mjs for email/password reset/two-step sign-in) and run-licensing.sh
+#   account.mjs for email/password reset/email confirmation/two-step sign-in) and run-licensing.sh
 # Connectors against the real services (needs internet): cd apps/api && npx tsx ../../tests/connectors/check.mts
 ```
 

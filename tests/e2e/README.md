@@ -40,13 +40,15 @@ Git server, and access rules.
 E2E_SCRIPT=$PWD/tests/e2e/code.mjs tests/e2e/run-work.sh
 ```
 
-## Accounts: email, password reset, two-step sign-in
+## Accounts: email, password reset, email confirmation, two-step sign-in
 
-`account.mjs` (12 checks) runs on the same stack. It starts its own test mail server and points
+`account.mjs` (16 checks) runs on the same stack. It starts its own test mail server and points
 Aatmiq at it from Admin → Settings → Email, then checks: a test email, emailed invitations,
 forgot password with the emailed link (once only), setting up two-step sign-in (QR, wrong and right
 codes, backup codes), signing in with a code and with a backup code, the admin turning it off,
-admin reset links and changing the password (also at phone width). Screenshots go to
+admin reset links and changing the password (also at phone width), confirming an email address
+from the banner (and a broken link), and requiring two-step sign-in: the admin must have it first,
+then a person without it only gets the setup page (also at phone width) until it's on. Screenshots go to
 `results-account/`.
 
 ```bash

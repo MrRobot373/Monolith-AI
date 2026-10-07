@@ -71,6 +71,13 @@
       "when": 1791364024463,
       "tag": "0009_email_two_factor",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791367783180,
+      "tag": "0010_email_verification_two_factor_rule",
+      "breakpoints": true
     }
   ]
 }

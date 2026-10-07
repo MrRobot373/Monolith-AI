@@ -43,6 +43,11 @@ function ssoTicketPlugin(hash: (s: string) => string): BetterAuthPlugin {
   };
 }
 
+/** Email confirmation links last a day. */
+export const VERIFY_LINK_HOURS = 24;
+/** Where the confirmation link lands; the app shows a notice from the query string. */
+export const VERIFY_CALLBACK = "/app?email_verified=1";
+
 /** Reset links last an hour (Better Auth's default), sent only to active accounts that may use a password. */
 export const RESET_LINK_MINUTES = 60;
 
@@ -100,6 +105,25 @@ export function createAuth(db: DB, cfg: Config, hash: (s: string) => string, mai
             note: "If this wasn't you, tell your admin right away.",
           })
           .catch(() => undefined);
+      },
+    },
+    emailVerification: {
+      expiresIn: VERIFY_LINK_HOURS * 3600,
+      sendOnSignUp: false,
+      // Never sign in from the link: that would skip the password and two-step sign-in.
+      autoSignInAfterVerification: false,
+      async sendVerificationEmail({ user: u, url }) {
+        const { productName } = await mail.brand();
+        await mail.send({
+          to: u.email,
+          subject: `Confirm your email for ${productName}`,
+          lines: [`Hi ${u.name.split(" ")[0]},`, `Confirm that ${u.email} is your address, so password resets and notices reach you.`],
+          button: { label: "Confirm my email", url },
+          note: `The link expires in ${VERIFY_LINK_HOURS} hours. If you don't have a ${productName} account, you can ignore this email.`,
+        });
+      },
+      async afterEmailVerification(u) {
+        await db.insert(auditLog).values({ actorId: u.id, actorEmail: u.email, action: "user.email_verified", targetType: "user", targetId: u.id });
       },
     },
     user: {

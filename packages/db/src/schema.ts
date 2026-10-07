@@ -75,6 +75,8 @@ export const organization = pgTable("organization", {
   licenseKey: text("license_key"),
   /** When on, only the owner may still sign in with a password (break-glass); everyone else uses SSO. */
   ssoRequired: boolean("sso_required").notNull().default(false),
+  /** When on, everyone who signs in with a password must set up two-step sign-in before using the app. */
+  twoFactorRequired: boolean("two_factor_required").notNull().default(false),
   /** Work AI policy set by org admins (see WorkSettings). */
   workSettings: jsonb("work_settings").$type<Partial<WorkSettings>>(),
   /** Outgoing email (SMTP) for invitations and password resets; the password is encrypted. */
@@ -175,6 +177,8 @@ export const invitation = pgTable("invitation", {
   orgRole: orgRoleEnum("org_role").notNull().default("member"),
   workspaces: jsonb("workspaces").$type<{ workspaceId: string; role: "admin" | "member" }[]>().notNull().default([]),
   tokenHash: text("token_hash").notNull().unique(),
+  /** The link was emailed to this address, so accepting it confirms the address. */
+  emailed: boolean("emailed").notNull().default(false),
   invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),

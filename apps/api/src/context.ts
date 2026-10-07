@@ -1,10 +1,12 @@
 import {
+  account,
   and,
   auditLog,
   eq,
   isNull,
   notification,
   organization,
+  sql,
   user,
   workspace,
   workspaceMember,
@@ -30,7 +32,7 @@ import type { WorkRunner } from "./services/work";
 import type { CodeServers } from "./services/code";
 import type { Connectors } from "./services/connectors";
 import type { Mailer } from "./services/mail";
-import { badRequest, forbidden, notFound, unauthorized } from "./errors";
+import { badRequest, forbidden, HttpError, notFound, unauthorized } from "./errors";
 
 export interface AppContext {
   db: DB;
@@ -51,7 +53,12 @@ export interface SessionUser {
   email: string;
   image: string | null;
   orgRole: OrgRole;
+  /** The org requires two-step sign-in and this person signs in with a password but hasn't set it up. */
+  twoFactorSetupRequired?: boolean;
 }
+
+/** The only routes open to someone who still has to set up the required two-step sign-in. */
+const TWO_FACTOR_SETUP_ROUTES = new Set(["/api/me", "/api/me/security", "/api/me/email/verify"]);
 
 export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T> {
   const r = schema.safeParse(data ?? {});
@@ -66,16 +73,34 @@ export async function getSessionUser(ctx: AppContext, req: FastifyRequest): Prom
   const s = await ctx.auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
   if (!s) return null;
   const [u] = await ctx.db
-    .select({ id: user.id, name: user.name, email: user.email, image: user.image, orgRole: user.orgRole, status: user.status })
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      image: user.image,
+      orgRole: user.orgRole,
+      status: user.status,
+      twoFactorEnabled: user.twoFactorEnabled,
+      // Raw "user"."id": Drizzle drops table prefixes in single-table selects, so ${user.id} would bind to account.id.
+      hasPassword: sql<boolean>`exists (select 1 from ${account} where ${account.userId} = ${sql.raw(`"user"."id"`)} and ${account.providerId} = 'credential')`,
+      twoFactorRequired: sql<boolean>`coalesce((select ${organization.twoFactorRequired} from ${organization} limit 1), false)`,
+      ssoRequired: sql<boolean>`coalesce((select ${organization.ssoRequired} from ${organization} limit 1), false)`,
+    })
     .from(user)
     .where(eq(user.id, s.user.id));
   if (!u || u.status !== "active") return null;
-  return { id: u.id, name: u.name, email: u.email, image: u.image, orgRole: u.orgRole };
+  // Single sign-on users are exempt: the identity provider runs its own check.
+  const usesPassword = u.hasPassword && (!u.ssoRequired || u.orgRole === "owner");
+  const twoFactorSetupRequired = u.twoFactorRequired && usesPassword && !u.twoFactorEnabled;
+  return { id: u.id, name: u.name, email: u.email, image: u.image, orgRole: u.orgRole, twoFactorSetupRequired };
 }
 
 export async function requireUser(ctx: AppContext, req: FastifyRequest): Promise<SessionUser> {
   const u = await getSessionUser(ctx, req);
   if (!u) throw unauthorized();
+  if (u.twoFactorSetupRequired && !TWO_FACTOR_SETUP_ROUTES.has(req.routeOptions?.url ?? "")) {
+    throw new HttpError(403, "Your organization requires two-step sign-in. Set it up to continue.", "two_factor_required");
+  }
   return u;
 }
 

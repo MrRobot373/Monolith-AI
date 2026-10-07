@@ -44,6 +44,11 @@ export function SessionGate({ children, requireAdmin }: { children: ReactNode; r
 
   useEffect(() => applyAccent(me?.org.accentColor), [me?.org.accentColor]);
 
+  const setupFirst = !!me?.user.twoFactorSetupRequired;
+  useEffect(() => {
+    if (setupFirst) router.replace("/two-step-setup");
+  }, [setupFirst, router]);
+
   useEffect(() => {
     if (!me) return;
     let saved = "";
@@ -76,7 +81,7 @@ export function SessionGate({ children, requireAdmin }: { children: ReactNode; r
     [me, workspaceId, setWorkspaceId, signOut],
   );
 
-  if (!value) {
+  if (!value || setupFirst) {
     return (
       <div className="flex min-h-dvh items-center justify-center text-fg-subtle">
         {error && !(error instanceof ApiError && error.status === 401) ? (

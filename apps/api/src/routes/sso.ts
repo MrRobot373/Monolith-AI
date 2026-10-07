@@ -218,11 +218,28 @@ export async function ssoRoutes(app: FastifyInstance, ctx: AppContext) {
 
   /* ───────────── Admin: Authentication ───────────── */
 
+  /** Active people who sign in with a password but haven't set up two-step sign-in. */
+  async function withoutTwoStep(ssoRequired: boolean) {
+    const rows = await db
+      .select({ id: user.id, orgRole: user.orgRole })
+      .from(user)
+      .where(
+        and(
+          eq(user.status, "active"),
+          eq(user.twoFactorEnabled, false),
+          sql`exists (select 1 from ${account} where ${account.userId} = ${sql.raw(`"user"."id"`)} and ${account.providerId} = 'credential')`,
+        ),
+      );
+    return rows.filter((r) => !ssoRequired || r.orgRole === "owner");
+  }
+
   async function authSettings() {
     const org = await getOrg(db);
     const connections = await db.select().from(ssoConnection).orderBy(asc(ssoConnection.createdAt));
     return {
       ssoRequired: org?.ssoRequired ?? false,
+      twoFactorRequired: org?.twoFactorRequired ?? false,
+      withoutTwoStep: (await withoutTwoStep(org?.ssoRequired ?? false)).length,
       redirectUri,
       connections: connections.map(publicConn),
       features: { sso: await license.hasFeature("sso"), oidc: await license.hasFeature("oidc") },
@@ -238,14 +255,26 @@ export async function ssoRoutes(app: FastifyInstance, ctx: AppContext) {
   app.put("/api/admin/auth", async (req) => {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.auth.manage");
-    const { ssoRequired } = parse(z.object({ ssoRequired: z.boolean() }), req.body);
-    if (ssoRequired) {
-      const live = await db.select({ id: ssoConnection.id }).from(ssoConnection).where(eq(ssoConnection.enabled, true));
-      if (!live.length) throw badRequest("Add and enable a sign-in provider before requiring single sign-on.");
-    }
+    const body = parse(z.object({ ssoRequired: z.boolean().optional(), twoFactorRequired: z.boolean().optional() }), req.body);
     const org = await getOrg(db);
-    await db.update(organization).set({ ssoRequired }).where(eq(organization.id, org!.id));
-    await audit(ctx, { actor: u, action: ssoRequired ? "auth.sso_required_on" : "auth.sso_required_off", targetType: "organization", targetId: org!.id });
+    if (body.ssoRequired !== undefined) {
+      const { ssoRequired } = body;
+      if (ssoRequired) {
+        const live = await db.select({ id: ssoConnection.id }).from(ssoConnection).where(eq(ssoConnection.enabled, true));
+        if (!live.length) throw badRequest("Add and enable a sign-in provider before requiring single sign-on.");
+      }
+      await db.update(organization).set({ ssoRequired }).where(eq(organization.id, org!.id));
+      await audit(ctx, { actor: u, action: ssoRequired ? "auth.sso_required_on" : "auth.sso_required_off", targetType: "organization", targetId: org!.id });
+    }
+    if (body.twoFactorRequired !== undefined) {
+      const { twoFactorRequired } = body;
+      // The admin goes first, so turning the rule on never locks them out of this page.
+      if (twoFactorRequired && (await withoutTwoStep(org?.ssoRequired ?? false)).some((r) => r.id === u.id)) {
+        throw badRequest("Set up two-step sign-in for your own account first (Settings → Security).");
+      }
+      await db.update(organization).set({ twoFactorRequired }).where(eq(organization.id, org!.id));
+      await audit(ctx, { actor: u, action: twoFactorRequired ? "auth.two_factor_required_on" : "auth.two_factor_required_off", targetType: "organization", targetId: org!.id });
+    }
     return authSettings();
   });
 

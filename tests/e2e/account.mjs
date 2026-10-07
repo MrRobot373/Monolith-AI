@@ -1,5 +1,5 @@
 /**
- * Email, password reset and two-step sign-in in the browser.
+ * Email, password reset, email confirmation and two-step sign-in (and requiring it) in the browser.
  * Usage: E2E_SCRIPT=tests/e2e/account.mjs tests/e2e/run-work.sh   (fresh database, no SMTP_URL)
  * Starts its own test mail server; the admin points Aatmiq at it from Admin → Settings → Email.
  */
@@ -244,6 +244,88 @@ await step("Security", "Change your password in Settings; phone layout has no si
   expect(!overflow, "horizontal scroll on phone");
   await shot(phone, "settings-security-phone");
   await ctx.close();
+});
+
+/* ═════════════ Email confirmation ═════════════ */
+await step("Confirm", "An emailed invitation confirms the address; the owner's isn't yet", owner, async () => {
+  await owner.goto(`${APP}/admin/users`);
+  await owner.locator("tr", { hasText: "owner@acme.test" }).getByTestId("email-unconfirmed").waitFor();
+  expect((await owner.locator("tr", { hasText: "maya@acme.test" }).getByTestId("email-unconfirmed").count()) === 0, "maya shown unconfirmed");
+});
+
+await step("Confirm", "The banner sends a link; opening it confirms the address", owner, async () => {
+  await owner.goto(`${APP}/app`);
+  await owner.getByTestId("email-banner").waitFor();
+  await shot(owner, "email-banner");
+  await owner.getByTestId("email-banner-send").click();
+  await toast(owner, "Link sent to owner@acme.test");
+  const m = await sink.next("owner@acme.test", "Confirm your email");
+  const link = m.links.find((l) => l.includes("/api/auth/verify-email?token="));
+  expect(link, "no confirmation link in the email");
+  // A broken link says so and confirms nothing.
+  await owner.goto(local(link).replace("token=", "token=x"));
+  await toast(owner, "isn't valid");
+  await owner.getByTestId("email-banner").waitFor();
+  await owner.goto(local(link));
+  await toast(owner, "Your email address is confirmed");
+  await owner.getByTestId("email-banner").waitFor({ state: "detached" });
+  expect(!owner.url().includes("email_verified"), "query string left in the address bar");
+  await owner.goto(`${APP}/app/settings#security`);
+  await owner.getByText("owner@acme.test is confirmed.").waitFor();
+});
+
+/* ═════════════ Requiring two-step sign-in ═════════════ */
+/** Runs the setup dialogs (password, QR, code, backup codes) and returns the authenticator secret. */
+async function setUpTwoStep(page, password) {
+  await page.getByTestId("two-factor-on").click();
+  await page.getByTestId("confirm-with-password").fill(password);
+  await page.getByTestId("password-prompt-submit").click();
+  await page.locator('img[alt="QR code for your authenticator app"]').waitFor();
+  const key = (await page.getByTestId("totp-secret").textContent()).replace(/\s/g, "");
+  await page.getByTestId("setup-code").fill(totpCode(key));
+  await page.getByTestId("setup-verify").click();
+  await page.getByTestId("backup-codes").waitFor();
+  await page.getByTestId("setup-done").click();
+  return key;
+}
+
+await step("Require", "The admin must set it up for themselves before requiring it", owner, async () => {
+  await owner.goto(`${APP}/admin/authentication`);
+  const policy = owner.getByTestId("two-step-policy");
+  await policy.getByText("2 people sign in with a password").waitFor();
+  await policy.getByRole("switch").click();
+  await toast(owner, "for your own account first");
+  await owner.goto(`${APP}/app/settings#security`);
+  await setUpTwoStep(owner, "correct-horse-battery");
+  await owner.getByText("On", { exact: true }).waitFor();
+  await owner.goto(`${APP}/admin/authentication`);
+  await policy.getByText("1 person signs in with a password").waitFor();
+  await policy.getByRole("switch").click();
+  await toast(owner, "Two-step sign-in is now required");
+  await policy.getByText("they'll be asked at their next visit").waitFor();
+  await shot(owner, "two-step-required-policy");
+});
+
+await step("Require", "Someone without it only gets the setup page until it's on", maya, async () => {
+  await maya.goto(`${APP}/app/chat`);
+  await maya.waitForURL("**/two-step-setup");
+  await maya.getByText("requires a code from an authenticator app").waitFor();
+  await shot(maya, "two-step-setup-page");
+  const blocked = await maya.request.get(`${APP}/api/notifications`);
+  expect(blocked.status() === 403, `notifications ${blocked.status()}`);
+  await maya.goto(`${APP}/admin`);
+  await maya.waitForURL("**/two-step-setup");
+  const { page: phone, ctx } = await newUser("phone-setup", { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: await mayaCtx.storageState() });
+  await phone.goto(`${APP}/two-step-setup`);
+  await phone.getByTestId("two-factor-on").waitFor();
+  expect(!(await phone.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), "horizontal scroll on phone");
+  await shot(phone, "two-step-setup-phone");
+  await ctx.close();
+  await setUpTwoStep(maya, "third-password-789");
+  await maya.waitForURL(/\/app$/);
+  await maya.goto(`${APP}/app/settings#security`);
+  await maya.getByText("Your organization requires it").waitFor();
+  expect((await maya.getByTestId("two-factor-off").count()) === 0, "turn-off button shown while required");
 });
 
 /* ═════════════ Report ═════════════ */

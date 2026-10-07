@@ -221,7 +221,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 
 | Phase | Scope | Result |
 |---|---|---|
-| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw with password reset and two-step sign-in, email via SMTP, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
+| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw with password reset, email confirmation and two-step sign-in that admins can require, email via SMTP, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
 | **P1 Chat** ✅ | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
 | **P2 Work AI** ✅ | DSH adapter, sandboxing (per-task user + Landlock; containers in P2.1), tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules ([details](06-work-ai.md)) | Cowork-class agent |
 | **P3 Code** ✅ (web) | Code-OSS build with our patch set, branding, Open VSX, web IDE in Aatmiq, Aatmiq panel wired to the harness ([details](07-code.md)); desktop build next | Cursor-class IDE |
@@ -236,7 +236,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 - **Planned features:** desktop IDE (P3), container mode for Work AI (P2.1), a browser tool for the
   agent, GitLab connector, project tasks with Work AI (Projects phase C), a separate IDE hostname,
   groups, logo upload, S3/MinIO storage, a background job worker.
-- **Accounts:** email verification, an org rule that requires two-step sign-in.
+- **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.
 

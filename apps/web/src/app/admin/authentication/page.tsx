@@ -31,6 +31,9 @@ interface Connection {
 }
 interface AuthSettings {
   ssoRequired: boolean;
+  twoFactorRequired: boolean;
+  /** Password users who haven't set up two-step sign-in yet. */
+  withoutTwoStep: number;
   redirectUri: string;
   connections: Connection[];
   features: { sso: boolean; oidc: boolean };
@@ -66,6 +69,14 @@ export default function AuthenticationPage() {
       qc.setQueryData(["admin-auth"], d);
       qc.invalidateQueries({ queryKey: ["public-status"] });
       toast.success(d.ssoRequired ? "Single sign-on is now required" : "Passwords are allowed again");
+    },
+    onError,
+  });
+  const setTwoStep = useMutation({
+    mutationFn: (twoFactorRequired: boolean) => put<AuthSettings>("/api/admin/auth", { twoFactorRequired }),
+    onSuccess: (d) => {
+      qc.setQueryData(["admin-auth"], d);
+      toast.success(d.twoFactorRequired ? "Two-step sign-in is now required" : "Two-step sign-in is optional again");
     },
     onError,
   });
@@ -166,6 +177,21 @@ export default function AuthenticationPage() {
             onCheckedChange={(v) => setRequired.mutate(v)}
             label="Require single sign-on"
           />
+        </Card>
+        <Card className="mt-3 flex items-start gap-4 p-5" data-testid="two-step-policy">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13.5px] text-fg">Require two-step sign-in</div>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-fg-subtle">
+              Everyone who signs in with a password must set up an authenticator app before they can use the app, and can&apos;t turn it off. People who sign in with single sign-on aren&apos;t asked; their provider runs its own check.
+            </p>
+            {d.withoutTwoStep > 0 && (
+              <p className="mt-2 text-[12.5px] text-fg-muted" data-testid="without-two-step">
+                {d.withoutTwoStep === 1 ? "1 person signs in" : `${d.withoutTwoStep} people sign in`} with a password and hasn&apos;t set it up
+                {d.twoFactorRequired ? " yet; they'll be asked at their next visit." : "."}
+              </p>
+            )}
+          </div>
+          <Switch checked={d.twoFactorRequired} onCheckedChange={(v) => setTwoStep.mutate(v)} label="Require two-step sign-in" />
         </Card>
       </Section>
 

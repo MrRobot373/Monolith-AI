@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Link2, MoreHorizontal, Search, ShieldCheck, ShieldOff, Smartphone, UserMinus, UserPlus, UserCheck, X } from "lucide-react";
+import { Check, Copy, KeyRound, Link2, MailWarning, MoreHorizontal, Search, ShieldCheck, ShieldOff, Smartphone, UserCheck, UserMinus, UserPlus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Section, Table, Td } from "@/components/admin/table";
@@ -28,6 +28,7 @@ interface UserRow {
   createdAt: string;
   tokensThisPeriod: number;
   twoFactorEnabled: boolean;
+  emailVerified: boolean;
   workspaces: { workspaceId: string; name: string; role: "admin" | "member" }[];
 }
 interface InviteRow {
@@ -114,6 +115,11 @@ export default function UsersPage() {
                     {u.twoFactorEnabled && (
                       <span title="Two-step sign-in is on" className="inline-flex text-fg-subtle" data-testid="two-factor-badge">
                         <Smartphone className="size-3.5" />
+                      </span>
+                    )}
+                    {!u.emailVerified && (
+                      <span title="Email address not confirmed yet" className="inline-flex text-warning" data-testid="email-unconfirmed">
+                        <MailWarning className="size-3.5" />
                       </span>
                     )}
                   </span>

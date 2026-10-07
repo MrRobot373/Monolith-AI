@@ -26,7 +26,7 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     const org = await getOrg(db);
     const [profile] = await db
-      .select({ jobTitle: user.jobTitle, customInstructions: user.customInstructions, createdAt: user.createdAt })
+      .select({ jobTitle: user.jobTitle, customInstructions: user.customInstructions, createdAt: user.createdAt, emailVerified: user.emailVerified })
       .from(user)
       .where(eq(user.id, u.id));
     const workspaces = await db
@@ -50,7 +50,8 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
     const lic = await ctx.license.info();
     const admin = isOrgAdmin(u.orgRole);
     return {
-      user: { ...u, ...profile },
+      user: { ...u, ...profile, twoFactorSetupRequired: u.twoFactorSetupRequired ?? false },
+      emailEnabled: await ctx.mail.configured(),
       isAdmin: isOrgAdmin(u.orgRole),
       isWorkspaceAdmin: workspaces.some((w) => w.role === "admin"),
       org: {

@@ -75,7 +75,9 @@ export function createCodeProxy(ctx: AppContext) {
     if (!key) return { user: null, allowed: false };
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit;
-    const user = await getSessionUser(ctx, { headers: req.headers } as FastifyRequest);
+    const found = await getSessionUser(ctx, { headers: req.headers } as FastifyRequest);
+    // Until the required two-step sign-in is set up, the person is treated as signed out here.
+    const user = found?.twoFactorSetupRequired ? null : found;
     const allowed = user ? await canUseCode(ctx, user) : false;
     const entry = { user, allowed, at: Date.now() };
     cache.set(key, entry);

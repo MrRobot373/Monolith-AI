@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, LogOut, ShieldCheck, Smartphone } from "lucide-react";
+import { Check, Copy, KeyRound, LogOut, Mail, ShieldCheck, Smartphone } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -16,6 +16,9 @@ interface Security {
   hasPassword: boolean;
   passwordAllowed: boolean;
   twoFactorEnabled: boolean;
+  twoFactorRequired: boolean;
+  email: string;
+  emailVerified: boolean;
   otherSessions: number;
   emailEnabled: boolean;
 }
@@ -33,8 +36,9 @@ export function SecuritySettings() {
           You sign in with your organization&apos;s single sign-on, so your password and two-step sign-in are managed there.
         </Card>
       )}
+      <EmailAddress email={s.email} verified={s.emailVerified} emailEnabled={s.emailEnabled} />
       {usesPassword && <ChangePassword />}
-      {usesPassword && <TwoStep enabled={s.twoFactorEnabled} />}
+      {usesPassword && <TwoStep enabled={s.twoFactorEnabled} required={s.twoFactorRequired} />}
       <OtherDevices count={s.otherSessions} />
     </div>
   );
@@ -55,6 +59,39 @@ function Section({ icon: Icon, title, description, aside, children }: { icon: ty
         </div>
       </div>
     </Card>
+  );
+}
+
+/** Sends a link that confirms the person's address. */
+export function useSendConfirmation() {
+  return useMutation({
+    mutationFn: () => post<{ to?: string; alreadyVerified?: boolean }>("/api/me/email/verify"),
+    onSuccess: (r) => (r.alreadyVerified ? toast.success("Your email is already confirmed") : toast.success(`Link sent to ${r.to}. It works for 24 hours.`)),
+    onError: (e: Error) => toast.error(e.message),
+  });
+}
+
+function EmailAddress({ email, verified, emailEnabled }: { email: string; verified: boolean; emailEnabled: boolean }) {
+  const send = useSendConfirmation();
+  return (
+    <Section
+      icon={Mail}
+      title="Email address"
+      description={
+        verified
+          ? `${email} is confirmed.`
+          : emailEnabled
+            ? `Confirm ${email} so password resets and notices reach you.`
+            : `${email} isn't confirmed yet. You can confirm it once your admin sets up email.`
+      }
+      aside={verified ? <Badge tone="success">Confirmed</Badge> : <Badge>Not confirmed</Badge>}
+    >
+      {!verified && emailEnabled && (
+        <Button onClick={() => send.mutate()} loading={send.isPending} data-testid="send-confirmation">
+          Send confirmation link
+        </Button>
+      )}
+    </Section>
   );
 }
 
@@ -149,7 +186,7 @@ function PasswordPrompt({ open, title, description, action, danger, onClose, onC
   );
 }
 
-function TwoStep({ enabled }: { enabled: boolean }) {
+function TwoStep({ enabled, required }: { enabled: boolean; required: boolean }) {
   const qc = useQueryClient();
   const [prompt, setPrompt] = useState<null | "enable" | "disable" | "codes">(null);
   const [setup, setSetup] = useState<{ uri: string; backupCodes: string[] } | null>(null);
@@ -169,9 +206,13 @@ function TwoStep({ enabled }: { enabled: boolean }) {
             <Button onClick={() => setPrompt("codes")} data-testid="new-backup-codes">
               New backup codes
             </Button>
-            <Button variant="ghost" onClick={() => setPrompt("disable")} data-testid="two-factor-off">
-              Turn off
-            </Button>
+            {required ? (
+              <span className="self-center text-[12.5px] text-fg-subtle">Your organization requires it, so it can&apos;t be turned off.</span>
+            ) : (
+              <Button variant="ghost" onClick={() => setPrompt("disable")} data-testid="two-factor-off">
+                Turn off
+              </Button>
+            )}
           </>
         ) : (
           <Button variant="primary" onClick={() => setPrompt("enable")} data-testid="two-factor-on">
@@ -243,7 +284,33 @@ function TwoStep({ enabled }: { enabled: boolean }) {
   );
 }
 
-function SetupDialog({ uri, backupCodes, onClose }: { uri: string; backupCodes: string[]; onClose: () => void }) {
+/** The setup flow alone, for the page shown when the organization requires two-step sign-in. */
+export function RequiredTwoStepSetup({ onDone }: { onDone: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const [setup, setSetup] = useState<{ uri: string; backupCodes: string[] } | null>(null);
+  return (
+    <>
+      <Button variant="primary" size="lg" className="w-full" onClick={() => setAsking(true)} data-testid="two-factor-on">
+        Set up two-step sign-in
+      </Button>
+      <PasswordPrompt
+        open={asking}
+        title="Set up two-step sign-in"
+        description="Confirm it's you first."
+        action="Continue"
+        onClose={() => setAsking(false)}
+        onConfirm={async (password) => {
+          const r = await post<{ totpURI: string; backupCodes: string[] }>("/api/auth/two-factor/enable", { password });
+          setAsking(false);
+          setSetup({ uri: r.totpURI, backupCodes: r.backupCodes });
+        }}
+      />
+      {setup && <SetupDialog uri={setup.uri} backupCodes={setup.backupCodes} onClose={() => setSetup(null)} onDone={onDone} />}
+    </>
+  );
+}
+
+function SetupDialog({ uri, backupCodes, onClose, onDone = onClose }: { uri: string; backupCodes: string[]; onClose: () => void; onDone?: () => void }) {
   const [qr, setQr] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [step, setStep] = useState<"scan" | "codes">("scan");
@@ -271,7 +338,7 @@ function SetupDialog({ uri, backupCodes, onClose }: { uri: string; backupCodes: 
   return (
     <Dialog
       open
-      onOpenChange={(o) => !o && step === "codes" && onClose()}
+      onOpenChange={(o) => !o && step === "codes" && onDone()}
       title={step === "scan" ? "Scan with your authenticator app" : "Save your backup codes"}
       description={step === "scan" ? "Then enter the 6-digit code it shows." : "Two-step sign-in is on. If you lose your phone, each of these codes signs you in once."}
     >
@@ -303,7 +370,7 @@ function SetupDialog({ uri, backupCodes, onClose }: { uri: string; backupCodes: 
           <>
             <BackupCodes codes={backupCodes} />
             <div className="mt-4 flex justify-end">
-              <Button variant="primary" onClick={onClose} data-testid="setup-done">
+              <Button variant="primary" onClick={onDone} data-testid="setup-done">
                 I saved them
               </Button>
             </div>

@@ -7,7 +7,8 @@
 import { account, and, eq, organization, session, twoFactor, user } from "@aatmiq/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { RESET_LINK_MINUTES } from "../auth";
+import { fromNodeHeaders } from "better-auth/node";
+import { RESET_LINK_MINUTES, VERIFY_CALLBACK, VERIFY_LINK_HOURS } from "../auth";
 import { audit, getOrg, parse, requireOrgCap, requireUser, type AppContext } from "../context";
 import { randomToken } from "../crypto";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
@@ -30,7 +31,7 @@ export async function accountRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.get("/api/me/security", async (req) => {
     const u = await requireUser(ctx, req);
-    const [row] = await db.select({ twoFactorEnabled: user.twoFactorEnabled }).from(user).where(eq(user.id, u.id));
+    const [row] = await db.select({ twoFactorEnabled: user.twoFactorEnabled, emailVerified: user.emailVerified }).from(user).where(eq(user.id, u.id));
     const [cred] = await db
       .select({ id: account.id })
       .from(account)
@@ -42,9 +43,26 @@ export async function accountRoutes(app: FastifyInstance, ctx: AppContext) {
       hasPassword: !!cred,
       passwordAllowed,
       twoFactorEnabled: row?.twoFactorEnabled ?? false,
+      twoFactorRequired: org?.twoFactorRequired ?? false,
+      email: u.email,
+      emailVerified: row?.emailVerified ?? false,
       otherSessions: Math.max(0, sessions.length - 1),
       emailEnabled: await ctx.mail.configured(),
     };
+  });
+
+  /** Emails a link that confirms the person's address (Better Auth marks it confirmed when opened). */
+  app.post("/api/me/email/verify", { config: { rateLimit: { max: 5, timeWindow: "10 minutes" } } }, async (req) => {
+    const u = await requireUser(ctx, req);
+    const [row] = await db.select({ emailVerified: user.emailVerified }).from(user).where(eq(user.id, u.id));
+    if (row?.emailVerified) return { ok: true, alreadyVerified: true };
+    if (!(await ctx.mail.configured())) throw new HttpError(503, "Email isn't set up on this server yet. Ask your admin.", "email_off");
+    try {
+      await ctx.auth.api.sendVerificationEmail({ body: { email: u.email, callbackURL: VERIFY_CALLBACK }, headers: fromNodeHeaders(req.headers) });
+    } catch (e) {
+      throw new HttpError(502, `The email couldn't be sent: ${(e as Error).message}`, "email_failed");
+    }
+    return { ok: true, to: u.email, expiresInHours: VERIFY_LINK_HOURS };
   });
 
   /* ───────────── Admin help for locked-out people ───────────── */
