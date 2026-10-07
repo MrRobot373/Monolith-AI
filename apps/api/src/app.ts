@@ -9,7 +9,7 @@ import type { AppContext } from "./context";
 import { createSecretBox, sha256 } from "./crypto";
 import { HttpError } from "./errors";
 import { documentRoutes } from "./routes/documents";
-import { createLocalStorage, type Storage } from "./services/storage";
+import { createStorage, type Storage } from "./services/storage";
 import { adminOrgRoutes } from "./routes/admin-org";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
@@ -60,7 +60,7 @@ export async function buildApp(
       }),
   });
   const box = createSecretBox(cfg.secret);
-  const storage = opts.storage ?? createLocalStorage(cfg.storageDir);
+  const storage = opts.storage ?? createStorage(cfg);
   const mail = createMailer({ db, cfg, box, storage });
   const ctx = {
     db,
@@ -161,7 +161,7 @@ export async function buildApp(
   let stopScheduler: (() => void) | undefined;
   app.addHook("onReady", async () => {
     // Document storage is the server's alone; Work AI tasks run as other users (docs/06-work-ai.md).
-    if (process.getuid?.() === 0 && cfg.storageDir) {
+    if (process.getuid?.() === 0 && cfg.storageDir && !cfg.s3) {
       await mkdir(cfg.storageDir, { recursive: true }).catch(() => undefined);
       await chmod(cfg.storageDir, 0o700).catch(() => undefined);
     }

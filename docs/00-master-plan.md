@@ -140,7 +140,7 @@ Customers/orgs, licenses (seats, tier, features, expiry, branding defaults), upd
 | Auth | Better Auth (email/password, 2FA, OAuth, SSO/SAML/OIDC plugins) | TS-native, self-hosted, covers all chosen login types |
 | DB | PostgreSQL 16 + pgvector, Drizzle ORM | One DB for app data and retrieval vectors |
 | Cache/queue | Redis + BullMQ | Streams, rate limits, background jobs |
-| Files | MinIO (S3-compatible) | Self-hosted object storage |
+| Files | Local volume, or any S3-compatible bucket (MinIO, AWS S3, Ceph, SeaweedFS, R2) | Self-hosted object storage; MinIO's own images are no longer published, so Compose uses Chainguard's MinIO build |
 | Doc parsing | Unstructured-style pipeline (pdf.js, mammoth, sheetjs, Tesseract OCR) | Local, no cloud |
 | Models | Ollama (simple), vLLM (high concurrency), any OpenAI-compatible API | Admin configurable |
 | Agent | DeepSeek Harness (dsh) behind `packages/harness` | Open, plugin-based |
@@ -235,7 +235,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
   customer turns on ([09-connectors.md](09-connectors.md)).
 - **Planned features:** desktop IDE (P3), container mode for Work AI (P2.1), a browser tool for the
   agent, project tasks with Work AI (Projects phase C), a separate IDE hostname,
-  groups, S3/MinIO storage, a background job worker.
+  groups, a background job worker.
 - **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.

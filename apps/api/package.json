@@ -17,6 +17,7 @@
     "@aatmiq/model-gateway": "workspace:*",
     "@aatmiq/shared": "workspace:*",
     "@aatmiq/skills": "workspace:*",
+    "@aws-sdk/client-s3": "^3.1147.0",
     "@deepseek-ai/dsh-sdk-protocol": "0.2.0-rc.2",
     "@fastify/cookie": "^11.0.2",
     "@fastify/multipart": "^9.4.0",

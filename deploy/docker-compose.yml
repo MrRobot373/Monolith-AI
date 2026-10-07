@@ -2,7 +2,8 @@
 #   cp deploy/.env.example deploy/.env   (then edit it)
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
 # Optional local models: add `--profile ollama`. Private web search for Work AI: add `--profile search`
-# (then set the SearXNG URL to http://searxng:8080 in Admin → Work AI).
+# (then set the SearXNG URL to http://searxng:8080 in Admin → Work AI). Uploads in a bundled MinIO
+# instead of the `files` volume: add `--profile minio` and set the S3_* values in .env.
 name: aatmiq
 
 services:
@@ -26,6 +27,7 @@ services:
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
+      minio: { condition: service_started, required: false }
     environment:
       DATABASE_URL: postgres://aatmiq:${POSTGRES_PASSWORD}@postgres:5432/aatmiq
       APP_URL: ${APP_URL:?set APP_URL}
@@ -43,6 +45,16 @@ services:
       # Admin → Settings → Email. Example: smtps://user:password@smtp.example.com:465
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      # Uploads in an S3-compatible bucket instead of the files volume (see .env.example).
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_PREFIX: ${S3_PREFIX:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+      S3_SSE: ${S3_SSE:-}
+      S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-}
     volumes:
       - files:/data
     healthcheck:
@@ -72,6 +84,18 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
 
+  # MinIO's own images are no longer published; this is Chainguard's build of MinIO.
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    profiles: ["minio"]
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-aatmiq}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-}
+    volumes:
+      - minio:/data
+
   ollama:
     image: ollama/ollama:latest
     profiles: ["ollama"]
@@ -87,4 +111,5 @@ services:
 volumes:
   pgdata:
   files:
+  minio:
   ollama:

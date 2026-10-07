@@ -1,3 +1,5 @@
+import type { S3Config } from "./services/storage";
+
 export interface Config {
   appUrl: string;
   databaseUrl: string;
@@ -5,6 +7,8 @@ export interface Config {
   allowMockProvider: boolean;
   port: number;
   storageDir: string;
+  /** Uploads go to this S3-compatible bucket instead of storageDir (set S3_BUCKET). */
+  s3?: S3Config | null;
   /** Aatmiq's license public key. When set, a valid license is required. */
   licensePublicKey?: string | null;
   /** Where check-ins go. Empty turns check-ins off (air-gapped installs). */
@@ -39,6 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowMockProvider: env.ALLOW_MOCK_PROVIDER === "true",
     port: Number(env.PORT ?? 4000),
     storageDir: env.STORAGE_DIR ?? ".data/files",
+    s3: loadS3(env),
     licensePublicKey: env.LICENSE_PUBLIC_KEY || null,
     licenseServerUrl: env.LICENSE_SERVER_URL === undefined ? "https://license.aatmiq.com" : env.LICENSE_SERVER_URL || null,
     version: env.APP_VERSION ?? "0.1.0",
@@ -50,5 +55,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
     smtpUrl: env.SMTP_URL || null,
     mailFrom: env.MAIL_FROM || null,
+  };
+}
+
+/** S3 storage from S3_* variables; null (local disk) without S3_BUCKET. */
+export function loadS3(env: NodeJS.ProcessEnv): S3Config | null {
+  if (!env.S3_BUCKET) return null;
+  const endpoint = env.S3_ENDPOINT || null;
+  if (endpoint && !/^https?:\/\//.test(endpoint)) throw new Error("S3_ENDPOINT must start with http:// or https://");
+  if (!!env.S3_ACCESS_KEY_ID !== !!env.S3_SECRET_ACCESS_KEY) throw new Error("Set both S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY, or neither (to use the AWS default credentials)");
+  const sse = env.S3_SSE || null;
+  if (sse !== null && sse !== "AES256" && sse !== "aws:kms") throw new Error('S3_SSE must be "AES256" or "aws:kms"');
+  return {
+    bucket: env.S3_BUCKET,
+    endpoint,
+    region: env.S3_REGION || "us-east-1",
+    accessKeyId: env.S3_ACCESS_KEY_ID || null,
+    secretAccessKey: env.S3_SECRET_ACCESS_KEY || null,
+    // Self-hosted services (MinIO and others) want the bucket in the path; AWS prefers the hostname.
+    forcePathStyle: env.S3_FORCE_PATH_STYLE ? env.S3_FORCE_PATH_STYLE === "true" : !!endpoint,
+    prefix: env.S3_PREFIX || "",
+    sse,
+    createBucket: env.S3_CREATE_BUCKET === "true",
   };
 }

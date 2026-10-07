@@ -4,6 +4,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import { buildApp } from "./app";
 import { loadConfig } from "./config";
+import { createStorage } from "./services/storage";
 
 const cfg = loadConfig();
 
@@ -15,7 +16,21 @@ if (process.env.MIGRATIONS_DIR) {
 }
 
 const { db, close } = createDb(cfg.databaseUrl);
-const app = await buildApp(db, cfg, { logger: true });
+// Fail at start, with a clear message, rather than on the first upload.
+// A bucket service started alongside (Compose) may need a few seconds, so try for about half a minute.
+const storage = createStorage(cfg);
+for (let attempt = 1; ; attempt++) {
+  try {
+    await storage.check();
+    break;
+  } catch (e) {
+    if (attempt >= 10) throw e;
+    console.warn(`${(e as Error).message} Retrying in 3 seconds…`);
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+const app = await buildApp(db, cfg, { logger: true, storage });
+app.log.info(`Files are stored in ${storage.describe()}`);
 
 const shutdown = async () => {
   await app.close();
