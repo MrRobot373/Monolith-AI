@@ -56,10 +56,11 @@ const salesRows = [];
 for (let i = 0; i < 36; i++) {
   const r = regions[(i * 7) % 4];
   const [p, price] = products[(i * 5) % 3];
-  salesRows.push({ date: `2026-0${1 + (i % 9)}-${String(1 + ((i * 3) % 28)).padStart(2, "0")}`, region: r, product: p, units: 1 + ((i * 11) % 9), unit_price: price });
+  salesRows.push({ date: `2026-0${1 + (i % 9)}-${String(1 + ((i * 3) % 28)).padStart(2, "0")}`, region: r, product: p, units: 1 + ((i * 11) % 9) + regions.indexOf(r), unit_price: price });
 }
 const revenue = Object.fromEntries(regions.map((r) => [r, salesRows.filter((x) => x.region === r).reduce((s, x) => s + x.units * x.unit_price, 0)]));
 const ranked = Object.entries(revenue).sort((a, b) => b[1] - a[1]);
+if (new Set(Object.values(revenue)).size !== regions.length) throw new Error("test data: regions must have different revenue");
 const salesCsv = ["date,region,product,units,unit_price", ...salesRows.map((x) => `${x.date},${x.region},${x.product},${x.units},${x.unit_price}`)].join("\n") + "\n";
 
 function chartPng() {

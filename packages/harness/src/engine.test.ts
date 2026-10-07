@@ -156,6 +156,7 @@ describe("tool-call cleanup", () => {
     expect(cleanArgs("bash", { command: "ls", sandbox_permissions: "workspace-write" }, mode)).toEqual({ command: "ls" });
     expect(cleanArgs("write", { file_path: "a", content: "x", sandbox_permissions: "read,write", justification: "save" }, mode)).toEqual({ file_path: "a", content: "x" });
     expect(cleanArgs("bash", { command: "ls", sandbox_permissions: "danger-full-access" }, mode)).toEqual({ command: "ls" }); // no justification
+    expect(cleanArgs("bash", { command: "ls", justification: "List files" }, mode)).toEqual({ command: "ls" }); // justification alone
     const escalate = { command: "pip install --user x", sandbox_permissions: "danger-full-access", justification: "Install the library." };
     expect(cleanArgs("bash", escalate, mode)).toBe(escalate);
     const plain = { command: "ls" };

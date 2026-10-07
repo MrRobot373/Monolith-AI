@@ -89,6 +89,10 @@ export function cleanArgs(name, args, mode) {
       delete out.sandbox_permissions;
       delete out.justification;
     }
+  } else if (Object.hasOwn(args, "justification")) {
+    // A justification on its own is only valid with sandbox_permissions; DSH rejects the call.
+    out = { ...args };
+    delete out.justification;
   }
   if (SEARCH_TOOLS.has(name) && typeof out.path === "string" && !out.path.trim()) {
     out = { ...out };
