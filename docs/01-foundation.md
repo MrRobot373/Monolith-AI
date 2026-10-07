@@ -82,6 +82,16 @@ Library: **Better Auth** (self-hosted, TypeScript). Sessions are stored in Postg
 - **Deactivating a user** revokes all sessions and API tokens immediately. Their content stays in the workspace.
 - **Email delivery:** SMTP is configured by the admin. Without SMTP, invites show a copyable link.
 
+*Built (2026-10-07):* SMTP from Admin → Settings → Email (password encrypted, test before saving) or
+`SMTP_URL`/`MAIL_FROM`; emailed invitations; forgot password (one-hour, one-time link; signs out
+other sessions; confirmation email; nothing is sent to deactivated accounts or, with SSO required,
+to anyone but the owner); admin reset links from Users (emailed to the person when email is on,
+otherwise shown to the admin); two-step sign-in with an authenticator app and 10 backup codes,
+"trust this device" for 30 days, admin can turn it off for a person; Settings → Security (change
+password, sign out other devices). Not yet: email verification, an org rule that *requires*
+two-step sign-in, a list of individual devices. SSO sign-ins skip Aatmiq's two-step check; the
+identity provider applies its own MFA.
+
 ### Security defaults
 Login rate limiting and lockout, CSRF protection, secure headers, 12h idle / 30d absolute session limits (configurable), and every auth event written to the audit log.
 

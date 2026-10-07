@@ -4,14 +4,16 @@
 
 *Aatmiq (Sanskrit ātmik, "of the self, one's own"), pronounced AAT-mik.*
 
-- [Master plan](docs/00-master-plan.md) · [Foundation spec](docs/01-foundation.md) · [Pricing & business](docs/pricing-and-business.md) · [Decision log](docs/decisions.md)
+- [Master plan](docs/00-master-plan.md) · [Foundation spec](docs/01-foundation.md) · [Connectors setup](docs/09-connectors.md) · [Skill library](docs/08-skills.md) · [Pricing & business](docs/pricing-and-business.md) · [Decision log](docs/decisions.md)
 
-## What works today (P0 Foundation + first Chat)
+## What works today
 
 | Area | Status |
 |---|---|
 | Landing page (company profile) | ✅ `/` |
 | First-run setup wizard, email/password sign-in, invitations | ✅ |
+| Email (SMTP, from Admin → Settings → Email or `SMTP_URL`): emailed invitations, forgot-password links, security notices; admins can send a reset link from Users | ✅ |
+| Two-step sign-in with an authenticator app and backup codes; Settings → Security (change password, sign out other devices); admins can turn it off for someone who lost their phone | ✅ |
 | Roles: org owner/admin, workspace admin, member | ✅ enforced in the API |
 | Workspaces (teams) with their own members, models and budget | ✅ |
 | Model providers: Ollama, any OpenAI-compatible server (vLLM, LM Studio…), demo model | ✅ health checks, model discovery, keys encrypted at rest |
@@ -29,6 +31,8 @@
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
 | License server + Super Admin console: customers, issue/change/revoke licenses, check-ins, release channel | ✅ `apps/license-server`, `apps/license-console` |
 | Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), MCP connectors, skills, schedules, per-task isolation, metering ([details](docs/06-work-ai.md)) | ✅ |
+| Connectors: catalog of 44 apps (Gmail, Google Calendar/Drive/Docs, Slack, GitHub, Notion, Canva, Jira…), each person signs in to their own account, checked against the real services ([setup](docs/09-connectors.md)) | ✅ |
+| Built-in skill library: 59 skills for software, data, documents and business work, admins switch each on or off ([list](docs/08-skills.md)) | ✅ |
 | Code: Aatmiq Code (Code-OSS) in the browser, per-person IDE as your own user, terminals, Git (clone, your name on commits), Open VSX extensions, and the Aatmiq panel: a coding agent with approvals and diffs ([details](docs/07-code.md)) | ✅ (desktop app next) |
 
 ## Repository layout
@@ -74,7 +78,9 @@ TEST_DATABASE_URL=postgres://…/aatmiq_test pnpm --filter @aatmiq/api test   # 
 pnpm --filter @aatmiq/license test
 pnpm --filter @aatmiq/harness test   # runs the real agent runtime against a fake model
 LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
-# Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI; E2E_SCRIPT=code.mjs for Code) and run-licensing.sh
+# Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI; E2E_SCRIPT=code.mjs for Code,
+#   account.mjs for email/password reset/two-step sign-in) and run-licensing.sh
+# Connectors against the real services (needs internet): cd apps/api && npx tsx ../../tests/connectors/check.mts
 ```
 
 ## Deploy on a server
@@ -88,6 +94,6 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile oll
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile search up -d --build
 ```
 
-The API applies database migrations automatically on start. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.
+The API applies database migrations automatically on start. For invitations and password resets by email, set `SMTP_URL` and `MAIL_FROM` in `deploy/.env` or use Admin → Settings → Email. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.
 
 The license server and Super Admin console run separately, in Aatmiq's cloud: `deploy/license/docker-compose.yml` (see [docs/05-license-server.md](docs/05-license-server.md)).

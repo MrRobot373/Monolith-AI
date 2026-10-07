@@ -6,7 +6,7 @@
 > **Chat**, **Work AI** (agent harness) and **Code** (VS Code–based IDE) in one product,
 > running on the customer's own servers with open-source models. Their data never leaves their infrastructure.
 
-Status: **P0 Foundation built** (see README "What works today") · Owner: Super Admin (product owner) · Last updated: 2026-09-28
+Status: **P0–P3 built** (Foundation, Chat, Work AI, Code in the browser; see README "What works today") · Owner: Super Admin (product owner) · Last updated: 2026-10-07
 
 ---
 
@@ -221,8 +221,8 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 
 | Phase | Scope | Result |
 |---|---|---|
-| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
-| **P1 Chat** | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
+| **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw with password reset and two-step sign-in, email via SMTP, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
+| **P1 Chat** ✅ | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
 | **P2 Work AI** ✅ | DSH adapter, sandboxing (per-task user + Landlock; containers in P2.1), tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules ([details](06-work-ai.md)) | Cowork-class agent |
 | **P3 Code** ✅ (web) | Code-OSS build with our patch set, branding, Open VSX, web IDE in Aatmiq, Aatmiq panel wired to the harness ([details](07-code.md)); desktop build next | Cursor-class IDE |
 | **P4 Enterprise** | SAML/OIDC, audit exports, retention policies, Helm/K8s, offline licenses, backups, SOC2-style docs | Mid-size readiness |
@@ -230,14 +230,26 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 
 ---
 
-## 13. How we plan from here
-Each part gets its own detailed spec in `docs/` before implementation:
+### Still open (2026-10-07)
+- **Before wide release:** a `main` branch and CI on every push; a real sign-in once per connector a
+  customer turns on ([09-connectors.md](09-connectors.md)).
+- **Planned features:** desktop IDE (P3), container mode for Work AI (P2.1), a browser tool for the
+  agent, GitLab connector, project tasks with Work AI (Projects phase C), a separate IDE hostname,
+  groups, logo upload, S3/MinIO storage, a background job worker.
+- **Accounts:** email verification, an org rule that requires two-step sign-in.
+- **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
+  licenses, signing-key rotation, billing.
 
-1. `01-foundation.md` — auth, roles, admin portal, gateway, quotas, deployment ✅ draft
-2. `02-chat.md`
-3. `03-work-ai.md`
-4. `04-code-ide.md`
-5. `05-website-and-license-server.md`
-6. `06-design-system.md` — UI/UX, screens, motion, branding
+## 13. Specs
+Each part has its own spec in `docs/`:
 
-Decisions already made are recorded in `docs/decisions.md`. Pricing and name: `docs/pricing-and-business.md`.
+1. [01-foundation.md](01-foundation.md): auth, roles, admin portal, gateway, quotas, deployment
+2. [03-projects.md](03-projects.md): projects and Chat phase B
+3. [04-single-sign-on.md](04-single-sign-on.md)
+4. [05-license-server.md](05-license-server.md)
+5. [06-work-ai.md](06-work-ai.md)
+6. [07-code.md](07-code.md)
+7. [08-skills.md](08-skills.md): the built-in skill library
+8. [09-connectors.md](09-connectors.md): connector setup, Google verification, real-service check
+
+Decisions already made are recorded in [decisions.md](decisions.md). Pricing and name: [pricing-and-business.md](pricing-and-business.md).

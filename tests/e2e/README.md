@@ -40,6 +40,29 @@ Git server, and access rules.
 E2E_SCRIPT=$PWD/tests/e2e/code.mjs tests/e2e/run-work.sh
 ```
 
+## Accounts: email, password reset, two-step sign-in
+
+`account.mjs` (12 checks) runs on the same stack. It starts its own test mail server and points
+Aatmiq at it from Admin → Settings → Email, then checks: a test email, emailed invitations,
+forgot password with the emailed link (once only), setting up two-step sign-in (QR, wrong and right
+codes, backup codes), signing in with a code and with a backup code, the admin turning it off,
+admin reset links and changing the password (also at phone width). Screenshots go to
+`results-account/`.
+
+```bash
+E2E_SCRIPT=$PWD/tests/e2e/account.mjs tests/e2e/run-work.sh
+```
+
+## Screenshots of every page
+
+`screens.mjs` captures each app page in dark, light and phone views with sample data (after
+`work.mjs`), and `screens-license.mjs` the license console and a licensed install:
+
+```bash
+E2E_SCRIPT=$PWD/tests/e2e/screens-after-work.mjs tests/e2e/run-work.sh
+E2E_SCRIPT=$PWD/tests/e2e/screens-license.mjs tests/e2e/run-licensing.sh
+```
+
 ## Licensing and single sign-on
 
 `run-licensing.sh` starts the license server (:4100), the Super Admin console (:3100), a mock
