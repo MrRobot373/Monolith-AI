@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/server.ts", "src/copy-files-to-s3.ts"],
+  entry: ["src/server.ts", "src/worker.ts", "src/copy-files-to-s3.ts"],
   format: ["esm"],
   target: "node22",
   platform: "node",

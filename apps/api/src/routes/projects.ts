@@ -247,7 +247,7 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
     await addSource(p.id, doc!.id, u.id);
     if (replaces) await db.update(document).set({ supersededById: doc!.id }).where(eq(document.id, replaces));
     await audit(ctx, { actor: u, action: "project.source_added", workspaceId: p.workspaceId, targetType: "document", targetId: doc!.id, meta: { projectId: p.id, name } });
-    setImmediate(() => void processDocument(db, box, storage, doc!.id));
+    await ctx.jobs.document(doc!.id);
     return doc;
   });
 
@@ -266,7 +266,7 @@ export async function projectRoutes(app: FastifyInstance, ctx: AppContext) {
       .returning();
     await addSource(p.id, doc!.id, u.id);
     await audit(ctx, { actor: u, action: body.kind === "answer" ? "project.answer_saved" : "project.note_added", workspaceId: p.workspaceId, targetType: "document", targetId: doc!.id, meta: { projectId: p.id } });
-    setImmediate(() => void processDocument(db, box, storage, doc!.id));
+    await ctx.jobs.document(doc!.id);
     return doc;
   });
 

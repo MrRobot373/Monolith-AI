@@ -103,7 +103,7 @@ export async function documentRoutes(app: FastifyInstance, ctx: AppContext) {
       })
       .returning();
     await audit(ctx, { actor: u, action: "document.uploaded", workspaceId, targetType: "document", targetId: doc!.id, meta: { name, size: file.data.length } });
-    setImmediate(() => void processDocument(db, box, storage, doc!.id));
+    await ctx.jobs.document(doc!.id);
     return { ...doc, ownerName: u.name };
   });
 
@@ -141,7 +141,7 @@ export async function documentRoutes(app: FastifyInstance, ctx: AppContext) {
     const { doc, canManage } = await loadReadable(ctx, u, req.params.id);
     if (!canManage) throw forbidden();
     await db.update(document).set({ status: "processing", error: null }).where(eq(document.id, doc.id));
-    setImmediate(() => void processDocument(db, box, storage, doc.id));
+    await ctx.jobs.document(doc.id);
     return { ok: true };
   });
 

@@ -30,6 +30,10 @@ export interface Config {
   smtpUrl?: string | null;
   /** Sender for SMTP_URL, e.g. "Aatmiq <ai@acme.com>". */
   mailFrom?: string | null;
+  /** Redis/Valkey for the job queue; background jobs then run in the worker process. */
+  redisUrl?: string | null;
+  /** Documents processed at once (per worker, or in the API without Redis). */
+  jobConcurrency?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -55,6 +59,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
     smtpUrl: env.SMTP_URL || null,
     mailFrom: env.MAIL_FROM || null,
+    redisUrl: env.REDIS_URL || null,
+    jobConcurrency: Math.max(1, Math.min(16, Number(env.JOB_CONCURRENCY ?? 2) || 2)),
   };
 }
 

@@ -32,6 +32,7 @@ import type { WorkRunner } from "./services/work";
 import type { CodeServers } from "./services/code";
 import type { Connectors } from "./services/connectors";
 import type { Mailer } from "./services/mail";
+import type { Jobs } from "./services/jobs";
 import { badRequest, forbidden, HttpError, notFound, unauthorized } from "./errors";
 
 export interface AppContext {
@@ -45,6 +46,7 @@ export interface AppContext {
   code: CodeServers;
   connectors: Connectors;
   mail: Mailer;
+  jobs: Jobs;
 }
 
 export interface SessionUser {

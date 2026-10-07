@@ -30,6 +30,7 @@
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
 | Compliance recording notice, branding (name, accent color, logo on sign-in, app, emails and tab icon), dark/light themes | ✅ |
 | Docker images + Compose stack | ✅ |
+| Background jobs (document processing, housekeeping): inside the API on one server, or a Redis/Valkey queue with separate worker processes (retries, restart recovery, Admin status) | ✅ |
 | Uploads on local disk or any S3-compatible bucket (AWS S3, MinIO, Ceph, SeaweedFS, R2…), bundled MinIO profile, copy script for existing installs | ✅ |
 | Single sign-on: Google, Microsoft Entra ID, any OpenID Connect provider (Okta, Keycloak…), invite-only or domain auto-join, "require SSO" ([details](docs/04-single-sign-on.md)) | ✅ (SAML: P4) |
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
@@ -79,7 +80,8 @@ pnpm -r typecheck
 pnpm --filter @aatmiq/shared test
 pnpm --filter @aatmiq/model-gateway test
 TEST_DATABASE_URL=postgres://…/aatmiq_test pnpm --filter @aatmiq/api test   # needs a migrated, disposable database
-# add S3_TEST_ENDPOINTS="minio=http://127.0.0.1:9000|key|secret" to also run the storage tests on S3 servers
+# add S3_TEST_ENDPOINTS="minio=http://127.0.0.1:9000|key|secret" to also run the storage tests on S3 servers,
+# and REDIS_TEST_URL=redis://127.0.0.1:6379/5 for the job queue tests
 pnpm --filter @aatmiq/license test
 pnpm --filter @aatmiq/harness test   # runs the real agent runtime against a fake model
 LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
@@ -99,8 +101,10 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile oll
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile search up -d --build
 # uploads in a bundled MinIO instead of the files volume (set the S3_* values in .env first):
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile minio up -d --build
+# background jobs in a separate worker with Valkey (set REDIS_URL=redis://valkey:6379 in .env first):
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile worker up -d --build
 ```
 
-The API applies database migrations automatically on start. For invitations and password resets by email, set `SMTP_URL` and `MAIL_FROM` in `deploy/.env` or use Admin → Settings → Email. Uploads (documents, project files, the logo) go to the `files` volume, or to an S3-compatible bucket when `S3_BUCKET` is set (AWS S3, MinIO, Ceph, SeaweedFS, Cloudflare R2…; see `deploy/.env.example`). The API checks it can write, read and delete there before it starts, and `docker compose exec api node dist/copy-files-to-s3.js` moves an existing install's files into the bucket. Work AI task folders and IDE homes always stay on the server's disk. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.
+The API applies database migrations automatically on start. For invitations and password resets by email, set `SMTP_URL` and `MAIL_FROM` in `deploy/.env` or use Admin → Settings → Email. Uploads (documents, project files, the logo) go to the `files` volume, or to an S3-compatible bucket when `S3_BUCKET` is set (AWS S3, MinIO, Ceph, SeaweedFS, Cloudflare R2…; see `deploy/.env.example`). The API checks it can write, read and delete there before it starts, and `docker compose exec api node dist/copy-files-to-s3.js` moves an existing install's files into the bucket. Work AI task folders and IDE homes always stay on the server's disk. Background jobs (processing uploads, deleting expired temporary chats, the license check-in) run inside the API by default; with `REDIS_URL` set they go through a queue to the `worker` service (`node dist/worker.js`, same image; run several to scale), get retries, and run once however many API copies there are. Admin → Overview shows where they run and whether a worker is alive. Either way, documents left half-processed by a restart are picked up again. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.
 
 The license server and Super Admin console run separately, in Aatmiq's cloud: `deploy/license/docker-compose.yml` (see [docs/05-license-server.md](docs/05-license-server.md)).

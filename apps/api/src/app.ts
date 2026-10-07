@@ -14,7 +14,7 @@ import { adminOrgRoutes } from "./routes/admin-org";
 import { groupRoutes } from "./routes/groups";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
-import { chatRoutes, purgeTemporaryChats } from "./routes/chat";
+import { chatRoutes } from "./routes/chat";
 import { stopOcr } from "./services/ocr";
 import { LicenseService } from "./services/license";
 import { licenseRoutes } from "./routes/license";
@@ -35,6 +35,7 @@ import { connectorRoutes } from "./routes/connectors";
 import { accountRoutes } from "./routes/account";
 import { createConnectors } from "./services/connectors";
 import { createMailer } from "./services/mail";
+import { createInProcessJobs, createRedisJobs, type Jobs } from "./services/jobs";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
 import type { AddressInfo } from "node:net";
@@ -43,7 +44,7 @@ import { chmod, mkdir } from "node:fs/promises";
 export async function buildApp(
   db: DB,
   cfg: Config,
-  opts: { logger?: boolean; storage?: Storage; fetch?: typeof fetch; workEngine?: HarnessEngine } = {},
+  opts: { logger?: boolean; storage?: Storage; fetch?: typeof fetch; workEngine?: HarnessEngine; jobs?: (ctx: AppContext) => Jobs } = {},
 ): Promise<FastifyInstance> {
   // The IDE proxy (/code/ide) handles its requests before Fastify, so bodies and WebSocket
   // upgrades pass through untouched.
@@ -72,6 +73,12 @@ export async function buildApp(
     storage,
     license: new LicenseService(db, cfg, opts.fetch),
   } as AppContext;
+  const jobLog = (msg: string, err?: unknown) => app.log.warn(err, msg);
+  ctx.jobs = opts.jobs
+    ? opts.jobs(ctx)
+    : cfg.redisUrl
+      ? createRedisJobs({ db, log: jobLog }, cfg.redisUrl)
+      : createInProcessJobs({ db, box, storage, license: ctx.license, log: jobLog }, cfg.jobConcurrency);
   ctx.connectors = createConnectors({
     db,
     box: ctx.box,
@@ -157,9 +164,6 @@ export async function buildApp(
   await connectorRoutes(app, ctx);
   await accountRoutes(app, ctx);
 
-  // Housekeeping: temporary chats older than a day are deleted.
-  const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));
-  let timer: NodeJS.Timeout | undefined;
   let stopScheduler: (() => void) | undefined;
   app.addHook("onReady", async () => {
     // Document storage is the server's alone; Work AI tasks run as other users (docs/06-work-ai.md).
@@ -167,20 +171,17 @@ export async function buildApp(
       await mkdir(cfg.storageDir, { recursive: true }).catch(() => undefined);
       await chmod(cfg.storageDir, 0o700).catch(() => undefined);
     }
-    ctx.license.start();
-    purge();
+    // Document processing and housekeeping (temporary chats, license check-in): see services/jobs.ts.
+    await ctx.jobs.start();
     void ctx.work.recover().catch((e) => app.log.warn(e, "recovering Work AI tasks failed"));
     stopScheduler = startScheduler(ctx, (msg, err) => app.log.warn(err, msg));
-    timer = setInterval(purge, 60 * 60 * 1000);
-    timer.unref();
   });
   app.addHook("preClose", async () => {
     ideProxy?.closeAll();
   });
   app.addHook("onClose", async () => {
-    clearInterval(timer);
     stopScheduler?.();
-    ctx.license.stop();
+    await ctx.jobs.close();
     await ctx.work.stopAll();
     await ctx.code.stopAll();
     await stopOcr();

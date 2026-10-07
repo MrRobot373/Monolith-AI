@@ -3,8 +3,42 @@
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
 # Optional local models: add `--profile ollama`. Private web search for Work AI: add `--profile search`
 # (then set the SearXNG URL to http://searxng:8080 in Admin → Work AI). Uploads in a bundled MinIO
-# instead of the `files` volume: add `--profile minio` and set the S3_* values in .env.
+# instead of the `files` volume: add `--profile minio` and set the S3_* values in .env. Background
+# jobs in a separate worker with a Redis-compatible queue: add `--profile worker` and set
+# REDIS_URL=redis://valkey:6379 in .env.
 name: aatmiq
+
+# Settings shared by the API and the background worker.
+x-app-env: &app-env
+  DATABASE_URL: postgres://aatmiq:${POSTGRES_PASSWORD}@postgres:5432/aatmiq
+  APP_URL: ${APP_URL:?set APP_URL}
+  APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+  ALLOW_MOCK_PROVIDER: ${ALLOW_MOCK_PROVIDER:-false}
+  OCR_ENABLED: ${OCR_ENABLED:-true}
+  # Aatmiq's license public key (from your order email). Without it the server runs in development mode.
+  LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
+  # Daily check-ins (counts only). Set empty for air-gapped installs.
+  LICENSE_SERVER_URL: ${LICENSE_SERVER_URL-https://license.aatmiq.com}
+  # Work AI: commands may only change their task folder (Landlock/bubblewrap). Set "off" only on
+  # hosts whose kernel has neither; each task still runs as its own Unix user.
+  WORK_SANDBOX: ${WORK_SANDBOX:-on}
+  # Outgoing email for invitations and password resets. Optional: admins can also set it in
+  # Admin → Settings → Email. Example: smtps://user:password@smtp.example.com:465
+  SMTP_URL: ${SMTP_URL:-}
+  MAIL_FROM: ${MAIL_FROM:-}
+  # Uploads in an S3-compatible bucket instead of the files volume (see .env.example).
+  S3_BUCKET: ${S3_BUCKET:-}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  S3_PREFIX: ${S3_PREFIX:-}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+  S3_SSE: ${S3_SSE:-}
+  S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-}
+  # Job queue (Redis/Valkey). With it, background jobs run in the worker service (--profile worker).
+  REDIS_URL: ${REDIS_URL:-}
+  JOB_CONCURRENCY: ${JOB_CONCURRENCY:-2}
 
 services:
   postgres:
@@ -28,33 +62,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       minio: { condition: service_started, required: false }
-    environment:
-      DATABASE_URL: postgres://aatmiq:${POSTGRES_PASSWORD}@postgres:5432/aatmiq
-      APP_URL: ${APP_URL:?set APP_URL}
-      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
-      ALLOW_MOCK_PROVIDER: ${ALLOW_MOCK_PROVIDER:-false}
-      OCR_ENABLED: ${OCR_ENABLED:-true}
-      # Aatmiq's license public key (from your order email). Without it the server runs in development mode.
-      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY:-}
-      # Daily check-ins (counts only). Set empty for air-gapped installs.
-      LICENSE_SERVER_URL: ${LICENSE_SERVER_URL-https://license.aatmiq.com}
-      # Work AI: commands may only change their task folder (Landlock/bubblewrap). Set "off" only on
-      # hosts whose kernel has neither; each task still runs as its own Unix user.
-      WORK_SANDBOX: ${WORK_SANDBOX:-on}
-      # Outgoing email for invitations and password resets. Optional: admins can also set it in
-      # Admin → Settings → Email. Example: smtps://user:password@smtp.example.com:465
-      SMTP_URL: ${SMTP_URL:-}
-      MAIL_FROM: ${MAIL_FROM:-}
-      # Uploads in an S3-compatible bucket instead of the files volume (see .env.example).
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_REGION: ${S3_REGION:-}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-      S3_PREFIX: ${S3_PREFIX:-}
-      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
-      S3_SSE: ${S3_SSE:-}
-      S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-}
+      valkey: { condition: service_healthy, required: false }
+    environment: *app-env
     volumes:
       - files:/data
     healthcheck:
@@ -84,6 +93,34 @@ services:
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
 
+  # Background jobs (document processing, housekeeping). Same image and settings as the API.
+  worker:
+    build: { context: .., dockerfile: deploy/Dockerfile.api }
+    profiles: ["worker"]
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      minio: { condition: service_started, required: false }
+    environment: *app-env
+    volumes:
+      - files:/data
+
+  # Valkey: the open-source (BSD) Redis fork; any Redis 6.2+ works too.
+  valkey:
+    image: valkey/valkey:8-alpine
+    profiles: ["worker"]
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # MinIO's own images are no longer published; this is Chainguard's build of MinIO.
   minio:
     image: cgr.dev/chainguard/minio:latest
@@ -112,4 +149,5 @@ volumes:
   pgdata:
   files:
   minio:
+  valkey:
   ollama:

@@ -247,8 +247,8 @@ Profile (name, avatar, job title), Appearance (dark/light/system, density), Defa
 ## 11. Deployment (P0 target: Docker Compose)
 
 ```
-services: caddy (TLS) · web · api · worker · postgres(+pgvector) · redis · minio
-optional profiles: ollama (GPU) · searxng (P2) · sandbox-manager (P2) · otel/grafana
+services: web · api · postgres(+pgvector)          (TLS reverse proxy in front: Caddy, Nginx, Traefik)
+optional profiles: worker (+ valkey) · minio · search (searxng) · ollama (GPU)
 ```
 - **Installer:** `curl -fsSL https://get.<domain>/install.sh | sh`. It checks Docker, asks for the domain and license key, generates secrets, writes `.env`, and starts the stack.
 - **Minimum:** 4 vCPU / 16 GB RAM / 100 GB SSD without local models. GPU sizing is documented per model tier.

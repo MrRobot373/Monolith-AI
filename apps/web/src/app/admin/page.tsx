@@ -87,6 +87,7 @@ export default function AdminOverview() {
               )}
             </Card>
           </Section>
+          <JobsCard />
           <Section title="License">
             <Link href="/admin/license" className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-strong">
               <KeyRound className="size-4 text-fg-subtle" />
@@ -103,5 +104,44 @@ export default function AdminOverview() {
         </div>
       </div>
     </div>
+  );
+}
+
+interface JobsStatus {
+  mode: "in-process" | "redis";
+  workers: { id: string; seenAt: string }[];
+  counts: { waiting: number; active: number; delayed: number; failed: number };
+  stalled: boolean;
+  documentsProcessing: number;
+}
+
+/** Where background jobs (document processing, housekeeping) run and whether they're keeping up. */
+function JobsCard() {
+  const q = useQuery({ queryKey: ["admin-jobs"], queryFn: () => get<JobsStatus>("/api/admin/jobs"), refetchInterval: 15_000 });
+  const d = q.data;
+  if (!d) return null;
+  const ok = d.mode === "in-process" || (d.workers.length > 0 && !d.stalled);
+  return (
+    <Section title="Background jobs">
+      <Card className="p-4" data-testid="jobs-card">
+        <div className="flex items-center gap-3">
+          {ok ? <CircleCheck className="size-4 text-success" /> : <CircleX className="size-4 text-danger" />}
+          <div className="min-w-0 flex-1 text-sm">
+            {d.mode === "in-process"
+              ? "Running inside the API"
+              : d.workers.length
+                ? `${d.workers.length} ${d.workers.length === 1 ? "worker" : "workers"} running`
+                : "No worker is running"}
+          </div>
+          <Badge>{d.mode === "redis" ? "Redis queue" : "Single server"}</Badge>
+        </div>
+        <div className="mt-2 text-xs text-fg-subtle">
+          {d.counts.active} running · {d.counts.waiting + d.counts.delayed} waiting
+          {d.counts.failed > 0 && ` · ${d.counts.failed} failed recently`}
+          {d.documentsProcessing > 0 && ` · ${d.documentsProcessing} ${d.documentsProcessing === 1 ? "document" : "documents"} processing`}
+        </div>
+        {d.stalled && <p className="mt-2 text-xs text-danger">Jobs are waiting but no worker is running. Start the worker service (node dist/worker.js).</p>}
+      </Card>
+    </Section>
   );
 }

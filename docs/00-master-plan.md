@@ -139,7 +139,7 @@ Customers/orgs, licenses (seats, tier, features, expiry, branding defaults), upd
 | API | Fastify + Zod, SSE/WebSocket streaming | Fast, typed, streaming-friendly |
 | Auth | Better Auth (email/password, 2FA, OAuth, SSO/SAML/OIDC plugins) | TS-native, self-hosted, covers all chosen login types |
 | DB | PostgreSQL 16 + pgvector, Drizzle ORM | One DB for app data and retrieval vectors |
-| Cache/queue | Redis + BullMQ | Streams, rate limits, background jobs |
+| Cache/queue | Optional Redis/Valkey + BullMQ | Background jobs in a worker process (documents, housekeeping); without it they run inside the API |
 | Files | Local volume, or any S3-compatible bucket (MinIO, AWS S3, Ceph, SeaweedFS, R2) | Self-hosted object storage; MinIO's own images are no longer published, so Compose uses Chainguard's MinIO build |
 | Doc parsing | Unstructured-style pipeline (pdf.js, mammoth, sheetjs, Tesseract OCR) | Local, no cloud |
 | Models | Ollama (simple), vLLM (high concurrency), any OpenAI-compatible API | Admin configurable |
@@ -234,8 +234,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 - **Before wide release:** a `main` branch and CI on every push; a real sign-in once per connector a
   customer turns on ([09-connectors.md](09-connectors.md)).
 - **Planned features:** desktop IDE (P3), container mode for Work AI (P2.1), a browser tool for the
-  agent, project tasks with Work AI (Projects phase C), a separate IDE hostname,
-  a background job worker.
+  agent, project tasks with Work AI (Projects phase C), a separate IDE hostname.
 - **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.

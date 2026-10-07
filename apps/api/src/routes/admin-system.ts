@@ -3,6 +3,7 @@ import {
   asc,
   auditLog,
   desc,
+  document,
   eq,
   gte,
   inArray,
@@ -379,6 +380,16 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         message: lic.status.message,
       },
     };
+  });
+
+  /* ───────────── Background jobs ───────────── */
+
+  /** Where background jobs run, whether a worker is alive, and what's queued. */
+  app.get("/api/admin/jobs", async (req) => {
+    const u = await requireUser(ctx, req);
+    requireOrgCap(u, "org.audit.view");
+    const processing = await db.select({ n: sql<number>`count(*)::int` }).from(document).where(eq(document.status, "processing"));
+    return { ...(await ctx.jobs.status()), documentsProcessing: processing[0]?.n ?? 0 };
   });
 
   /* ───────────── Audit log ───────────── */

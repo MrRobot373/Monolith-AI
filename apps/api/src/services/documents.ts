@@ -50,16 +50,29 @@ export async function embeddingModelFor(db: DB, box: SecretBox, workspaceId: str
   return { id: row.model.id, key: row.model.modelKey, cfg };
 }
 
-/** Extract, chunk and (optionally) embed a stored document. Never throws; records failures on the row. */
-export async function processDocument(db: DB, box: SecretBox, storage: Storage, documentId: string): Promise<void> {
+/** Raised for files that will never work (no text, unsupported type): retrying can't help. */
+class NoTextError extends Error {}
+
+/**
+ * Extract, chunk and (optionally) embed a stored document. Never throws; records the outcome on the
+ * row. With `willRetry`, a failure that may pass (storage or the embedding model unreachable) leaves
+ * the document "processing" and returns "retry" so the job queue can try again later.
+ */
+export async function processDocument(
+  db: DB,
+  box: SecretBox,
+  storage: Storage,
+  documentId: string,
+  opts: { willRetry?: boolean } = {},
+): Promise<"ready" | "failed" | "retry" | "missing"> {
   const [doc] = await db.select().from(document).where(eq(document.id, documentId));
-  if (!doc) return;
+  if (!doc) return "missing";
   try {
     const data = await storage.get(doc.storageKey);
     const pages = await extractText(doc.name, data);
     const chunks = chunkPages(pages);
     const charCount = pages.reduce((n, p) => n + p.text.length, 0);
-    if (chunks.length === 0) throw new Error("No readable text was found. Scanned PDFs need OCR, which is coming soon.");
+    if (chunks.length === 0) throw new NoTextError("No readable text was found. Scanned PDFs need OCR, which is coming soon.");
 
     const emb = await embeddingModelFor(db, box, doc.workspaceId);
     let vectors: (number[] | null)[] = chunks.map(() => null);
@@ -107,10 +120,17 @@ export async function processDocument(db: DB, box: SecretBox, storage: Storage, 
         })
         .where(eq(document.id, doc.id));
     });
+    return "ready";
   } catch (e) {
     const message =
       e instanceof UnsupportedFileError || e instanceof Error ? e.message : "The file could not be processed.";
+    const permanent = e instanceof UnsupportedFileError || e instanceof NoTextError;
+    if (opts.willRetry && !permanent) {
+      await db.update(document).set({ status: "processing", error: `Will try again: ${message}`.slice(0, 500) }).where(eq(document.id, doc.id));
+      return "retry";
+    }
     await db.update(document).set({ status: "failed", error: message.slice(0, 500) }).where(eq(document.id, doc.id));
+    return "failed";
   }
 }
 
