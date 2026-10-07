@@ -39,10 +39,14 @@ services:
       # Work AI: commands may only change their task folder (Landlock/bubblewrap). Set "off" only on
       # hosts whose kernel has neither; each task still runs as its own Unix user.
       WORK_SANDBOX: ${WORK_SANDBOX:-on}
+      # Outgoing email for invitations and password resets. Optional: admins can also set it in
+      # Admin → Settings → Email. Example: smtps://user:password@smtp.example.com:465
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     volumes:
       - files:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4000/api/health"]
       interval: 10s
       timeout: 3s
       retries: 10
