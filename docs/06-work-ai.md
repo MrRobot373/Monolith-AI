@@ -131,7 +131,7 @@ What protects what, and the limits:
 
 | Layer | Protects | Notes |
 |---|---|---|
-| **Own Unix user per task** (D25) | Tasks can't read other tasks' folders, uploaded documents, or the API's environment | Needs the API to run as root (the Docker image does). Task folders are `0700`, the work root `0711`, document storage `0700`. Uids come from a database sequence (100000+). |
+| **Own Unix user per task** (D25) | Tasks can't read other tasks' folders, uploaded documents, or the API's environment | Needs the API to run as root (the Docker image does). Task folders are `0700`, the work root `0755` (DSH reads every parent folder of its home when storing an image; listing it shows only task IDs), document storage `0700`. Uids come from a database sequence (100000+). |
 | **Command sandbox** | Commands can only *change* the task folder (and a private `/tmp`) | DSH's Landlock/bubblewrap runner, `workspace-write`. Fails closed: if the kernel offers neither, commands error. `WORK_SANDBOX=off` turns it off on such hosts; the per-task user still applies. |
 | **Clean environment** | No database URL, app secret or provider keys reach the runtime | The runtime gets PATH, HOME, its task token and a few locale settings only. |
 | **Per-task token** | Internal endpoints (models, approvals, search) only answer a running task | Random 256-bit token, valid while the runtime lives. |

@@ -58,7 +58,7 @@ ENV AATMIQ_DSH_CLI=/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
 # The API runs as root inside the container so each Work AI task and each person's IDE can run as
 # its own unprivileged Unix user (no access to documents or anyone else's folders).
 # See docs/06-work-ai.md and docs/07-code.md.
-RUN mkdir -p /data/files /data/work /data/code && chmod 700 /data/files && chmod 711 /data/work /data/code
+RUN mkdir -p /data/files /data/work /data/code && chmod 700 /data/files && chmod 755 /data/work && chmod 711 /data/code
 VOLUME /data
 EXPOSE 4000
 CMD ["node", "dist/server.js"]

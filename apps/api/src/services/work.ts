@@ -136,15 +136,16 @@ export class WorkRunner {
   }
 
   /**
-   * Create the task folder. When isolated, it belongs to the task's user with 0700 and the work
-   * root is 0711, so a task can reach its own folder but can't list or read anyone else's.
+   * Create the task folder. When isolated, it belongs to the task's user with 0700, so a task can't
+   * read anyone else's. The work root is 0755: DSH syncs every parent folder of its home when it
+   * stores an image (read_image), which needs read access; listing it shows only task IDs.
    */
   async prepareFolder(taskId: string, uid: number) {
     const dir = this.taskDir(taskId);
     await mkdir(join(dir, "files"), { recursive: true });
     await mkdir(join(dir, "runtime"), { recursive: true });
     if (!this.isolated) return;
-    await chmod(this.dir, 0o711);
+    await chmod(this.dir, 0o755);
     await this.chownTree(dir, uid);
     await chmod(dir, 0o700);
   }
