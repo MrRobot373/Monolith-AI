@@ -6,12 +6,30 @@
  *  - tools/post-execute: reminds the agent to keep its plan current
  *  - approval/request:  the answerer: the question goes to Aatmiq, where a person approves or rejects it
  *  - web search:        a "aatmiq" provider that searches through Aatmiq (self-hosted SearXNG)
+ *  - browser_* tools:   a browser run by Aatmiq for pages that need JavaScript, clicks or forms
  *
  * Everything talks to Aatmiq's internal API with the per-task token from $AATMIQ_TOKEN.
  * Failures fail closed: an unanswerable approval is "unavailable", which DSH treats as a denial.
  */
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { browserTools } from "./browser.mjs";
 import { classifyRisk } from "./policy.mjs";
 import { cleanArgs, planReminder } from "./tooling.mjs";
+
+/**
+ * DSH's defineTool, from the runtime's own install (this file is loaded from Aatmiq's folder, so
+ * resolve it next to the runtime that's running it). Null if it can't be found: no browser tools.
+ */
+async function loadDefineTool() {
+  try {
+    const req = createRequire(process.argv[1] ?? import.meta.url);
+    return (await import(pathToFileURL(req.resolve("@deepseek-ai/dsh-tools")).href)).defineTool;
+  } catch {
+    return null;
+  }
+}
+const defineTool = await loadDefineTool();
 
 export const name = "aatmiq";
 export const inject = ["tools", "approval", "web"];
@@ -103,7 +121,13 @@ export function apply(ctx, config) {
     }
   });
 
-  // 5. Private web search through Aatmiq.
+  // 5. The browser, run by Aatmiq.
+  if (config.browser && defineTool) {
+    const browser = (body, signal) => call("/browser", { method: "POST", body: JSON.stringify(body), signal });
+    for (const t of browserTools(defineTool, browser)) ctx.tools.register(t);
+  }
+
+  // 6. Private web search through Aatmiq.
   ctx.effect(() => ctx.web.registerSearchProvider({
     id: "aatmiq",
     available: () => !!config.webSearch,

@@ -147,6 +147,20 @@ export function describeCall(name: string, args: any): { verb: string; target?: 
       return { verb: "Searched the web", target: Array.isArray(a.queries) ? a.queries.join(" · ") : a.query };
     case "web_fetch":
       return { verb: "Opened", target: a.url };
+    case "browser_open":
+      return { verb: "Opened in the browser", target: a.url };
+    case "browser_click":
+      return { verb: a.confirm_submit ? "Submitted a form" : "Clicked", target: `element ${a.element}` };
+    case "browser_type":
+      return { verb: a.confirm_submit ? "Typed and submitted" : "Typed", target: String(a.text ?? "").slice(0, 60) };
+    case "browser_select":
+      return { verb: "Chose", target: a.option };
+    case "browser_back":
+      return { verb: "Went back a page" };
+    case "browser_read":
+      return { verb: "Read more of the page" };
+    case "browser_screenshot":
+      return { verb: "Took a screenshot" };
     case "skill":
       return { verb: "Used skill", target: a.name ?? a.skill };
     case "todo_write": {

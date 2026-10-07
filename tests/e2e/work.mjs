@@ -160,6 +160,37 @@ await step("Search", "Private web search through SearXNG", page, async () => {
   await page.getByTestId("task-step").filter({ hasText: "Searched the web" }).waitFor();
   await page.getByTestId("task-answer").locator('a[href="https://intranet.example/travel-policy"]', { hasText: "Travel policy 2026" }).waitFor();
 });
+/* ═════════════ Browser ═════════════ */
+const SIGNUP = "browse: http://localhost:11500/signup";
+await step("Browser", "The organization's private network is off limits by default", page, async () => {
+  await send(page, SIGNUP);
+  await waitStatus(page, "completed");
+  await page.getByTestId("task-step").filter({ hasText: "Opened in the browser" }).first().waitFor();
+  await page.getByTestId("task-answer").filter({ hasText: "private network" }).waitFor();
+});
+let browserTask = "";
+await step("Browser", "Admin allows an internal site; the agent fills in its form, submitting waits for approval", page, async () => {
+  browserTask = page.url();
+  await page.goto(`${APP}/admin/work`);
+  await page.getByTestId("browser-allowed-hosts").fill("localhost");
+  await page.getByTestId("save-work-settings").click();
+  await page.getByText("Work AI settings saved").waitFor();
+  await page.goto(browserTask);
+  await send(page, SIGNUP);
+  await waitStatus(page, "needs_approval");
+  const card = page.getByTestId("approval-card");
+  await card.getByText("Submits a form on a website").waitFor();
+  await shot(page, "browser-approval");
+  await page.getByTestId("approve").click();
+  await waitStatus(page, "completed");
+  await page.getByTestId("task-answer").filter({ hasText: "Welcome, Ada Lovelace!" }).waitFor();
+  await page.getByTestId("task-step").filter({ hasText: "Typed and submitted" }).first().waitFor();
+  await page.getByTestId("task-step").filter({ hasText: "Took a screenshot" }).first().waitFor();
+  await page.getByTestId("files-toggle").click();
+  await page.getByTestId("files").getByText(/screenshot-.*\.png/).first().waitFor();
+  await shot(page, "browser-done");
+});
+
 await step("Tasks", "Start a task with a file; the agent works on it", page, async () => {
   const f = join(tmpdir(), "notes.txt");
   writeFileSync(f, "alpha\nbeta\ngamma\n");

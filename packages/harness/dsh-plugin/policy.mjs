@@ -50,6 +50,14 @@ export function classifyRisk(call, policy) {
     const asks = ask.some((g) => globToRegExp(g).test(mcp[2])) && !never.some((g) => globToRegExp(g).test(mcp[2]));
     return asks ? `Uses the ${mcp[1]} connector (${mcp[2]})` : null;
   }
+  if (name.startsWith("browser_")) {
+    // Reading and looking never ask; under "always" anything that acts on a page does; otherwise
+    // only submitting a form (which the browser holds until the agent confirms it).
+    if (name === "browser_read" || name === "browser_screenshot") return null;
+    if (policy.approvals === "always") return "Every action is reviewed in this organization";
+    if ((name === "browser_click" || name === "browser_type") && call.args?.confirm_submit === true) return "Submits a form on a website";
+    return null;
+  }
   if (policy.approvals === "always") return CHANGING_TOOLS.has(name) ? "Every action is reviewed in this organization" : null;
   if (name === "bash" || name === "pwsh") {
     const cmd = String(call.args?.command ?? "");

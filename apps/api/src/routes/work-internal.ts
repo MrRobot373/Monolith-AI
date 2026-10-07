@@ -16,6 +16,7 @@ import { HttpError } from "../errors";
 import { resolveModel } from "../services/models";
 import { quotaFor } from "../services/quota";
 import { getWorkSettings } from "../services/work";
+import { BrowserError } from "../services/browser";
 
 const BASE = "/api/internal/work";
 /** Statuses worth retrying: the server is busy or briefly broken, not refusing the request. */
@@ -267,6 +268,49 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
       return { sources, ...(answers.length ? { content: answers.join("\n") } : {}), truncated: (json.results?.length ?? 0) > sources.length };
     } catch (e) {
       return reply.status(502).send({ error: `Web search failed: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  });
+
+  /* ───────────── Browser (the agent's browser_* tools) ───────────── */
+
+  const browserSchema = z.discriminatedUnion("action", [
+    z.object({ action: z.literal("open"), url: z.string().trim().min(1).max(4000) }),
+    z.object({ action: z.literal("click"), ref: z.number().int().min(1), confirmSubmit: z.boolean().default(false) }),
+    z.object({ action: z.literal("type"), ref: z.number().int().min(1), text: z.string().max(10_000), submit: z.boolean().default(false), confirmSubmit: z.boolean().default(false) }),
+    z.object({ action: z.literal("select"), ref: z.number().int().min(1), option: z.string().max(500) }),
+    z.object({ action: z.literal("back") }),
+    z.object({ action: z.literal("read"), offset: z.number().int().min(0).default(0) }),
+    z.object({ action: z.literal("screenshot"), fullPage: z.boolean().default(false) }),
+  ]);
+  app.post(`${BASE}/browser`, internal, async (req, reply) => {
+    const t = taskOf(req);
+    const b = parse(browserSchema, req.body);
+    const settings = await getWorkSettings(db);
+    if (!settings.browser) return reply.status(403).send({ error: "The browser is turned off in this organization (Admin → Work AI)." });
+    const br = ctx.browser;
+    br.allowedHosts = settings.browserAllowedHosts;
+    const target = async () => work.browserTarget(t.taskId);
+    try {
+      switch (b.action) {
+        case "open":
+          return await br.open(t.taskId, target, b.url);
+        case "click":
+          return await br.click(t.taskId, target, b.ref, b.confirmSubmit);
+        case "type":
+          return await br.type(t.taskId, target, b.ref, b.text, b.submit, b.confirmSubmit);
+        case "select":
+          return await br.select(t.taskId, target, b.ref, b.option);
+        case "back":
+          return await br.back(t.taskId, target);
+        case "read":
+          return await br.read(t.taskId, target, b.offset);
+        case "screenshot":
+          return await br.screenshot(t.taskId, target, b.fullPage);
+      }
+    } catch (e) {
+      if (!(e instanceof BrowserError)) req.log.warn({ err: (e as Error).message }, "browser: unexpected failure");
+      // The agent reads this and adjusts (a different element, confirm_submit, another page).
+      return reply.status(422).send({ error: e instanceof BrowserError ? e.message : `The browser failed: ${(e as Error).message.split("\n")[0]}` });
     }
   });
 }

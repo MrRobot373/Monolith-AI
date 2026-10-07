@@ -134,7 +134,7 @@ function toolIcon(name: string) {
   if (name === "write" || name === "edit" || name === "str_replace_editor") return FilePen;
   if (name === "read" || name === "read_image") return FileText;
   if (name === "glob" || name === "grep") return Search;
-  if (name === "web_search" || name === "web_fetch") return Globe;
+  if (name === "web_search" || name === "web_fetch" || name.startsWith("browser_")) return Globe;
   if (name === "skill") return Sparkles;
   if (name === "todo_write") return ListChecks;
   if (name.startsWith("subagent")) return Bot;

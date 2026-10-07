@@ -8,6 +8,10 @@ export const DEFAULT_WORK_SETTINGS = {
   idleMinutes: 15,
   /** Built-in library skills turned off for the organization (by name). */
   disabledLibrarySkills: [] as string[],
+  /** The agent may use a browser (open pages, click, fill in forms). */
+  browser: true,
+  /** Internal hosts the browser may open anyway (private addresses are refused otherwise). */
+  browserAllowedHosts: [] as string[],
 };
 export type WorkSettingsValue = typeof DEFAULT_WORK_SETTINGS;
 
@@ -18,6 +22,11 @@ export const workSettingsSchema = z.object({
   maxConcurrentPerUser: z.number().int().min(1).max(20).optional(),
   idleMinutes: z.number().int().min(1).max(240).optional(),
   disabledLibrarySkills: z.array(z.string().max(80)).max(500).optional(),
+  browser: z.boolean().optional(),
+  browserAllowedHosts: z
+    .array(z.string().trim().toLowerCase().regex(/^(\*\.)?[a-z0-9.-]+$|^[0-9a-f:.]+$/, "Use host names like intranet.acme.com or *.acme.internal"))
+    .max(200)
+    .optional(),
 });
 
 export const workTaskCreateSchema = z.object({

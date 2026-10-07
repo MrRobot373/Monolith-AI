@@ -20,6 +20,12 @@ createServer(async (req, res) => {
     ] }));
   }
   if (req.url === "/mcp") return fakeMcp(req, res);
+  // A sign-up page for the browser tool.
+  if (req.url === "/signup" || req.url?.startsWith("/signup?")) {
+    const q = new URL(req.url, "http://x").searchParams.get("name");
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end(q ? `<title>Done</title><h1>Welcome, ${q.replace(/[<>&]/g, "")}!</h1>` : `<title>Sign up</title><h1>Join the newsletter</h1><form action="/signup"><label>Name <input name="name"></label><button>Sign up</button></form>`);
+  }
   if (req.url?.startsWith("/oauth") || req.url?.startsWith("/.well-known/oauth")) return fakeOAuthMcp(req, res);
   if (req.url === "/v1/chat/completions") {
     let body = ""; for await (const c of req) body += c;
@@ -92,6 +98,7 @@ async function agentReply(j, res) {
   const askIdx = msgs.findLastIndex((m) => m.role === "user" && clean(m) && !/^Current runtime context/.test(clean(m)));
   const ask = askIdx >= 0 ? clean(msgs[askIdx]).split("</earlier-conversation>").at(-1).trim() : "";
   const toolsSoFar = msgs.slice(askIdx + 1).filter((m) => m.role === "tool").length;
+  let m0;
   const callTool = (name, args, preface) => {
     const a = JSON.stringify(args);
     if (preface) send({ choices: [{ index: 0, delta: { content: preface } }] });
@@ -111,6 +118,21 @@ async function agentReply(j, res) {
     ];
     if (toolsSoFar < script.length) return script[toolsSoFar]();
     return say("I created **sales.csv** and **report.md**. North leads South by 25 (120 vs 95). Open the Files panel to download the report.");
+  }
+  // "browse: URL" fills in the page's Name field and submits it (the submission needs approval),
+  // then takes a screenshot. Element numbers come from the page view, as a real model would read them.
+  if ((m0 = /^browse: (\S+)/.exec(ask)) && has("browser_open")) {
+    const lastTool = textOf(last.content);
+    const name = Number(/\[(\d+)\] textbox "Name"/.exec(msgs.slice(askIdx).filter((x) => x.role === "tool").map((x) => textOf(x.content)).join("\n"))?.[1] ?? 1);
+    const script = [
+      () => callTool("browser_open", { url: m0[1] }, "Let me open the page."),
+      () => (/textbox "Name"/.test(lastTool) ? callTool("browser_type", { element: name, text: "Ada Lovelace", submit: true }) : say(`I couldn't use the page: ${lastTool.slice(0, 300)}`)),
+      () => callTool("browser_type", { element: name, text: "Ada Lovelace", submit: true, confirm_submit: true }, "That submits the sign-up form; asking first."),
+      () => callTool("browser_screenshot", {}),
+    ];
+    if (toolsSoFar < script.length) return script[toolsSoFar]();
+    const page = msgs.slice(askIdx).filter((x) => x.role === "tool").map((x) => textOf(x.content)).find((t) => t.includes("Welcome")) ?? "";
+    return say(`Signed up. The page says: ${/Welcome[^\n]*/.exec(page)?.[0] ?? "(no confirmation)"}. ${lastTool.trim()}`);
   }
   if (last.role === "tool") {
     const out = textOf(last.content).replace(/\s+/g, " ").trim().slice(0, 300);

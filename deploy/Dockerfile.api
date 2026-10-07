@@ -40,16 +40,17 @@ RUN npm install --no-save --no-audit --no-fund @napi-rs/canvas@1 \
 
 FROM node:22-bookworm-slim
 # Tools the agent uses inside a task folder (the skill library's helper scripts rely on the Python
-# packages). Add more in your own image.
+# packages), and Chromium for the Work AI browser. Add more in your own image.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git jq less procps unzip zip file python3 python3-pip python3-venv openssh-client \
       libnss-wrapper \
+      chromium fonts-liberation fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m pip install --no-cache-dir --break-system-packages \
       pandas openpyxl matplotlib python-docx python-pptx reportlab pypdf lxml pyyaml
 ENV NODE_ENV=production MIGRATIONS_DIR=/app/migrations PORT=4000 STORAGE_DIR=/data/files WORK_DIR=/data/work \
-    CODE_DIR=/data/code AATMIQ_CODE_DIST=/opt/aatmiq-code MPLCONFIGDIR=/tmp/matplotlib
+    CODE_DIR=/data/code AATMIQ_CODE_DIST=/opt/aatmiq-code MPLCONFIGDIR=/tmp/matplotlib BROWSER_PATH=/usr/bin/chromium
 WORKDIR /app
 COPY --from=build /out /app
 COPY --from=dsh /opt/dsh /opt/dsh

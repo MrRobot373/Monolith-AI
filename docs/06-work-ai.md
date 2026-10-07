@@ -14,7 +14,7 @@ beyond that package.
 | Where | What |
 |---|---|
 | **Work AI** (sidebar) | Describe a task, optionally add files and pick a model. Starter prompts help with common jobs. |
-| Task page | The live timeline: your messages, the agent's text as it writes, each step (command, file, search, connector call) with its input and output, approvals, errors. |
+| Task page | The live timeline: your messages, the agent's text as it writes, each step (command, file, search, browser action, connector call) with its input and output, approvals, errors. |
 | Progress panel | The agent's plan with items checked off, status, steps, tokens and timing. |
 | Files panel | The task folder: preview text and images, download anything, add files for the agent. |
 | Approvals | Risky steps stop and wait. Approve or reject inline, from the Work AI home ("Waiting for you"), or from the notification. The sidebar shows a badge while anything waits. |
@@ -38,6 +38,10 @@ Chat (section `work` in usage reports).
   network or install packages, plus connector tools that match the connector's rule.
 - **Web search**: the URL of your SearXNG server, with a test button. Empty turns web search off.
   Searches go only to that server (D27).
+- **Browser** (on by default): the agent can open pages in a real browser, click, type and choose
+  options, for sites that need JavaScript, logins or forms. See *Browser* below. **Internal sites it
+  may open** lists hosts on your private network it may reach anyway (`intranet.acme.com`,
+  `*.wiki.acme.internal`); everything else private is refused.
 - **Let commands use the network**: off by default, which makes network commands ask first.
 - **Tasks per person at once** (others queue) and **how long a finished task stays warm** for instant follow-ups.
 - **Connectors**: apps and MCP servers (streamable HTTP) the agent can use as tools. **Add
@@ -155,6 +159,33 @@ Limits today, to know when deploying:
   token (refreshing it) or the shared headers and forwards the request. OAuth connectors are only
   given to tasks of people who connected them.
 
+### Browser
+
+`browser_open`, `browser_click`, `browser_type`, `browser_select`, `browser_back`, `browser_read`
+and `browser_screenshot`, registered by the Aatmiq DSH plugin when the browser is on. Each call goes
+to `/api/internal/work/browser` with the task token; the browser belongs to the API, never to the
+agent.
+
+- **One headless Chromium per task**, run as the task's own Unix user (through `setpriv`), with its
+  profile in the task's runtime folder (cookies last for the task) and closed when the task stops or
+  after 10 idle minutes. Chromium's own sandbox is off (containers lack user namespaces); the Unix
+  user and the egress proxy are the boundary.
+- **Pages as text**: the page's text with numbered elements (`[4] button "Sign in"`, `[5] textbox
+  "Email" (value: …)`), which the agent uses to click and type. `browser_read` pages through long
+  pages; `browser_screenshot` saves a PNG under `screenshots/` (the agent can look at it with
+  `read_image` when the model sees images). Downloads land in `downloads/`.
+- **Network**: every request goes through an egress proxy in the API that refuses loopback, private,
+  link-local (cloud metadata), CGNAT and reserved addresses, including names that resolve to them
+  (any private answer refuses), unless the host is listed under *Internal sites it may open*. The
+  proxy connects to the address it checked, so DNS rebinding can't swap it. Behind a corporate
+  proxy (`HTTPS_PROXY`) public sites go through it; allowed internal hosts are reached directly.
+  Only `http`/`https` pages open.
+- **Approvals**: reading never asks. A click or Enter that would submit a form is held until the
+  agent repeats it with `confirm_submit: true`, which asks the person under *before risky actions*;
+  under *before every change* every page action asks; *never* asks nothing.
+- The Docker image includes Chromium (about 1 GB more). Elsewhere, set `BROWSER_PATH`; without a
+  browser the setting is greyed out and the tools aren't offered.
+
 Planned next (P2.1): **container mode**, with one container per person or task through a launcher
 (`packages/harness` already separates the launcher), giving network isolation and resource limits
 as in D5.
@@ -215,10 +246,14 @@ Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/appro
 ## Tests
 
 - `packages/harness`: the real DSH runtime against a fake control server (commands, approvals,
-  rejection keeps files, confinement, per-task user, web search).
+  rejection keeps files, confinement, per-task user, web search, browser tools and their approvals).
+- `apps/api/src/browser.test.ts`: real Chromium against a local site (page views, held form
+  submissions, JavaScript pages, long pages, downloads, screenshots, the private-network rules, the
+  corporate proxy, running as the task's user from a deep folder).
 - `apps/api/src/work.test.ts`: the whole flow through the API with the real runtime: metering,
   follow-ups, approvals, SSE, restart from history, skills, MCP connector with approval, schedules,
   isolation, cancel.
-- `tests/e2e/run-work.sh`: 20 browser checks (task timeline, plan, files, approvals, search, uploads,
-  stop and continue, isolation, skills, schedules, connectors, light theme, phone layout).
+- `tests/e2e/run-work.sh`: 27 browser checks (task timeline, plan, files, approvals, search, the
+  agent's browser on an internal site before and after the admin allows it, uploads, stop and
+  continue, isolation, skills, schedules, connectors, light theme, phone layout).
   `API_IMAGE=<tag>` runs the same checks against the API's Docker image.

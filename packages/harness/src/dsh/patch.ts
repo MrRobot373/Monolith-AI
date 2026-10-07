@@ -110,6 +110,7 @@ export function buildPatch(spec: TaskSpec): string {
         approvals: spec.approvals,
         askForNetwork: spec.askForNetwork,
         webSearch: spec.webSearch,
+        browser: !!spec.browser,
         connectors: spec.connectors.map((c) => ({ name: c.name, approveTools: c.approveTools })),
       },
     },

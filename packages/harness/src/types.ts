@@ -33,6 +33,8 @@ export interface TaskSpec {
   /** Ask before commands that use the network (when the sandbox can't block it). */
   askForNetwork: boolean;
   webSearch: boolean;
+  /** The browser_* tools (a headless browser run by Aatmiq). */
+  browser?: boolean;
   skillsDir: string | null;
   connectors: ConnectorSpec[];
   productName: string;

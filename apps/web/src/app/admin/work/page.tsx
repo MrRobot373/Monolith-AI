@@ -7,7 +7,7 @@ import { ConnectorsSection } from "@/components/admin/connectors";
 import { Section } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/field";
+import { Field, Input, Textarea } from "@/components/ui/field";
 import { Card, Switch } from "@/components/ui/misc";
 import { Skeleton } from "@/components/ui/spinner";
 import { StatTile } from "@/components/admin/charts";
@@ -20,10 +20,13 @@ interface WorkSettings {
   allowNetwork: boolean;
   maxConcurrentPerUser: number;
   idleMinutes: number;
+  browser: boolean;
+  browserAllowedHosts: string[];
 }
 interface AdminWork {
   settings: WorkSettings;
   licensed: boolean;
+  browserInstalled: boolean;
   stats: { running: number; queued: number; week: number };
 }
 
@@ -37,6 +40,8 @@ export default function AdminWorkPage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["admin-work"], queryFn: () => get<AdminWork>("/api/admin/work") });
   const [form, setForm] = useState<WorkSettings | null>(null);
+  // What's typed in the hosts box, kept as typed (the form holds the parsed list).
+  const [hostsText, setHostsText] = useState<string | null>(null);
   useEffect(() => {
     if (q.data && !form) setForm(q.data.settings);
   }, [q.data, form]);
@@ -115,6 +120,40 @@ export default function AdminWorkPage() {
               </Button>
             </div>
           </Field>
+        </Card>
+      </Section>
+
+      <Section title="Browser" description="A real browser the agent can use for pages that need clicks, forms or JavaScript. It runs on this server, one per task.">
+        <Card className="divide-y divide-border">
+          <div className="flex items-start gap-4 p-5">
+            <div className="min-w-0 flex-1">
+              <div className="text-[13.5px] text-fg">Let the agent use a browser</div>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-fg-subtle">
+                {d.browserInstalled
+                  ? "It opens pages, clicks and fills in forms. Submitting a form asks the person first (with approvals before risky actions). Screenshots and downloads land in the task's files."
+                  : "Chromium isn't installed on this server (it is in the Aatmiq Docker image; elsewhere set BROWSER_PATH)."}
+              </p>
+            </div>
+            <Switch checked={form.browser && d.browserInstalled} disabled={!d.browserInstalled} onCheckedChange={(v) => setForm({ ...form, browser: v })} label="Allow the browser" />
+          </div>
+          <div className="p-5">
+            <Field
+              label="Internal sites it may open"
+              hint="The browser can't reach your private network (intranet, databases, cloud metadata) unless a host is listed here. One per line; *.example.internal covers its subdomains."
+            >
+              <Textarea
+                rows={3}
+                value={hostsText ?? form.browserAllowedHosts.join("\n")}
+                onChange={(e) => {
+                  setHostsText(e.target.value);
+                  setForm({ ...form, browserAllowedHosts: e.target.value.split(/[\s,]+/).map((h) => h.trim().toLowerCase()).filter(Boolean) });
+                }}
+                placeholder={"intranet.acme.com\n*.wiki.acme.internal"}
+                className="font-mono text-[12.5px]"
+                data-testid="browser-allowed-hosts"
+              />
+            </Field>
+          </div>
         </Card>
       </Section>
 

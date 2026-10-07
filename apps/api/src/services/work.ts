@@ -62,6 +62,9 @@ interface Live {
   lastAnswer: string;
   /** This turn's plan as the agent last wrote it. */
   plan: PlanItem[] | null;
+  /** Where the agent works and as whom (the browser uses the same). */
+  workdir?: string;
+  runUid?: number;
   idleTimer?: NodeJS.Timeout;
 }
 
@@ -311,6 +314,8 @@ export class WorkRunner {
       const runUid = code ? await this.ctx.code.uidFor(task.userId) : task.runUid;
       const workdir = code ? this.ctx.code.workspacePath(task.userId, code.slug) : this.filesDir(taskId);
       const homeDir = join(this.taskDir(taskId), "runtime");
+      l.workdir = workdir;
+      l.runUid = this.isolated ? (runUid ?? undefined) : undefined;
       await mkdir(this.dir, { recursive: true });
       // The coding agent gets the library's engineering, data and app skills; Work AI gets them all.
       const skillsDir = await this.writeSkills(task.userId, join(homeDir, "skills"), settings.disabledLibrarySkills, code ? CODE_LIBRARY : undefined);
@@ -328,6 +333,7 @@ export class WorkRunner {
           approvals: settings.approvals,
           askForNetwork: !settings.allowNetwork,
           webSearch: !!settings.searxngUrl,
+          browser: settings.browser && !!this.ctx.browser?.available,
           skillsDir,
           connectors: await this.connectorSpecs(task.userId, token),
           productName: org?.productName ?? PRODUCT_NAME,
@@ -487,6 +493,7 @@ export class WorkRunner {
     clearTimeout(l.idleTimer);
     l.busy = false;
     await l.runtime?.stop();
+    await this.ctx.browser?.close(taskId);
   }
 
   async cancel(taskId: string) {
@@ -534,6 +541,13 @@ export class WorkRunner {
     const id = this.byToken.get(token);
     const l = id ? this.live.get(id) : undefined;
     return l && !l.cancelled ? { taskId: l.taskId, userId: l.userId, workspaceId: l.workspaceId } : null;
+  }
+
+  /** Where a running task's browser lives: its folder, a private profile, and its Unix user. */
+  browserTarget(taskId: string): { workdir: string; profileDir: string; uid?: number } {
+    const l = this.live.get(taskId);
+    if (!l?.workdir) throw new Error("This task isn't running.");
+    return { workdir: l.workdir, profileDir: join(this.taskDir(taskId), "runtime", "browser"), ...(l.runUid !== undefined ? { uid: l.runUid } : {}) };
   }
 
   reportError(taskId: string, message: string) {

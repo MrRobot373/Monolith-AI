@@ -36,6 +36,7 @@
     "mammoth": "^1.13.0",
     "marked": "^18.0.14",
     "nodemailer": "^7.0.13",
+    "playwright-core": "1.63.0",
     "postgres": "^3.4.7",
     "tesseract.js": "^7.0.0",
     "unpdf": "^1.8.1",

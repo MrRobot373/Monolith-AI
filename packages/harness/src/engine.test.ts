@@ -20,6 +20,7 @@ let controlUrl = "";
 const approvals: { toolName: string; reason: string | null }[] = [];
 let approvalAnswer: "approved" | "rejected" = "rejected";
 const searches: string[] = [];
+const browserCalls: Record<string, unknown>[] = [];
 const seenAuth = new Set<string>();
 const toolMessages: string[] = [];
 
@@ -80,6 +81,14 @@ beforeAll(async () => {
       return json(200, { id: String(++approvalId) });
     }
     if (url.startsWith("/approvals/")) return json(200, { status: approvalAnswer });
+    if (url === "/browser") {
+      const b = JSON.parse(raw) as { action: string; ref?: number; confirmSubmit?: boolean };
+      browserCalls.push(b);
+      // Element 2 is a submit button: held until confirmed, like Aatmiq's browser.
+      if (b.action === "click" && b.ref === 2 && !b.confirmSubmit) return json(422, { error: "[2] submits a form. If that's what the task needs, call browser_click again with confirm_submit: true." });
+      if (b.action === "screenshot") return json(200, { file: "screenshots/shop.png", url: "https://shop.example/", title: "Shop" });
+      return json(200, { url: "https://shop.example/", title: "Shop", text: '[1] textbox "Search"\n[2] button "Order"', truncated: false, downloads: [] });
+    }
     if (url === "/search") {
       searches.push(JSON.parse(raw).query);
       return json(200, { sources: [{ url: "https://intranet.example/policy", title: "Travel policy", snippet: "Economy class for flights under 6 hours." }] });
@@ -137,6 +146,17 @@ describe("risk policy", () => {
     expect(classifyRisk({ name: "bash", args: { command: "curl https://x.test" } }, { ...p, askForNetwork: false })).toBeNull();
     expect(classifyRisk({ name: "write", args: {} }, p)).toBeNull();
   });
+  it("browser: reading never asks; a confirmed form submission does; under always every action does", () => {
+    expect(classifyRisk({ name: "browser_open", args: { url: "https://x.test" } }, p)).toBeNull();
+    expect(classifyRisk({ name: "browser_click", args: { element: 3 } }, p)).toBeNull();
+    expect(classifyRisk({ name: "browser_click", args: { element: 3, confirm_submit: true } }, p)).toBe("Submits a form on a website");
+    expect(classifyRisk({ name: "browser_type", args: { element: 1, text: "x", submit: true, confirm_submit: true } }, p)).toBe("Submits a form on a website");
+    const always = { ...p, approvals: "always" as const };
+    expect(classifyRisk({ name: "browser_open", args: {} }, always)).toContain("Every action");
+    expect(classifyRisk({ name: "browser_read", args: {} }, always)).toBeNull();
+    expect(classifyRisk({ name: "browser_click", args: { confirm_submit: true } }, { ...p, approvals: "never" })).toBeNull();
+  });
+
   it("follows connector rules and the always/never modes", () => {
     expect(classifyRisk({ name: "mcp__github__create_issue", args: {} }, p)).toContain("github");
     expect(classifyRisk({ name: "mcp__github__list_issues", args: {} }, p)).toBeNull();
@@ -318,6 +338,38 @@ describe("DeepSeek Harness engine", () => {
     // Its own answer isn't the task's answer.
     expect(events.filter((e) => e.type === "assistant").some((e) => (e as { text: string }).text.startsWith("Result: from-the-subagent"))).toBe(false);
   }, 90_000);
+
+  it("browses through Aatmiq: page views, a held form submission, approval, screenshot", async () => {
+    approvalAnswer = "approved";
+    approvals.length = 0;
+    const steps = [
+      ["browser_open", { url: "https://shop.example" }],
+      ["browser_type", { element: 1, text: "socks", submit: true }],
+      ["browser_click", { element: 2 }],
+      ["browser_click", { element: 2, confirm_submit: true }],
+      ["browser_screenshot", {}],
+    ];
+    const s = { ...(await spec()), browser: true };
+    const { events } = await runTurn(`script: ${JSON.stringify(steps)}`, s);
+    expect(browserCalls.map((c) => c.action)).toEqual(["open", "type", "click", "click", "screenshot"]);
+    expect(browserCalls[1]).toMatchObject({ ref: 1, text: "socks", submit: true, confirmSubmit: false });
+    const results = events.filter((e) => e.type === "tool_result") as { text: string; isError: boolean }[];
+    expect(results[0]!.text).toContain("Page: Shop");
+    expect(results[0]!.text).toContain('[2] button "Order"');
+    expect(results[2]).toMatchObject({ isError: true });
+    expect(results[2]!.text).toContain("confirm_submit: true");
+    expect(results[4]!.text).toContain("Saved screenshots/shop.png");
+    // Only the confirmed submission asked the person.
+    expect(approvals).toEqual([{ toolName: "browser_click", reason: "Submits a form on a website" }]);
+  }, 60_000);
+
+  it("has no browser tools when the organization turns the browser off", async () => {
+    browserCalls.length = 0;
+    const { events } = await runTurn(`script: ${JSON.stringify([["browser_open", { url: "https://shop.example" }]])}`);
+    expect(browserCalls).toEqual([]);
+    const r = events.find((e) => e.type === "tool_result") as { text: string; isError: boolean };
+    expect(r.isError).toBe(true);
+  }, 60_000);
 
   it("searches the web through Aatmiq", async () => {
     const { events } = await runTurn("search: travel policy flights");

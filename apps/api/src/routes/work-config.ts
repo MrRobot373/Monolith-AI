@@ -238,7 +238,7 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
         week: sql<number>`count(*) filter (where ${workTask.createdAt} > now() - interval '7 days')::int`,
       })
       .from(workTask);
-    return { settings, defaults: DEFAULT_WORK_SETTINGS, licensed: await ctx.license.hasSection("work"), stats: counts };
+    return { settings, defaults: DEFAULT_WORK_SETTINGS, licensed: await ctx.license.hasSection("work"), stats: counts, browserInstalled: ctx.browser.available };
   });
 
   app.put("/api/admin/work", async (req) => {

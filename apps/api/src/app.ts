@@ -2,6 +2,7 @@ import { organization, type DB } from "@aatmiq/db";
 import { PRODUCT_NAME } from "@aatmiq/shared";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
+import { join } from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createAuth } from "./auth";
 import type { Config } from "./config";
@@ -36,6 +37,8 @@ import { accountRoutes } from "./routes/account";
 import { createConnectors } from "./services/connectors";
 import { createMailer } from "./services/mail";
 import { createInProcessJobs, createRedisJobs, type Jobs } from "./services/jobs";
+import { BrowserService, findChromium } from "./services/browser";
+import { startEgressProxy, type EgressProxy } from "./services/egress";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
 import type { AddressInfo } from "node:net";
@@ -75,6 +78,15 @@ export async function buildApp(
     storage,
     license: new LicenseService(db, cfg, opts.fetch),
   } as AppContext;
+  // The Work AI browser reaches the web only through the egress proxy (started on first use).
+  let egress: Promise<EgressProxy> | null = null;
+  const upstreamProxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || null;
+  ctx.browser = new BrowserService({
+    executablePath: findChromium(),
+    egress: () => (egress ??= startEgressProxy({ allowedHosts: () => ctx.browser.allowedHosts, upstream: upstreamProxy, log: (m) => app.log.info(m) })),
+    runtimeDir: join(cfg.workDir ?? ".data/work", ".browser"),
+    log: (msg, err) => app.log.warn(err, msg),
+  });
   const jobLog = (msg: string, err?: unknown) => app.log.warn(err, msg);
   ctx.jobs = opts.jobs
     ? opts.jobs(ctx)
@@ -196,6 +208,8 @@ export async function buildApp(
   app.addHook("onClose", async () => {
     stopScheduler?.();
     await ctx.jobs.close();
+    await ctx.browser.closeAll();
+    if (egress) await (await egress).close();
     await ctx.work.stopAll();
     await ctx.code.stopAll();
     await stopOcr();

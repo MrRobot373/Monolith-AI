@@ -1,9 +1,9 @@
 # Browser end-to-end suite
 
-109 checks that drive the real app in Chromium: setup, chat, projects, message versions,
+113 checks that drive the real app in Chromium: setup, chat, projects, message versions,
 temporary chats, documents (Excel, OCR), export, models, workspaces, invites, roles, quotas
-and token requests, workspace admins, user management, settings, audit, usage, sign-in
-flows and mobile layout.
+and token requests, workspace admins, user management, groups, settings (with the logo), audit,
+usage, sign-in flows and mobile layout.
 
 Run against a **fresh** install (empty database) with `ALLOW_MOCK_PROVIDER=true`:
 
@@ -18,10 +18,12 @@ Each step reports PASS/FAIL; failures save a screenshot to `results/`.
 ## Work AI
 
 `run-work.sh` starts the fake model (which also plays SearXNG and an MCP server) on :11500, a fresh
-API on :4000 and the built web app on :3300, then runs `work.mjs` (20 checks) against the real agent
+API on :4000 and the built web app on :3300, then runs `work.mjs` (27 checks) against the real agent
 runtime: a multi-step task with a plan and files, approvals (reject, approve from the inbox), web
-search, uploads, stop and continue, isolation (own Unix user, no writes outside the folder), skills,
-schedules, connectors, light theme and phone layout.
+search, the agent's browser (an internal sign-up page refused, then allowed by the admin, with the
+form submission approved), uploads, stop and continue, isolation (own Unix user, no writes outside
+the folder), skills, schedules, connectors, light theme and phone layout. Outside the Docker image,
+set `BROWSER_PATH` to a Chromium binary for the browser checks.
 
 ```bash
 pnpm --filter @aatmiq/web build
