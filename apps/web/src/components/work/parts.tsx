@@ -196,7 +196,10 @@ export const WorkComposer = forwardRef<
                 <MenuItem key={m.id} onSelect={() => p.onModelChange!(m)} shortcut={m.id === p.model!.id ? <Check className="size-3.5" /> : null}>
                   <span className="flex flex-col">
                     <span>{m.displayName}</span>
-                    <span className="text-[11.5px] text-fg-subtle">{m.providerName}</span>
+                    <span className="text-[11.5px] text-fg-subtle">
+                      {m.providerName}
+                      {m.groups?.length ? ` · via ${m.groups.map((g) => g.name).join(", ")}` : ""}
+                    </span>
                   </span>
                 </MenuItem>
               ))}

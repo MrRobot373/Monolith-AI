@@ -11,6 +11,7 @@ import { HttpError } from "./errors";
 import { documentRoutes } from "./routes/documents";
 import { createStorage, type Storage } from "./services/storage";
 import { adminOrgRoutes } from "./routes/admin-org";
+import { groupRoutes } from "./routes/groups";
 import { adminSystemRoutes } from "./routes/admin-system";
 import { authRoutes } from "./routes/auth";
 import { chatRoutes, purgeTemporaryChats } from "./routes/chat";
@@ -145,6 +146,7 @@ export async function buildApp(
   await projectRoutes(app, ctx);
   await requestRoutes(app, ctx);
   await adminOrgRoutes(app, ctx);
+  await groupRoutes(app, ctx);
   await adminSystemRoutes(app, ctx);
   await licenseRoutes(app, ctx);
   await workRoutes(app, ctx);

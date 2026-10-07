@@ -18,6 +18,7 @@
 | Admins can require two-step sign-in for everyone who uses a password (Admin → Authentication) | ✅ |
 | Roles: org owner/admin, workspace admin, member | ✅ enforced in the API |
 | Workspaces (teams) with their own members, models and budget | ✅ |
+| Groups: models and a token budget for a set of people across all their workspaces; the group pays for models only it gives ([details](docs/01-foundation.md#61a-groups-built-2026-10-07)) | ✅ |
 | Model providers: Ollama, any OpenAI-compatible server (vLLM, LM Studio…), demo model | ✅ health checks, model discovery, keys encrypted at rest |
 | Model gateway with streaming and token metering | ✅ |
 | Budgets: workspace budget split evenly per member, per-user overrides | ✅ |

@@ -18,8 +18,8 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { audit, parse, type AppContext, type SessionUser } from "../context";
 import { HttpError, notFound } from "../errors";
-import { availableModels } from "../services/models";
-import { getQuotaStatus } from "../services/quota";
+import { availableModels, type AvailableModel } from "../services/models";
+import { quotaFor } from "../services/quota";
 import { titleFrom } from "../services/work";
 import { streamTask } from "./work";
 
@@ -50,9 +50,10 @@ export async function codeInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     if (!t || t.userId !== u.id || !t.codeWorkspaceId) throw notFound("Task not found");
     return t;
   };
-  const requireQuota = async (workspaceId: string, userId: string) => {
-    const q = await getQuotaStatus(db, workspaceId, userId);
-    if (!q.result.allowed) throw new HttpError(402, "You've used your token allowance for this period.", "quota_exceeded");
+  const requireQuota = async (workspaceId: string, userId: string, m: AvailableModel) => {
+    const { status: q } = await quotaFor(db, workspaceId, userId, m);
+    if (!q.result.allowed)
+      throw new HttpError(402, q.scope.kind === "group" ? `You've used your share of the ${q.scope.name} group's tokens for this period.` : "You've used your token allowance for this period.", "quota_exceeded");
   };
 
   app.get<{ Querystring: { folder?: string } }>(`${BASE}/context`, internal, async (req) => {
@@ -61,7 +62,7 @@ export async function codeInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     const rows = await db.select().from(codeWorkspace).where(eq(codeWorkspace.userId, u.id));
     const w = rows.find((r) => ctx.code.workspacePath(u.id, r.slug) === folder);
     if (!w) return { workspace: null, models: [] };
-    const models = await availableModels(db, w.workspaceId, "code");
+    const models = await availableModels(db, w.workspaceId, "code", u.id);
     return { workspace: { id: w.id, name: w.name }, user: { name: u.name }, models: models.map((m) => ({ id: m.id, name: m.displayName, isDefault: m.isDefault })) };
   });
 
@@ -81,10 +82,10 @@ export async function codeInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     const u = await person(req);
     const b = parse(createSchema, req.body);
     const w = await ownWorkspace(u, b.codeWorkspaceId);
-    await requireQuota(w.workspaceId, u.id);
-    const models = await availableModels(db, w.workspaceId, "code");
-    const m = (b.modelId && models.find((x) => x.id === b.modelId)) || models.find((x) => x.isDefault) || models[0];
+    const models = await availableModels(db, w.workspaceId, "code", u.id);
+    const m = (b.modelId && models.find((x) => x.id === b.modelId)) || models.find((x) => x.isDefault) || models.find((x) => !x.groups.length) || models[0];
     if (!m) throw new HttpError(400, "No model is enabled for Code in this workspace. Ask your admin.", "bad_request");
+    await requireQuota(w.workspaceId, u.id, m);
     const [t] = await db
       .insert(workTask)
       .values({ workspaceId: w.workspaceId, userId: u.id, title: titleFrom(b.prompt), modelId: m.id, codeWorkspaceId: w.id })
@@ -114,7 +115,10 @@ export async function codeInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     const u = await person(req);
     const t = await ownTask(u, req.params.id);
     const b = parse(z.object({ prompt: z.string().trim().min(1).max(50_000) }), req.body);
-    await requireQuota(t.workspaceId, u.id);
+    const models = await availableModels(db, t.workspaceId, "code", u.id);
+    const m = models.find((x) => x.id === t.modelId) ?? models.find((x) => x.isDefault) ?? models.find((x) => !x.groups.length) ?? models[0];
+    if (!m) throw new HttpError(400, "No model is enabled for Code in this workspace. Ask your admin.", "bad_request");
+    await requireQuota(t.workspaceId, u.id, m);
     await work.submit(t.id, b.prompt);
     return { ok: true };
   });

@@ -170,7 +170,7 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     const b = parse(scheduleSchema, req.body);
     await requireWorkSection(ctx, u, b.workspaceId);
-    if (b.modelId) await resolveModel(db, box, b.workspaceId, "work", b.modelId);
+    if (b.modelId) await resolveModel(db, box, b.workspaceId, "work", b.modelId, u.id);
     assertReasonable(b.cron, b.timezone);
     const [s] = await db
       .insert(workSchedule)
@@ -183,7 +183,7 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     const s = await loadOwnSchedule(u, req.params.id);
     const b = parse(scheduleSchema.omit({ workspaceId: true }).partial(), req.body);
-    if (b.modelId) await resolveModel(db, box, s.workspaceId, "work", b.modelId);
+    if (b.modelId) await resolveModel(db, box, s.workspaceId, "work", b.modelId, u.id);
     const next = { ...s, ...b };
     assertReasonable(next.cron, next.timezone);
     const [row] = await db

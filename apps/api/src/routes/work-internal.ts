@@ -14,7 +14,7 @@ import { z } from "zod";
 import { parse, type AppContext } from "../context";
 import { HttpError } from "../errors";
 import { resolveModel } from "../services/models";
-import { getQuotaStatus } from "../services/quota";
+import { quotaFor } from "../services/quota";
 import { getWorkSettings } from "../services/work";
 
 const BASE = "/api/internal/work";
@@ -53,17 +53,18 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
       return llmError(reply, status, message);
     };
     if (!(await ctx.license.hasSection("work"))) return refuse(403, "Work AI isn't included in your organization's license.");
-    const quota = await getQuotaStatus(db, t.workspaceId, t.userId);
-    if (!quota.result.allowed) return refuse(402, "You've used your token allowance for this period. Ask your admin for more tokens.");
-
-    const [task] = await db.select({ modelId: workTask.modelId }).from(workTask).where(eq(workTask.id, t.taskId));
+    const [task] = await db.select({ modelId: workTask.modelId, codeWorkspaceId: workTask.codeWorkspaceId }).from(workTask).where(eq(workTask.id, t.taskId));
     let resolved: Awaited<ReturnType<typeof resolveModel>>;
     try {
-      resolved = await resolveModel(db, box, t.workspaceId, "work", task?.modelId);
+      resolved = await resolveModel(db, box, t.workspaceId, task?.codeWorkspaceId ? "code" : "work", task?.modelId, t.userId);
     } catch (e) {
       return refuse(400, e instanceof Error ? e.message : "No model is available.");
     }
     const { model: m, provider } = resolved;
+    // The workspace pays for its own models; a group pays for a model only it gives.
+    const { status: quota, groupId } = await quotaFor(db, t.workspaceId, t.userId, m);
+    if (!quota.result.allowed)
+      return refuse(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period. Ask your admin for more.` : "You've used your token allowance for this period. Ask your admin for more tokens.");
     const body = (req.body ?? {}) as Record<string, unknown> & { messages?: unknown[]; stream?: boolean };
     const inputGuess = estimateTokens(JSON.stringify(body.messages ?? []));
     const started = Date.now();
@@ -73,6 +74,7 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
         workspaceId: t.workspaceId,
         userId: t.userId,
         modelId: m.id,
+        groupId,
         section: "work",
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,

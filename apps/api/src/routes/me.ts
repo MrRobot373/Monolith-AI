@@ -18,7 +18,7 @@ import { getOrg, parse, requireUser, requireWorkspaceCap, type AppContext } from
 import { forbidden } from "../errors";
 import { availableModels } from "../services/models";
 import { logoUrl } from "../services/branding";
-import { getQuotaStatus } from "../services/quota";
+import { getQuotaStatus, quotaFor } from "../services/quota";
 
 export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db } = ctx;
@@ -83,10 +83,13 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
     return { ok: true };
   });
 
-  app.get<{ Params: { id: string } }>("/api/workspaces/:id/quota", async (req) => {
+  /** Your budget in a workspace; with ?modelId=, the budget that pays for that model (a group's for a group-only model). */
+  app.get<{ Params: { id: string }; Querystring: { modelId?: string } }>("/api/workspaces/:id/quota", async (req) => {
     const u = await requireUser(ctx, req);
     await requireWorkspaceCap(ctx, u, req.params.id, "workspace.use");
-    return getQuotaStatus(db, req.params.id, u.id);
+    if (!req.query.modelId) return getQuotaStatus(db, req.params.id, u.id);
+    const models = await availableModels(db, req.params.id, "chat", u.id).then(async (c) => [...c, ...(await availableModels(db, req.params.id, "work", u.id))]);
+    return (await quotaFor(db, req.params.id, u.id, models.find((m) => m.id === req.query.modelId) ?? null)).status;
   });
 
   app.get<{ Params: { id: string }; Querystring: { section?: Section } }>("/api/workspaces/:id/models", async (req) => {
@@ -94,7 +97,7 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
     const m = await requireWorkspaceCap(ctx, u, req.params.id, "workspace.use");
     const section = req.query.section ?? "chat";
     if (m && !m.sections.includes(section) && !isOrgAdmin(u.orgRole)) throw forbidden("This section is not enabled for you.");
-    return availableModels(db, req.params.id, section);
+    return availableModels(db, req.params.id, section, u.id);
   });
 
   app.get("/api/notifications", async (req) => {

@@ -235,7 +235,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
   customer turns on ([09-connectors.md](09-connectors.md)).
 - **Planned features:** desktop IDE (P3), container mode for Work AI (P2.1), a browser tool for the
   agent, project tasks with Work AI (Projects phase C), a separate IDE hostname,
-  groups, a background job worker.
+  a background job worker.
 - **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.

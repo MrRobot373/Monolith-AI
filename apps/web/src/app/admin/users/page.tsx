@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Link2, MailWarning, MoreHorizontal, Search, ShieldCheck, ShieldOff, Smartphone, UserCheck, UserMinus, UserPlus, X } from "lucide-react";
+import { Check, Copy, KeyRound, Link2, MailWarning, MoreHorizontal, Search, ShieldCheck, ShieldOff, Smartphone, UserCheck, UserMinus, UserPlus, UsersRound, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Section, Table, Td } from "@/components/admin/table";
@@ -29,6 +29,7 @@ interface UserRow {
   tokensThisPeriod: number;
   twoFactorEnabled: boolean;
   emailVerified: boolean;
+  groups: { id: string; name: string }[];
   workspaces: { workspaceId: string; name: string; role: "admin" | "member" }[];
 }
 interface InviteRow {
@@ -134,6 +135,12 @@ export default function UsersPage() {
                     </span>
                   ))}
                   {u.workspaces.length === 0 && <span className="text-xs text-fg-subtle">None</span>}
+                  {u.groups?.map((g) => (
+                    <span key={g.id} title="Group" className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[11.5px] text-fg-muted" data-testid="user-group">
+                      <UsersRound className="size-3" />
+                      {g.name}
+                    </span>
+                  ))}
                 </div>
               </Td>
               <Td className="tabular-nums text-fg-muted">{formatTokens(u.tokensThisPeriod)}</Td>

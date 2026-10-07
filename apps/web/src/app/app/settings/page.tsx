@@ -148,6 +148,7 @@ function Usage() {
       {me.workspaces.map((w) => (
         <WorkspaceUsage key={w.id} id={w.id} name={w.name} onRequest={() => setRequestFor(w.id)} />
       ))}
+      <GroupUsage />
       <div className="pt-4">
         <h3 className="mb-3 text-sm font-medium">Your requests</h3>
         {requests.data?.length ? (
@@ -175,6 +176,43 @@ function Usage() {
       </div>
       {requestFor && <RequestTokensDialog open onOpenChange={(o) => !o && setRequestFor(null)} workspaceId={requestFor} />}
     </div>
+  );
+}
+
+/** Your share of each group's budget (groups pay for the models only they give). */
+function GroupUsage() {
+  const q = useQuery({ queryKey: ["my-groups"], queryFn: () => get<{ id: string; name: string; description: string | null; models: { id: string; displayName: string }[]; quota: QuotaStatus }[]>("/api/me/groups") });
+  if (!q.data?.length) return null;
+  return (
+    <>
+      {q.data.map((g) => {
+        const d = g.quota;
+        const limit = d.user.limit;
+        return (
+          <Card key={g.id} className="p-4" data-testid="group-usage">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-medium">
+                  {g.name} <span className="text-xs font-normal text-fg-subtle">group</span>
+                </div>
+                <div className="truncate text-xs text-fg-subtle">
+                  {g.models.length ? `Pays for ${g.models.map((m) => m.displayName).join(", ")} in any of your workspaces` : "No models of its own"} · Resets{" "}
+                  {new Date(d.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex items-baseline justify-between text-sm">
+              <span>
+                <span className="font-mono text-base font-medium">{formatTokens(d.user.used)}</span>
+                <span className="text-fg-muted"> used</span>
+              </span>
+              <span className="text-fg-muted">{limit === null ? "No limit" : `of ${formatTokens(limit)}`}</span>
+            </div>
+            <Meter className="mt-2" value={limit === null ? 0 : d.user.used / Math.max(1, limit)} />
+          </Card>
+        );
+      })}
+    </>
   );
 }
 

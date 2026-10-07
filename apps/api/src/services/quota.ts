@@ -2,14 +2,18 @@ import {
   and,
   eq,
   gte,
+  isNull,
   organization,
   sql,
   tokenRequest,
   usageEvent,
+  userGroup,
+  userGroupMember,
   workspace,
   workspaceMember,
   type DB,
 } from "@aatmiq/db";
+import type { AvailableModel } from "./models";
 import {
   defaultUserQuota,
   evaluateQuota,
@@ -20,6 +24,8 @@ import {
 } from "@aatmiq/shared";
 
 export interface QuotaStatus {
+  /** Whose budget this is: the workspace's, or a group's (for a model only that group gives). */
+  scope: { kind: "workspace" } | { kind: "group"; id: string; name: string };
   period: BudgetPeriod;
   periodStart: string;
   resetsAt: string;
@@ -56,12 +62,13 @@ export async function getQuotaStatus(
     db
       .select({ n: sql<number>`coalesce(sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}), 0)::bigint` })
       .from(usageEvent)
-      .where(and(eq(usageEvent.workspaceId, workspaceId), gte(usageEvent.createdAt, start))),
+      // Calls a group paid for don't count against the workspace.
+      .where(and(eq(usageEvent.workspaceId, workspaceId), isNull(usageEvent.groupId), gte(usageEvent.createdAt, start))),
     db
       .select({ n: sql<number>`coalesce(sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}), 0)::bigint` })
       .from(usageEvent)
       .where(
-        and(eq(usageEvent.workspaceId, workspaceId), eq(usageEvent.userId, userId), gte(usageEvent.createdAt, start)),
+        and(eq(usageEvent.workspaceId, workspaceId), eq(usageEvent.userId, userId), isNull(usageEvent.groupId), gte(usageEvent.createdAt, start)),
       ),
     db
       .select({ userId: tokenRequest.userId, amount: tokenRequest.decidedAmount, duration: tokenRequest.duration })
@@ -95,6 +102,7 @@ export async function getQuotaStatus(
     workspaceUsed: Number(wsUsed?.n ?? 0),
   };
   return {
+    scope: { kind: "workspace" },
     period,
     periodStart: start.toISOString(),
     resetsAt: periodEnd(period, now).toISOString(),
@@ -102,4 +110,46 @@ export async function getQuotaStatus(
     workspace: { limit: wsLimit, bonus: wsBonus, used: input.workspaceUsed },
     result: evaluateQuota(input),
   };
+}
+
+/**
+ * A person's position in a group's budget, across all workspaces. Same rules as a workspace: the
+ * group budget split evenly among members unless the group sets a per-person amount. `workspace`
+ * holds the group's totals so the shape matches; token requests are workspace-only.
+ */
+export async function getGroupQuotaStatus(db: DB, groupId: string, userId: string, now = new Date()): Promise<QuotaStatus> {
+  const period = await getOrgPeriod(db);
+  const start = periodStart(period, now);
+  const sum = sql<number>`coalesce(sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}), 0)::bigint`;
+  const [[g], [members], [poolUsed], [userUsed]] = await Promise.all([
+    db.select().from(userGroup).where(eq(userGroup.id, groupId)),
+    db.select({ n: sql<number>`count(*)::int` }).from(userGroupMember).where(eq(userGroupMember.groupId, groupId)),
+    db.select({ n: sum }).from(usageEvent).where(and(eq(usageEvent.groupId, groupId), gte(usageEvent.createdAt, start))),
+    db.select({ n: sum }).from(usageEvent).where(and(eq(usageEvent.groupId, groupId), eq(usageEvent.userId, userId), gte(usageEvent.createdAt, start))),
+  ]);
+  const poolLimit = g?.tokenLimit ?? null;
+  const userLimit = g?.memberTokenLimit ?? defaultUserQuota(poolLimit, members?.n ?? 1);
+  const input = { userLimit, userBonus: 0, userUsed: Number(userUsed?.n ?? 0), workspaceLimit: poolLimit, workspaceBonus: 0, workspaceUsed: Number(poolUsed?.n ?? 0) };
+  const result = evaluateQuota(input);
+  return {
+    scope: { kind: "group", id: groupId, name: g?.name ?? "" },
+    period,
+    periodStart: start.toISOString(),
+    resetsAt: periodEnd(period, now).toISOString(),
+    user: { limit: userLimit, bonus: 0, used: input.userUsed, isOverride: g?.memberTokenLimit != null },
+    workspace: { limit: poolLimit, bonus: 0, used: input.workspaceUsed },
+    result: { ...result, blockedBy: result.blockedBy === "workspace" ? "group" : result.blockedBy },
+  };
+}
+
+/**
+ * Who pays for a call to this model, and whether there's budget left: the workspace for its own
+ * models; for a model only groups give, the granting group with the most left (unlimited first).
+ */
+export async function quotaFor(db: DB, workspaceId: string, userId: string, m: Pick<AvailableModel, "groups"> | null): Promise<{ status: QuotaStatus; groupId: string | null }> {
+  if (!m?.groups.length) return { status: await getQuotaStatus(db, workspaceId, userId), groupId: null };
+  const all = await Promise.all(m.groups.map((g) => getGroupQuotaStatus(db, g.id, userId)));
+  const rank = (q: QuotaStatus) => (!q.result.allowed ? -1 : q.result.remaining === null ? Infinity : q.result.remaining);
+  const best = all.reduce((a, b) => (rank(b) > rank(a) ? b : a));
+  return { status: best, groupId: best.scope.kind === "group" ? best.scope.id : null };
 }

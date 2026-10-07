@@ -130,9 +130,13 @@ export function ChatView({
     queryFn: () => get<AvailableModel[]>(`/api/workspaces/${workspaceId}/models?section=chat`),
     enabled: !!workspaceId,
   });
+  const model = models.data?.find((m) => m.id === modelId) ?? models.data?.find((m) => m.isDefault) ?? models.data?.[0];
+  // A model only a group gives is paid from that group's budget, so show that budget for it.
+  const groupModel = model?.groups?.length ? model.id : null;
+  const quotaKey = ["quota", workspaceId, groupModel] as const;
   const quota = useQuery({
-    queryKey: ["quota", workspaceId],
-    queryFn: () => get<QuotaStatus>(`/api/workspaces/${workspaceId}/quota`),
+    queryKey: quotaKey,
+    queryFn: () => get<QuotaStatus>(`/api/workspaces/${workspaceId}/quota${groupModel ? `?modelId=${encodeURIComponent(groupModel)}` : ""}`),
     enabled: !!workspaceId,
   });
   const existing = useQuery({
@@ -224,7 +228,6 @@ export function ChatView({
     if (quota.data) setQuotaBlocked(!quota.data.result.allowed);
   }, [quota.data]);
 
-  const model = models.data?.find((m) => m.id === modelId) ?? models.data?.find((m) => m.isDefault) ?? models.data?.[0];
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -329,7 +332,7 @@ export function ChatView({
             patchAsst((m) => ({ ...m, streaming: false }));
             renameNode(asstId, ev.data.messageId);
             asstId = ev.data.messageId;
-            if (ev.data.quota) qc.setQueryData(["quota", workspaceId], ev.data.quota);
+            if (ev.data.quota) qc.setQueryData(quotaKey, ev.data.quota);
           } else if (ev.event === "error") {
             patchAsst((m) => ({ ...m, streaming: false, error: ev.data.message }));
             if (ev.data.messageId) {
@@ -346,7 +349,7 @@ export function ChatView({
           setLeafId(prevLeaf);
           if (!opts.regenerateOf) setInput(content);
           setQuotaBlocked(true);
-          if (e.details) qc.setQueryData(["quota", workspaceId], e.details);
+          if (e.details) qc.setQueryData(quotaKey, e.details);
         } else {
           patchAsst((m) => ({ ...m, streaming: false, error: (e as Error).message }));
         }
@@ -930,6 +933,22 @@ function MessageBlock({
 }
 
 function QuotaBanner({ quota, onRequest }: { quota: QuotaStatus; onRequest: () => void }) {
+  const resets = new Date(quota.resetsAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (quota.scope?.kind === "group") {
+    const who = quota.result.blockedBy === "group" ? `The ${quota.scope.name} group has` : "You've";
+    const what = quota.result.blockedBy === "group" ? "its" : `your share of the ${quota.scope.name} group's`;
+    return (
+      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3" data-testid="group-quota-banner">
+        <TriangleAlert className="size-4 shrink-0 text-warning" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] text-fg">
+            {who} used {what} tokens for this {quota.period}
+          </div>
+          <div className="text-xs text-fg-subtle">Resets {resets}. Pick another model, or ask your admin to raise the group&apos;s budget.</div>
+        </div>
+      </motion.div>
+    );
+  }
   const who = quota.result.blockedBy === "workspace" ? "This workspace has" : "You've";
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
@@ -952,7 +971,13 @@ function FooterHint({ quota, blocked, orgName, onRequest }: { quota?: QuotaStatu
   return (
     <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11.5px] text-fg-subtle">
       <span className="whitespace-nowrap">Private to {orgName || "your organization"}. AI can make mistakes.</span>
-      {quota && f !== null && f >= 0.5 && !blocked && (
+      {quota && f !== null && f >= 0.5 && !blocked && quota.scope?.kind === "group" && (
+        <span className="inline-flex items-center gap-2 whitespace-nowrap">
+          <Meter value={f} className="w-12" />
+          {Math.round(f * 100)}% of your {PERIOD_ADJ[quota.period]} share of {quota.scope.name}
+        </span>
+      )}
+      {quota && f !== null && f >= 0.5 && !blocked && quota.scope?.kind !== "group" && (
         <button onClick={onRequest} className="inline-flex items-center gap-2 whitespace-nowrap transition-colors hover:text-fg">
           <Meter value={f} className="w-12" />
           {Math.round(f * 100)}% of your {PERIOD_ADJ[quota.period]} allowance

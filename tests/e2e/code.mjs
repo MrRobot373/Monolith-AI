@@ -154,6 +154,8 @@ await step("Panel", "Steps open their file in the editor", async () => {
   await step.locator("summary").hover();
   await step.locator("[data-open]").click();
   await ide().locator(".tab", { hasText: "notes.md" }).waitFor();
+  // Let the editor finish reading the file; leaving mid-read logs a "Canceled" error.
+  await ide().locator(".view-lines", { hasText: "Billing notes" }).waitFor();
 });
 
 /* ═════════════ Git ═════════════ */

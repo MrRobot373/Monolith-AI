@@ -170,6 +170,22 @@ Org pool (optional, e.g. 500M tokens/month from license or admin)
 - A request is allowed only if **all** levels have room. The most restrictive level blocks it.
 - Soft alerts at **80%** and **95%** go to the user, and at the workspace level to its admins.
 
+### 6.1a Groups (built 2026-10-07)
+Admin → Groups. A group is a set of people with **models** and a **token budget** that apply in
+every workspace they belong to (a workspace grants models and a budget to *its* members only).
+- Members see the group's models in each workspace's model picker, marked "via <group>".
+- **Who pays:** a call to a model the workspace offers is paid by the workspace, as before, even if
+  a group offers it too. A call to a model only groups offer is paid by the granting group with the
+  most left; the usage row records the group (`usage_event.group_id`) and the workspace budget
+  leaves it out.
+- **Group budget:** tokens per period for the whole group (or no limit), split evenly among members
+  unless the group sets an amount per person. When a share runs out, the group's models stop for
+  that person (the workspace's models keep working); token requests stay workspace-only, so the
+  admin raises the group's budget instead.
+- People see each group's share in Settings → Usage; admins see usage per group and person, and
+  the Users page lists each person's groups. Deleting a group takes its models away; its past usage
+  still doesn't count against any workspace.
+
 ### 6.2 When a user hits their limit
 1. The composer is replaced by a calm banner: *"You've used your monthly token allowance."* with a **Request more** button. A running agent task **pauses** instead of failing.
 2. The request form has presets (+1M, +5M, custom), a duration (just this period / permanently), and a reason (optional text). It can show the task that is waiting.

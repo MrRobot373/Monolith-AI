@@ -40,7 +40,7 @@ export interface QuotaInput {
   workspaceUsed: number;
 }
 
-export type QuotaBlocker = "user" | "workspace" | null;
+export type QuotaBlocker = "user" | "workspace" | "group" | null;
 
 export interface QuotaResult {
   allowed: boolean;

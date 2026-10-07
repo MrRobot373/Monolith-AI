@@ -925,6 +925,51 @@ await step("Users", "Reactivate restores access", owner, async () => {
   await dev.waitForURL("**/app/chat");
 });
 
+/* ═════════════ K2. Groups ═════════════ */
+await step("Groups", "Create a group with a model no workspace offers and a member", owner, async () => {
+  // gemma3:12b was switched off above; groups only offer enabled models.
+  await owner.goto(`${BASE}/admin/models`);
+  const row = owner.locator("tbody tr", { hasText: "gemma3:12b" });
+  await row.locator('button[role="switch"]').click();
+  await wait(700);
+  await owner.goto(`${BASE}/admin/groups`);
+  await owner.getByText("No groups yet").waitFor();
+  await owner.getByTestId("new-group").click();
+  await owner.getByTestId("group-name").fill("Engineering");
+  await owner.getByTestId("group-budget").fill("500000");
+  await owner.getByTestId("group-model-Gemma3 12B").check();
+  await owner.getByTestId("group-member-search").fill("dev");
+  await owner.getByTestId("group-member-dev@acme.test").check();
+  await owner.getByTestId("save-group").click();
+  await toast(owner, "Created Engineering");
+  const card = owner.getByTestId("group-Engineering");
+  await card.getByText("Gemma3 12B").waitFor();
+  await card.getByText("1 person").waitFor();
+  await owner.screenshot({ path: `${OUT}admin-groups.png` });
+});
+await step("Groups", "The member picks the group's model in chat; the group pays", dev, async () => {
+  await dev.goto(`${BASE}/app/chat`);
+  await dev.locator("form button", { hasText: "Qwen3 8B" }).click();
+  const item = dev.getByRole("menuitem", { name: /Gemma3 12B/ });
+  await item.getByText("via Engineering").waitFor();
+  await item.click();
+  await send(dev, "Which model are you?");
+  await dev.locator(".prose-chat", { hasText: "gemma3:12b" }).waitFor();
+  await dev.goto(`${BASE}/app/settings#usage`);
+  const g = dev.getByTestId("group-usage");
+  await g.getByText("Engineering").waitFor();
+  await g.getByText("Pays for Gemma3 12B").waitFor();
+  expect(!(await g.innerText()).match(/^0 used/m), "no usage recorded for the group");
+  await dev.screenshot({ path: `${OUT}settings-group-usage.png` });
+});
+await step("Groups", "Admin sees the group's usage and the group on the Users page", owner, async () => {
+  await owner.goto(`${BASE}/admin/groups`);
+  const used = await owner.getByTestId("group-Engineering").getByText(/used this period/).innerText();
+  expect(!used.startsWith("0 "), `group usage: ${used}`);
+  await owner.goto(`${BASE}/admin/users`);
+  await owner.locator("tbody tr", { hasText: "dev@acme.test" }).getByTestId("user-group").filter({ hasText: "Engineering" }).waitFor();
+});
+
 /* ═════════════ L. Org settings ═════════════ */
 await step("Settings", "Branding: product name, accent and sign-in message", owner, async () => {
   await owner.goto(`${BASE}/admin/settings`);

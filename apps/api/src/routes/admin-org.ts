@@ -1,4 +1,6 @@
 import {
+  userGroup,
+  userGroupMember,
   and,
   asc,
   desc,
@@ -84,10 +86,16 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
       .from(workspaceMember)
       .innerJoin(workspace, eq(workspace.id, workspaceMember.workspaceId))
       .where(isNull(workspace.archivedAt));
+    const groups = await db
+      .select({ userId: userGroupMember.userId, id: userGroup.id, name: userGroup.name })
+      .from(userGroupMember)
+      .innerJoin(userGroup, eq(userGroup.id, userGroupMember.groupId))
+      .orderBy(asc(userGroup.name));
     return rows.map((r) => ({
       ...r,
       tokensThisPeriod: Number(r.tokensThisPeriod),
       workspaces: memberships.filter((m) => m.userId === r.id).map(({ userId: _u, ...m }) => m),
+      groups: groups.filter((g) => g.userId === r.id).map(({ userId: _u, ...g }) => g),
     }));
   });
 
@@ -233,7 +241,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         createdAt: workspace.createdAt,
         memberCount: sql<number>`(select count(*) from ${workspaceMember} where ${workspaceMember.workspaceId} = ${OUTER_WORKSPACE_ID})::int`,
         modelCount: sql<number>`(select count(*) from ${workspaceModel} where ${workspaceModel.workspaceId} = ${OUTER_WORKSPACE_ID})::int`,
-        used: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.workspaceId} = ${OUTER_WORKSPACE_ID} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
+        used: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.workspaceId} = ${OUTER_WORKSPACE_ID} and ${usageEvent.groupId} is null and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
         pendingRequests: sql<number>`(select count(*) from ${tokenRequest} where ${tokenRequest.workspaceId} = ${OUTER_WORKSPACE_ID} and ${tokenRequest.status} = 'pending')::int`,
       })
       .from(workspace)
@@ -297,7 +305,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         role: workspaceMember.role,
         sections: workspaceMember.sections,
         tokenLimit: workspaceMember.tokenLimit,
-        used: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.userId} = ${user.id} and ${usageEvent.workspaceId} = ${req.params.id} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
+        used: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.userId} = ${user.id} and ${usageEvent.workspaceId} = ${req.params.id} and ${usageEvent.groupId} is null and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
       })
       .from(workspaceMember)
       .innerJoin(user, eq(user.id, workspaceMember.userId))

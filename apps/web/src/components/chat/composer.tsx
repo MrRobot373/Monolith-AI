@@ -267,6 +267,7 @@ function ModelPicker({ models, value, onChange }: { models?: AvailableModel[]; v
               {m.providerName}
               {m.contextLength ? ` · ${formatTokens(m.contextLength)} context` : ""}
               {m.isDefault ? " · default" : ""}
+              {m.groups?.length ? ` · via ${m.groups.map((g) => g.name).join(", ")}` : ""}
             </span>
           </MenuItem>
         ))}

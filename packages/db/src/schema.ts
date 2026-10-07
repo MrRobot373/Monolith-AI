@@ -271,6 +271,52 @@ export const workspaceModel = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.modelId] })],
 );
 
+/* ───────────── Groups (across workspaces) ───────────── */
+
+/**
+ * A group gives its members models and a token budget in every workspace they belong to. Calls to
+ * a model the workspace already offers are paid by the workspace; calls to a model only a group
+ * gives are paid from that group's budget (usage_event.group_id).
+ */
+export const userGroup = pgTable("user_group", {
+  id: id(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  /** Tokens per budget period for the whole group; null = no limit. */
+  tokenLimit: bigint("token_limit", { mode: "number" }),
+  /** Tokens per person per period; null = the group budget split evenly among members. */
+  memberTokenLimit: bigint("member_token_limit", { mode: "number" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const userGroupMember = pgTable(
+  "user_group_member",
+  {
+    groupId: text("group_id")
+      .notNull()
+      .references(() => userGroup.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("ugm_user_idx").on(t.userId)],
+);
+
+export const userGroupModel = pgTable(
+  "user_group_model",
+  {
+    groupId: text("group_id")
+      .notNull()
+      .references(() => userGroup.id, { onDelete: "cascade" }),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => model.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.modelId] })],
+);
+
 /* ───────────── Usage, budgets, requests ───────────── */
 
 export const usageEvent = pgTable(
@@ -280,6 +326,11 @@ export const usageEvent = pgTable(
     workspaceId: text("workspace_id").references(() => workspace.id, { onDelete: "set null" }),
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
     modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
+    /**
+     * Set when a group paid for the call (a model only the group gives); the workspace's budget is
+     * untouched. No foreign key: after a group is deleted its past usage still isn't the workspace's.
+     */
+    groupId: text("group_id"),
     section: sectionEnum("section").notNull(),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
@@ -291,6 +342,7 @@ export const usageEvent = pgTable(
   (t) => [
     index("usage_ws_time_idx").on(t.workspaceId, t.createdAt),
     index("usage_user_time_idx").on(t.userId, t.createdAt),
+    index("usage_group_time_idx").on(t.groupId, t.createdAt),
   ],
 );
 

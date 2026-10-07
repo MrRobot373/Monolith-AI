@@ -13,7 +13,7 @@ import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type S
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
 import { resolveModel } from "../services/models";
 import { getProjectAccess } from "../services/projects";
-import { getQuotaStatus } from "../services/quota";
+import { quotaFor } from "../services/quota";
 import { getWorkSettings, titleFrom, type WorkStreamEvent } from "../services/work";
 
 const MAX_FILES = 1000;
@@ -41,9 +41,13 @@ async function loadOwnTask(ctx: AppContext, u: SessionUser, id: string) {
   return t;
 }
 
-async function requireQuota(ctx: AppContext, workspaceId: string, userId: string) {
-  const quota = await getQuotaStatus(ctx.db, workspaceId, userId);
-  if (!quota.result.allowed) throw new HttpError(402, "You've used your token allowance for this period.", "quota_exceeded", quota);
+/** Budget check for the model a task will use (the workspace's, or the group's that gives it). */
+async function requireQuota(ctx: AppContext, workspaceId: string, userId: string, modelId: string | null, section: "work" | "code" = "work") {
+  const { model: m } = await resolveModel(ctx.db, ctx.box, workspaceId, section, modelId, userId);
+  const { status: quota } = await quotaFor(ctx.db, workspaceId, userId, m);
+  if (!quota.result.allowed)
+    throw new HttpError(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period.` : "You've used your token allowance for this period.", "quota_exceeded", quota);
+  return m;
 }
 
 /** Resolve a path inside the task folder; refuses anything that escapes it (.., symlinks). */
@@ -122,8 +126,7 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     const b = parse(workTaskCreateSchema, req.body);
     await requireWorkSection(ctx, u, b.workspaceId);
-    await requireQuota(ctx, b.workspaceId, u.id);
-    const { model: m } = await resolveModel(db, box, b.workspaceId, "work", b.modelId);
+    const m = await requireQuota(ctx, b.workspaceId, u.id, b.modelId ?? null);
     if (b.projectId) {
       const p = await getProjectAccess(ctx, u, b.projectId);
       if (p.project.workspaceId !== b.workspaceId) throw badRequest("That project is in another workspace.");
@@ -161,7 +164,7 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     const t = await loadOwnTask(ctx, u, req.params.id);
     await requireWorkSection(ctx, u, t.workspaceId);
     const b = parse(workMessageSchema, req.body);
-    await requireQuota(ctx, t.workspaceId, u.id);
+    await requireQuota(ctx, t.workspaceId, u.id, t.modelId, t.codeWorkspaceId ? "code" : "work");
     await work.submit(t.id, b.prompt);
     return { ok: true };
   });

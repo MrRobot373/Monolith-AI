@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, ShieldCheck, Users, Workflow } from "lucide-react";
+import { ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, ShieldCheck, Users, UsersRound, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -20,6 +20,7 @@ const GROUPS = [
     items: [
       { href: "/admin", label: "Overview", icon: LayoutDashboard, org: true, exact: true },
       { href: "/admin/users", label: "Users", icon: Users, org: true },
+      { href: "/admin/groups", label: "Groups", icon: UsersRound, org: true },
       { href: "/admin/workspaces", label: "Workspaces", icon: Layers },
       { href: "/admin/models", label: "Models", icon: Cpu, org: true },
     ],
@@ -105,6 +106,7 @@ function AdminNav() {
 const TITLES: Record<string, string> = {
   "": "Overview",
   users: "Users",
+  groups: "Groups",
   workspaces: "Workspaces",
   models: "Models",
   requests: "Token requests",

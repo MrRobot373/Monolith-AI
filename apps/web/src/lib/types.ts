@@ -39,6 +39,8 @@ export interface PublicStatus {
 }
 
 export interface QuotaStatus {
+  /** Whose budget: the workspace's, or a group's (for a model only that group gives). */
+  scope: { kind: "workspace" } | { kind: "group"; id: string; name: string };
   period: "day" | "week" | "month";
   periodStart: string;
   resetsAt: string;
@@ -55,6 +57,8 @@ export interface AvailableModel {
   providerType: string;
   contextLength: number | null;
   isDefault: boolean;
+  /** Groups that give this model when the workspace doesn't; their budget pays for it. */
+  groups: { id: string; name: string }[];
 }
 
 export interface ChatSummary {

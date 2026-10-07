@@ -31,7 +31,7 @@ export async function runSchedule(ctx: AppContext, s: typeof workSchedule.$infer
   const m = await getMembership(db, s.workspaceId, s.userId);
   if (!(await ctx.license.hasSection("work"))) return null;
   // The person may have left the workspace (org admins aren't members but may use it).
-  const models = await availableModels(db, s.workspaceId, "work");
+  const models = await availableModels(db, s.workspaceId, "work", s.userId);
   const model = models.find((x) => x.id === s.modelId) ?? models.find((x) => x.isDefault) ?? models[0];
   const [t] = await db
     .insert(workTask)

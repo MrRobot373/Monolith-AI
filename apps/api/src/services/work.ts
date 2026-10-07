@@ -306,7 +306,7 @@ export class WorkRunner {
     try {
       // In Aatmiq Code the agent works in the person's own workspace, as the person's own user.
       const [code] = task.codeWorkspaceId ? await db.select().from(codeWorkspace).where(eq(codeWorkspace.id, task.codeWorkspaceId)) : [];
-      const { model: m } = await resolveModel(db, box, task.workspaceId, code ? "code" : "work", task.modelId);
+      const { model: m } = await resolveModel(db, box, task.workspaceId, code ? "code" : "work", task.modelId, task.userId);
       if (task.modelId !== m.id) await db.update(workTask).set({ modelId: m.id }).where(eq(workTask.id, taskId));
       const runUid = code ? await this.ctx.code.uidFor(task.userId) : task.runUid;
       const workdir = code ? this.ctx.code.workspacePath(task.userId, code.slug) : this.filesDir(taskId);

@@ -8,7 +8,7 @@ import { accessibleDocs, buildContext, recallProjectChats, retrieve } from "../s
 import { chatToDocx, chatToMarkdown, fileNameFor, type ExportMessage } from "../services/export";
 import { getProjectAccess } from "../services/projects";
 import { resolveModel } from "../services/models";
-import { getQuotaStatus } from "../services/quota";
+import { quotaFor } from "../services/quota";
 
 const MAX_HISTORY = 40;
 
@@ -231,12 +231,12 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     await requireChatSection(ctx, u, c.workspaceId);
     const body = parse(sendMessageSchema, req.body);
 
-    const quota = await getQuotaStatus(db, c.workspaceId, u.id);
+    const { model: m, provider } = await resolveModel(db, box, c.workspaceId, "chat", body.modelId ?? c.modelId, u.id);
+    // The workspace pays for its own models; a group pays for a model only it gives.
+    const { status: quota, groupId } = await quotaFor(db, c.workspaceId, u.id, m);
     if (!quota.result.allowed) {
-      throw new HttpError(402, "You've used your token allowance for this period.", "quota_exceeded", quota);
+      throw new HttpError(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period.` : "You've used your token allowance for this period.", "quota_exceeded", quota);
     }
-
-    const { model: m, provider } = await resolveModel(db, box, c.workspaceId, "chat", body.modelId ?? c.modelId);
 
     // Where the new messages go. Default: after the branch being shown. An earlier parent edits and branches.
     const inChat = async (id: string) =>
@@ -414,6 +414,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       workspaceId: c.workspaceId,
       userId: u.id,
       modelId: m.id,
+      groupId,
       section: "chat",
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -424,7 +425,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
 
     if (!res.writableEnded && !res.destroyed) {
       if (error) send("error", { message: error, messageId: assistant!.id });
-      else send("done", { messageId: assistant!.id, usage, quota: await getQuotaStatus(db, c.workspaceId, u.id) });
+      else send("done", { messageId: assistant!.id, usage, quota: (await quotaFor(db, c.workspaceId, u.id, m)).status });
       res.end();
     }
   });
