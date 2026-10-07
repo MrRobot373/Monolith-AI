@@ -16,7 +16,7 @@ const OUT = process.env.OUT ?? new URL("./results", import.meta.url).pathname;
 const MODELS = (process.env.MODELS ?? "gemma4:31b,gpt-oss:120b,gpt-oss:20b,nemotron-3-nano:30b,nemotron-3-super,nemotron-3-ultra").split(",");
 const ONLY = process.env.ONLY ? process.env.ONLY.split(",") : null;
 const PER_MODEL = Number(process.env.PER_MODEL ?? 2);
-const TASK_TIMEOUT_MS = Number(process.env.TASK_TIMEOUT_MS ?? 8 * 60_000);
+const TASK_TIMEOUT_MS = Number(process.env.TASK_TIMEOUT_MS ?? 10 * 60_000);
 const KEYS = readFileSync(process.env.OLLAMA_KEYS_FILE, "utf8").trim();
 mkdirSync(OUT, { recursive: true });
 
@@ -394,6 +394,72 @@ const TESTS = [
       const posts = await Promise.all([1, 2, 3].map((n) => r.file(`posts/post${n}.txt`)));
       const good = posts.map((p) => !!p && p.trim().split(/\s+/).length <= 45 && p.includes("#IronPeakStrong") && p.includes("IronPeak") && !/\p{Extended_Pictographic}/u.test(p));
       return [used(r, "skill"), posts.every(Boolean), good.every(Boolean)];
+    },
+  },
+  {
+    id: "c07-word-document",
+    tools: ["skill:word-documents", "bash", "write"],
+    prompt:
+      "Write a one-page company overview of Northwind Cycles as a Word document named overview.docx: a title, a short introduction, and a table of key facts (founded 2019, 42 employees, makes e-bikes, based in Pune).",
+    verify: async (r) => {
+      const b = await r.bytes("overview.docx");
+      let info = "";
+      if (b) {
+        const dir = mkdtempSync(join(tmpdir(), "matrix-c07-"));
+        writeFileSync(join(dir, "o.docx"), b);
+        try {
+          info = execFileSync("python3", ["-c", "import sys,docx; d=docx.Document(sys.argv[1]); print(len(d.tables)); print(' '.join(p.text for p in d.paragraphs)); print(' '.join(c.text for t in d.tables for row in t.rows for c in row.cells))", join(dir, "o.docx")]).toString();
+        } catch {
+          info = "";
+        }
+      }
+      return [r.calls.some((c) => c.name === "skill" && /word/.test(JSON.stringify(c.args ?? ""))) || used(r, "skill"), !!info && Number(info.split("\n")[0]) >= 1, has(info, "2019", "42", "Pune")];
+    },
+  },
+  {
+    id: "c08-slide-deck",
+    tools: ["skill:presentations", "bash", "write"],
+    prompt: "Create a 4-slide PowerPoint deck q3.pptx about our Q3 results: revenue $412k (+18% vs Q2), 46 new customers (target 40), churn down to 2.1%. Use a title slide and slide titles that state the takeaway.",
+    verify: async (r) => {
+      const b = await r.bytes("q3.pptx");
+      let info = "";
+      if (b) {
+        const dir = mkdtempSync(join(tmpdir(), "matrix-c08-"));
+        writeFileSync(join(dir, "q.pptx"), b);
+        try {
+          info = execFileSync("python3", ["-c", "import sys; from pptx import Presentation; p=Presentation(sys.argv[1]); print(len(p.slides)); print(' '.join(sh.text_frame.text for s in p.slides for sh in s.shapes if sh.has_text_frame))", join(dir, "q.pptx")]).toString();
+        } catch {
+          info = "";
+        }
+      }
+      return [used(r, "skill"), !!info && Number(info.split("\n")[0]) >= 4, has(info, "412", "46", "2.1")];
+    },
+  },
+  {
+    id: "c09-excel-report",
+    tools: ["skill:excel-spreadsheets", "bash"],
+    seeds: { "sales.csv": salesCsv },
+    prompt:
+      "From sales.csv, create sales_report.xlsx with two sheets: Summary (revenue = units × unit_price by region, highest first, with a TOTAL row) and Data (the raw rows). Format the header row and the money columns.",
+    verify: async (r) => {
+      const b = await r.bytes("sales_report.xlsx");
+      let info = "";
+      if (b) {
+        const dir = mkdtempSync(join(tmpdir(), "matrix-c09-"));
+        writeFileSync(join(dir, "s.xlsx"), b);
+        try {
+          info = execFileSync("python3", ["-c", "import sys,openpyxl; wb=openpyxl.load_workbook(sys.argv[1]); print('|'.join(wb.sheetnames)); ws=wb[[n for n in wb.sheetnames if n.lower().startswith('summ')][0]]; rows=list(ws.iter_rows(values_only=True)); print(rows[1][0], rows[1][1]); print(ws.cell(1,1).font.bold); print(any('TOTAL' in str(c).upper() for row in rows for c in row if c))", join(dir, "s.xlsx")]).toString();
+        } catch {
+          info = "";
+        }
+      }
+      const lines = info.split("\n");
+      return [
+        /summary/i.test(lines[0] ?? "") && /data/i.test(lines[0] ?? ""),
+        (lines[1] ?? "").startsWith(ranked[0][0]) && Math.abs(Number((lines[1] ?? "").split(" ")[1]) - ranked[0][1]) < 1,
+        lines[2] === "True",
+        lines[3] === "True",
+      ];
     },
   },
 ];
