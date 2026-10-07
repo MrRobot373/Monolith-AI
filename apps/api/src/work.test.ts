@@ -324,6 +324,17 @@ d("Work AI", () => {
     ]);
   }, 60_000);
 
+  it("survives binary command output (an image printed to the terminal)", async () => {
+    const r = await call("POST", "/api/work/tasks", { workspaceId, prompt: "run: head -c 3000 /bin/ls; printf 'tail\\0end'" });
+    const t = await waitStatus(r.json.id, "completed", "failed");
+    expect(t.task.status).toBe("completed");
+    expect(t.events.find((e) => e.kind === "tool_result")?.data.text).toContain("binary output");
+    const r2 = await call("POST", "/api/work/tasks", { workspaceId, prompt: "run: printf 'before\\0after'" });
+    const t2 = await waitStatus(r2.json.id, "completed", "failed");
+    expect(t2.events.find((e) => e.kind === "tool_result")?.data.text).toContain("beforeafter");
+    expect((await call("GET", "/api/health")).status).toBe(200);
+  }, 60_000);
+
   it("rides out a briefly overloaded model server", async () => {
     const r = await call("POST", "/api/work/tasks", { workspaceId, prompt: "busy-server: say hi" });
     const t = await waitStatus(r.json.id, "completed", "failed");

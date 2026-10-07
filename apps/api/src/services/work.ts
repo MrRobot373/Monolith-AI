@@ -83,6 +83,22 @@ export function titleFrom(text: string): string {
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n… (${s.length - n} more characters)` : s);
 
+/** Command output that is mostly control characters (an image or archive printed to the terminal). */
+function looksBinary(s: string): boolean {
+  const sample = s.slice(0, 4000);
+  if (!sample) return false;
+  const odd = sample.match(/[\u0000-\u0008\u000e-\u001f\ufffd]/g)?.length ?? 0;
+  return odd / sample.length > 0.1;
+}
+
+/** Postgres JSON can't hold NUL characters or unpaired surrogates; strip them everywhere. */
+function storable(v: unknown): unknown {
+  if (typeof v === "string") return v.replace(/\u0000/g, "").replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "\ufffd");
+  if (Array.isArray(v)) return v.map(storable);
+  if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, storable(x)]));
+  return v;
+}
+
 /** Folder-safe skill slug. */
 export function slugify(s: string): string {
   return (
@@ -179,7 +195,8 @@ export class WorkRunner {
   }
 
   /** Store an event in order and send it to watchers. */
-  record(taskId: string, kind: string, data: Record<string, unknown>): Promise<void> {
+  record(taskId: string, kind: string, raw: Record<string, unknown>): Promise<void> {
+    const data = storable(raw) as Record<string, unknown>;
     const prev = this.writes.get(taskId) ?? Promise.resolve();
     const next = prev
       .catch(() => undefined)
@@ -195,13 +212,17 @@ export class WorkRunner {
         this.broadcast(taskId, { seq, kind, data, at: row?.at.toISOString() });
       });
     this.writes.set(taskId, next);
-    void next.finally(() => {
-      if (this.writes.get(taskId) === next) this.writes.delete(taskId);
-    });
+    // A failed write is logged below; it must never become an unhandled rejection (that ends the process).
+    void next
+      .finally(() => {
+        if (this.writes.get(taskId) === next) this.writes.delete(taskId);
+      })
+      .catch(() => undefined);
     return next.catch((e) => this.opts.log?.("work: recording an event failed", e));
   }
 
-  private async setStatus(taskId: string, status: TaskStatus, extra: Partial<typeof workTask.$inferInsert> = {}) {
+  private async setStatus(taskId: string, status: TaskStatus, raw: Partial<typeof workTask.$inferInsert> = {}) {
+    const extra = storable(raw) as Partial<typeof workTask.$inferInsert>;
     const done = status === "completed" || status === "failed" || status === "cancelled";
     await this.ctx.db
       .update(workTask)
@@ -379,7 +400,11 @@ export class WorkRunner {
         await this.record(taskId, "tool_call", { callId: e.callId, name: e.name, args: e.args as Record<string, unknown> });
         return;
       case "tool_result":
-        await this.record(taskId, "tool_result", { callId: e.callId, text: clip(e.text, MAX_TOOL_TEXT), isError: e.isError });
+        await this.record(taskId, "tool_result", {
+          callId: e.callId,
+          text: looksBinary(e.text) ? `(binary output, ${e.text.length.toLocaleString()} characters, not shown)` : clip(e.text, MAX_TOOL_TEXT),
+          isError: e.isError,
+        });
         this.pulse(taskId, "files", {});
         return;
       case "plan":
