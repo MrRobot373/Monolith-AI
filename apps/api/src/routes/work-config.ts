@@ -2,6 +2,7 @@
  * Work AI configuration: skills (org + personal), schedules and the org policy. Connectors: routes/connectors.ts.
  */
 import { and, asc, eq, ne, or, organization, skill, sql, workSchedule, workTask } from "@aatmiq/db";
+import { librarySkill, librarySkills } from "@aatmiq/skills";
 import { DEFAULT_WORK_SETTINGS, orgCan, scheduleSchema, skillSchema, workSettingsSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -93,6 +94,43 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     await db.delete(skill).where(eq(skill.id, s.id));
     if (s.scope === "org") await audit(ctx, { actor: u, action: "work.skill.deleted", targetType: "skill", targetId: s.id, meta: { name: s.name } });
     return { ok: true };
+  });
+
+  /* ───────────── Skill library (built in) ───────────── */
+
+  /** The built-in library: everyone sees what's on; admins also see what's off. */
+  app.get("/api/work/skills/library", async (req) => {
+    const u = await requireUser(ctx, req);
+    const off = new Set((await getWorkSettings(db)).disabledLibrarySkills);
+    return librarySkills()
+      .filter((s) => canManageWork(u) || !off.has(s.slug))
+      .map((s) => ({ slug: s.slug, name: s.title, description: s.description, category: s.category, files: s.files, enabled: !off.has(s.slug) }));
+  });
+
+  app.get<{ Params: { slug: string } }>("/api/work/skills/library/:slug", async (req) => {
+    await requireUser(ctx, req);
+    const s = librarySkill(req.params.slug);
+    if (!s) throw notFound("Skill not found");
+    return { slug: s.slug, name: s.title, description: s.description, category: s.category, body: s.body, files: s.files };
+  });
+
+  app.patch<{ Params: { slug: string } }>("/api/work/skills/library/:slug", async (req) => {
+    const u = await requireUser(ctx, req);
+    if (!canManageWork(u)) throw forbidden("Only admins can turn library skills on or off.");
+    const s = librarySkill(req.params.slug);
+    if (!s) throw notFound("Skill not found");
+    const { enabled } = parse(z.object({ enabled: z.boolean() }), req.body);
+    const [org] = await db.select({ id: organization.id, s: organization.workSettings }).from(organization).limit(1);
+    if (!org) throw notFound("Organization not found");
+    const off = new Set(org.s?.disabledLibrarySkills ?? []);
+    if (enabled) off.delete(s.slug);
+    else off.add(s.slug);
+    await db
+      .update(organization)
+      .set({ workSettings: { ...(org.s ?? {}), disabledLibrarySkills: [...off].sort() } })
+      .where(eq(organization.id, org.id));
+    await audit(ctx, { actor: u, action: enabled ? "work.library_skill.enabled" : "work.library_skill.disabled", targetType: "skill", targetId: s.slug });
+    return { slug: s.slug, enabled };
   });
 
   /* ───────────── Schedules ───────────── */

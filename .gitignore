@@ -14,3 +14,5 @@ playwright-report
 
 # model matrix output
 tests/models/results
+__pycache__/
+*.pyc

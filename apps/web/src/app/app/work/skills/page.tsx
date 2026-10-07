@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { TopBar } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
 import { WorkTabs } from "@/components/work/parts";
+import { SkillLibrary } from "@/components/work/skill-library";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Badge, EmptyState, Switch } from "@/components/ui/misc";
@@ -66,8 +67,8 @@ export default function SkillsPage() {
             <EmptyState
               className="mt-6 rounded-xl border border-dashed border-border"
               icon={<Sparkles className="size-5" />}
-              title="No skills yet"
-              description="Write down how a task should be done once, and every Work AI task can follow it."
+              title="No skills of your own yet"
+              description="Write down how your team does a task once, and every Work AI task can follow it. The library below covers common work already."
               action={
                 <Button variant="primary" size="sm" onClick={() => setEditing("new")}>
                   <Plus className="size-3.5" /> New skill
@@ -119,6 +120,9 @@ export default function SkillsPage() {
                 ))}
             </div>
           )}
+          <div className="mt-10">
+            <SkillLibrary canManage={me.isAdmin} />
+          </div>
         </div>
       </div>
       {editing && <SkillDialog key={editing === "new" ? "new" : editing.id} skill={editing === "new" ? undefined : editing} canOrg={me.isAdmin} onClose={() => setEditing(null)} onSaved={refresh} />}

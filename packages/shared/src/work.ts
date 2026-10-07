@@ -6,6 +6,8 @@ export const DEFAULT_WORK_SETTINGS = {
   allowNetwork: false,
   maxConcurrentPerUser: 2,
   idleMinutes: 15,
+  /** Built-in library skills turned off for the organization (by name). */
+  disabledLibrarySkills: [] as string[],
 };
 export type WorkSettingsValue = typeof DEFAULT_WORK_SETTINGS;
 
@@ -15,6 +17,7 @@ export const workSettingsSchema = z.object({
   allowNetwork: z.boolean().optional(),
   maxConcurrentPerUser: z.number().int().min(1).max(20).optional(),
   idleMinutes: z.number().int().min(1).max(240).optional(),
+  disabledLibrarySkills: z.array(z.string().max(80)).max(500).optional(),
 });
 
 export const workTaskCreateSchema = z.object({

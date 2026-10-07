@@ -19,7 +19,8 @@ beyond that package.
 | Files panel | The task folder: preview text and images, download anything, add files for the agent. |
 | Approvals | Risky steps stop and wait. Approve or reject inline, from the Work AI home ("Waiting for you"), or from the notification. The sidebar shows a badge while anything waits. |
 | **Scheduled** | A prompt on a schedule (weekdays at 9:00, every Monday, monthly, hourly or any cron) in your time zone. Each run is a new task. "Run now" for a test. |
-| **Skills** | Reusable instructions ("how we write the weekly report"). The agent reads each skill's description and follows it when it fits. Personal skills are yours; organization skills are shared by admins. |
+| **Skills** | Reusable instructions ("how we write the weekly report"). The agent reads each skill's description and follows it when it fits. Personal skills are yours; organization skills are shared by admins; the **Library** has 59 built-in skills for software, data, documents and business work ([08-skills.md](08-skills.md)). |
+| **Connections** | Your own accounts in apps your admin added (Gmail, Calendar, Canva, GitHub…). Connect once; your tasks then act with your access. |
 
 Stopping a task ends its runtime immediately. Sending another message continues the task: the
 conversation so far is handed to a fresh runtime and the files are still in the folder.

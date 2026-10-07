@@ -386,6 +386,29 @@ d("Work AI", () => {
     expect((await call("DELETE", `/api/work/skills/${mine.json.id}`)).status).toBe(200);
   }, 60_000);
 
+  it("ships the built-in skill library; admins can switch skills off", async () => {
+    const lib = (await call("GET", "/api/work/skills/library")).json as { slug: string; category: string; enabled: boolean; files: string[] }[];
+    expect(lib.length).toBeGreaterThanOrEqual(50);
+    expect(lib.find((s) => s.slug === "excel-spreadsheets")).toMatchObject({ category: "Data", enabled: true, files: ["scripts/xlsx_helpers.py"] });
+    const one = await call("GET", "/api/work/skills/library/code-review");
+    expect(one.json.body).toContain("## Done when");
+
+    expect((await call("PATCH", "/api/work/skills/library/seo", { enabled: false })).json).toEqual({ slug: "seo", enabled: false });
+    const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: "hello library" });
+    await waitStatus(t.json.id, "completed");
+    const seen = JSON.stringify(modelRequests.at(-1));
+    expect(seen).toContain("`word-documents`");
+    expect(seen).toContain("`code-review`");
+    expect(seen).not.toContain("`seo`");
+    // The skill's helper scripts are in the task's skills folder, readable by the task.
+    const { readdir } = await import("node:fs/promises");
+    expect(await readdir(join(workDir, t.json.id, "runtime", "skills", "word-documents", "scripts"))).toEqual(["md_to_docx.py"]);
+
+    expect((await call("GET", "/api/work/skills/library")).json.find((s: { slug: string }) => s.slug === "seo").enabled).toBe(false);
+    await call("PATCH", "/api/work/skills/library/seo", { enabled: true });
+    expect((await call("PATCH", "/api/work/skills/library/no-such-skill", { enabled: false })).status).toBe(404);
+  }, 60_000);
+
   it("connects MCP servers and asks before matching tools", async () => {
     const c = await call("POST", "/api/admin/connectors", { name: "notes", displayName: "Notes", url: `${fakeUrl}/mcp`, headers: { authorization: "Bearer notes-secret" }, approveTools: "create_*" });
     expect(c.status).toBe(200);

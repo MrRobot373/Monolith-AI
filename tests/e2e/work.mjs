@@ -223,6 +223,27 @@ await step("Skills", "Create an org skill; the agent sees it", page, async () =>
   await page.getByTestId("skill-row").filter({ hasText: "Weekly report" }).waitFor();
   await shot(page, "skills");
 });
+await step("Skills", "Browse the built-in library, read a skill, switch one off", page, async () => {
+  await page.goto(`${APP}/app/work/skills`);
+  const lib = page.getByTestId("skill-library");
+  await lib.getByText("Library").first().waitFor();
+  await page.getByTestId("library-row").first().waitFor();
+  if ((await page.getByTestId("library-row").count()) < 50) throw new Error("library is missing skills");
+  await page.getByTestId("library-search").fill("excel");
+  const row = page.locator('[data-testid="library-row"][data-slug="excel-spreadsheets"]');
+  await row.waitFor();
+  await row.locator("button").first().click();
+  await page.getByTestId("library-skill-body").getByText("Write formatted sheets").waitFor();
+  await shot(page, "skill-library-reader");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("library-search").fill("seo");
+  const seo = page.locator('[data-testid="library-row"][data-slug="seo"]');
+  await seo.getByRole("switch").click();
+  await seo.getByText("Off").waitFor();
+  await seo.getByRole("switch").click();
+  await page.getByTestId("library-search").fill("");
+  await shot(page, "skill-library");
+});
 await step("Schedules", "Schedule a weekday task, preview runs, run it now", page, async () => {
   await page.goto(`${APP}/app/work/schedules`);
   await page.getByTestId("new-schedule").click();

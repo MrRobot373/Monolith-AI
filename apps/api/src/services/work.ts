@@ -30,8 +30,11 @@ import {
 } from "@aatmiq/db";
 import { createDshEngine, type ConnectorSpec, type HarnessEngine, type HarnessEvent, type TaskRuntime } from "@aatmiq/harness";
 import { DEFAULT_WORK_SETTINGS, PRODUCT_NAME, type WorkSettingsValue } from "@aatmiq/shared";
+import { librarySkills, shipsFile, type LibraryCategory } from "@aatmiq/skills";
+
+const CODE_LIBRARY: readonly LibraryCategory[] = ["Software development", "Data", "Apps"];
 import { randomBytes } from "node:crypto";
-import { chmod, chown, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, chown, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { AppContext } from "../context";
 import { resolveModel } from "./models";
@@ -287,7 +290,8 @@ export class WorkRunner {
       const workdir = code ? this.ctx.code.workspacePath(task.userId, code.slug) : this.filesDir(taskId);
       const homeDir = join(this.taskDir(taskId), "runtime");
       await mkdir(this.dir, { recursive: true });
-      const skillsDir = await this.writeSkills(task.userId, join(homeDir, "skills"));
+      // The coding agent gets the library's engineering, data and app skills; Work AI gets them all.
+      const skillsDir = await this.writeSkills(task.userId, join(homeDir, "skills"), settings.disabledLibrarySkills, code ? CODE_LIBRARY : undefined);
       await this.prepareFolder(taskId, runUid);
       if (code) await this.ctx.code.prepare(task.userId, workdir);
       const [org] = await db.select({ productName: organization.productName }).from(organization).limit(1);
@@ -608,14 +612,20 @@ export class WorkRunner {
 
   /* ───────────── Task setup ───────────── */
 
-  /** Org skills plus the person's own, as SKILL.md folders the runtime discovers. */
-  private async writeSkills(userId: string, dir: string): Promise<string | null> {
+  /**
+   * Org skills, the person's own, and the enabled built-in library, as SKILL.md folders the runtime
+   * discovers. A skill the organization or person wrote wins over a library skill of the same name.
+   */
+  private async writeSkills(userId: string, dir: string, disabledLibrary: string[], categories?: readonly LibraryCategory[]): Promise<string | null> {
     const rows = await this.ctx.db
       .select()
       .from(skill)
       .where(and(eq(skill.enabled, true), or(eq(skill.scope, "org"), and(eq(skill.scope, "personal"), eq(skill.ownerId, userId)))));
     await rm(dir, { recursive: true, force: true });
-    if (rows.length === 0) return null;
+    const off = new Set(disabledLibrary);
+    const library = librarySkills().filter((s) => !off.has(s.slug) && (!categories || categories.includes(s.category)));
+    if (rows.length === 0 && library.length === 0) return null;
+    await mkdir(dir, { recursive: true });
     const used = new Set<string>();
     for (const s of rows) {
       let slug = slugify(s.slug || s.name);
@@ -624,6 +634,11 @@ export class WorkRunner {
       await mkdir(join(dir, slug), { recursive: true });
       const front = ["---", `name: ${slug}`, `description: ${JSON.stringify(s.description.replace(/\s+/g, " "))}`, "---", ""].join("\n");
       await writeFile(join(dir, slug, "SKILL.md"), `${front}# ${s.name}\n\n${s.body}\n`);
+    }
+    for (const s of library) {
+      if (used.has(s.slug)) continue;
+      used.add(s.slug);
+      await cp(s.dir, join(dir, s.slug), { recursive: true, filter: (src) => shipsFile(src.slice(s.dir.length)) });
     }
     return dir;
   }

@@ -575,6 +575,8 @@ export interface WorkSettings {
   maxConcurrentPerUser: number;
   /** Minutes a finished task keeps its runtime warm for follow-ups. */
   idleMinutes: number;
+  /** Built-in library skills turned off for the organization. */
+  disabledLibrarySkills: string[];
 }
 
 /** Unix user ids for task runtimes (each task runs as its own user when the API runs as root). */
