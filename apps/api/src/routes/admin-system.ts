@@ -31,7 +31,8 @@ import {
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit, getOrg, parse, requireOrgCap, requireUser, type AppContext } from "../context";
-import { badRequest, forbidden, notFound } from "../errors";
+import { badRequest, forbidden, HttpError, notFound } from "../errors";
+import { LOGO_TYPES, logoUrl, MAX_LOGO_BYTES, newLogoVersion, sniffLogo, svgProblem } from "../services/branding";
 
 export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
   const { db, box, cfg } = ctx;
@@ -409,7 +410,50 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
       promptLogging: org.promptLogging,
       retentionDays: org.retentionDays,
       hasLicense: !!org.licenseKey,
+      logoUrl: logoUrl(org.logo),
     };
+  });
+
+  /** Upload the organization's logo (one multipart `file`: PNG, JPEG, WebP or SVG, up to 512 KB). */
+  app.put("/api/admin/settings/logo", async (req) => {
+    const u = await requireUser(ctx, req);
+    requireOrgCap(u, "org.branding.manage");
+    if (!req.isMultipart()) throw badRequest("Send the logo as multipart/form-data");
+    const file = await req.file({ limits: { fileSize: MAX_LOGO_BYTES + 1 } });
+    if (!file) throw badRequest("Choose an image file");
+    const tooBig = () => badRequest("The logo must be 512 KB or smaller.");
+    const data = await file.toBuffer().catch((e: { code?: string }) => {
+      throw e.code === "FST_REQ_FILE_TOO_LARGE" ? tooBig() : e;
+    });
+    if (file.file.truncated || data.length > MAX_LOGO_BYTES) throw tooBig();
+    const type = sniffLogo(data);
+    if (!type) throw new HttpError(415, "Use a PNG, JPEG, WebP or SVG image.", "unsupported_type");
+    if (type === "image/svg+xml") {
+      const problem = svgProblem(data);
+      if (problem) throw badRequest(`This SVG can't be used because ${problem}. Export it again as a plain SVG or PNG.`);
+    }
+    const org = await getOrg(db);
+    if (!org) throw notFound();
+    const version = newLogoVersion();
+    const key = `branding/logo-${version}.${LOGO_TYPES[type]}`;
+    await ctx.storage.put(key, data);
+    await db.update(organization).set({ logo: { key, type, version }, updatedAt: new Date() }).where(eq(organization.id, org.id));
+    if (org.logo) await ctx.storage.remove(org.logo.key).catch(() => undefined);
+    await audit(ctx, { actor: u, action: "settings.logo_updated", targetType: "organization", targetId: org.id, meta: { type, bytes: data.length } });
+    return { logoUrl: logoUrl({ version }) };
+  });
+
+  app.delete("/api/admin/settings/logo", async (req) => {
+    const u = await requireUser(ctx, req);
+    requireOrgCap(u, "org.branding.manage");
+    const org = await getOrg(db);
+    if (!org) throw notFound();
+    if (org.logo) {
+      await db.update(organization).set({ logo: null, updatedAt: new Date() }).where(eq(organization.id, org.id));
+      await ctx.storage.remove(org.logo.key).catch(() => undefined);
+      await audit(ctx, { actor: u, action: "settings.logo_removed", targetType: "organization", targetId: org.id });
+    }
+    return { logoUrl: null };
   });
 
   app.put("/api/admin/settings", async (req) => {

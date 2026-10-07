@@ -21,6 +21,15 @@ export function applyTheme(pref: ThemePref): void {
 /** Runs before paint to avoid a theme flash. Dark is the default. */
 export const themeBootScript = `(function(){try{var p=localStorage.getItem("${KEY}")||"dark";var d=p==="dark"||(p==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light";}catch(e){document.documentElement.dataset.theme="dark";}})();`;
 
+/** Use the org logo as the tab icon (or put the product icon back). */
+export function applyFavicon(url: string | null | undefined): void {
+  const links = document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]');
+  links.forEach((l) => {
+    if (!l.dataset.original) l.dataset.original = l.href;
+    l.href = url ? new URL(url, window.location.href).href : l.dataset.original;
+  });
+}
+
 /** Set the org accent color and a readable foreground for text on it. */
 export function applyAccent(hex: string | null | undefined): void {
   if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return;

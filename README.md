@@ -27,7 +27,7 @@
 | Projects: instructions, sources (files, pasted text, saved answers, library links), project memory across chats, sharing (private/workspace, chat/edit roles, chats private unless shared), move/archive chats, ⌘K search over messages ([spec](docs/03-projects.md)) | ✅ |
 | Chat Phase B: edit & branch (versions), temporary chats, source labels (Confirmed/Assumption/TBD) and versions, Excel and OCR (images, scanned PDFs), export to Word/PDF/Markdown | ✅ |
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
-| Compliance recording notice, accent-color branding, dark/light themes | ✅ |
+| Compliance recording notice, branding (name, accent color, logo on sign-in, app, emails and tab icon), dark/light themes | ✅ |
 | Docker images + Compose stack | ✅ |
 | Single sign-on: Google, Microsoft Entra ID, any OpenID Connect provider (Okta, Keycloak…), invite-only or domain auto-join, "require SSO" ([details](docs/04-single-sign-on.md)) | ✅ (SAML: P4) |
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |

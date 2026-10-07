@@ -79,6 +79,8 @@ export const organization = pgTable("organization", {
   twoFactorRequired: boolean("two_factor_required").notNull().default(false),
   /** Work AI policy set by org admins (see WorkSettings). */
   workSettings: jsonb("work_settings").$type<Partial<WorkSettings>>(),
+  /** Uploaded logo (storage key, media type, version for cache busting); null shows the product mark. */
+  logo: jsonb("logo").$type<{ key: string; type: string; version: string }>(),
   /** Outgoing email (SMTP) for invitations and password resets; the password is encrypted. */
   emailSettings: jsonb("email_settings").$type<EmailSettingsStored>(),
   createdAt: createdAt(),

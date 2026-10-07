@@ -40,7 +40,7 @@ import { Markdown } from "@/components/chat/markdown";
 import { FileIcon } from "@/components/documents/use-documents";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
-import { LogoMark } from "@/components/ui/logo";
+import { AppLogo } from "@/components/org-logo";
 import { Tooltip } from "@/components/ui/misc";
 import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
 import { Skeleton } from "@/components/ui/spinner";
@@ -493,7 +493,7 @@ function TimelineItem({ item, active, onDecide, deciding }: { item: Item; active
       return (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-5" data-testid="task-answer">
           <div className="mb-1.5 flex items-center gap-2 text-[12.5px] text-fg-subtle">
-            <LogoMark className="size-4" />
+            <AppLogo className="size-4" />
           </div>
           <div className="pl-6">
             <Markdown content={item.text} />
@@ -619,7 +619,7 @@ function Working({ status, draft, thinking }: { status: TaskStatus; draft: strin
   return (
     <div className="mb-5">
       <div className="mb-1.5 flex items-center gap-2 text-[12.5px]">
-        <LogoMark className="size-4" />
+        <AppLogo className="size-4" />
         <span className="bg-[linear-gradient(90deg,var(--fg-subtle)_0%,var(--fg)_50%,var(--fg-subtle)_100%)] bg-[length:200%_100%] bg-clip-text text-transparent animate-shimmer">
           {label}
         </span>

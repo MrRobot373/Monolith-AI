@@ -3,7 +3,7 @@
  * recorded with a screenshot and the run continues.
  */
 import { chromium } from "playwright-core";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const FAKE = process.env.FAKE_LLM_URL ?? "http://localhost:11500";
@@ -928,7 +928,7 @@ await step("Users", "Reactivate restores access", owner, async () => {
 /* ═════════════ L. Org settings ═════════════ */
 await step("Settings", "Branding: product name, accent and sign-in message", owner, async () => {
   await owner.goto(`${BASE}/admin/settings`);
-  await owner.locator("input").nth(1).fill("Acme AI");
+  await owner.getByLabel("Product name").fill("Acme AI");
   await owner.click('button[aria-label="Accent #A78BFA"]');
   await owner.fill("textarea", "For Acme employees only.");
   await owner.click("text=Save branding");
@@ -939,6 +939,33 @@ await step("Settings", "Branding: product name, accent and sign-in message", own
   const accent = await pub.evaluate(() => document.documentElement.style.getPropertyValue("--accent"));
   expect(accent.toLowerCase() === "#a78bfa", `accent ${accent}`);
   await pub.screenshot({ path: `${OUT}branded-login.png` });
+});
+await step("Settings", "Logo: upload shows on sign-in, in the app and as the tab icon; remove goes back", owner, async () => {
+  const file = `${OUT}acme-logo.svg`;
+  writeFileSync(file, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#7C3AED"/><path d="M18 46 32 16l14 30" stroke="#fff" stroke-width="6" fill="none" stroke-linejoin="round"/></svg>`);
+  // A file that only claims to be an image is refused.
+  const fake = `${OUT}not-a-logo.png`;
+  writeFileSync(fake, "plain text");
+  await owner.getByTestId("logo-input").setInputFiles(fake);
+  await toast(owner, "PNG, JPEG, WebP or SVG");
+  await owner.getByTestId("logo-input").setInputFiles(file);
+  await toast(owner, "Logo updated");
+  await owner.getByTestId("logo-remove").waitFor();
+  await owner.screenshot({ path: `${OUT}settings-logo.png` });
+  await pub.goto(`${BASE}/login`);
+  await pub.getByTestId("org-logo").waitFor();
+  expect(await pub.getByTestId("org-logo").evaluate((img) => img.complete && img.naturalWidth > 0), "logo didn't load on the sign-in page");
+  const icon = await pub.evaluate(() => document.querySelector('link[rel~="icon"]')?.getAttribute("href") ?? "");
+  expect(icon.includes("/api/public/logo"), `tab icon ${icon}`);
+  await pub.screenshot({ path: `${OUT}branded-login-logo.png` });
+  await owner.goto(`${BASE}/admin`);
+  await owner.getByTestId("org-logo").first().waitFor();
+  await owner.goto(`${BASE}/admin/settings`);
+  await owner.getByTestId("logo-remove").click();
+  await toast(owner, "Logo removed");
+  await pub.reload();
+  await pub.getByText("Sign in to Acme AI").waitFor();
+  expect((await pub.getByTestId("org-logo").count()) === 0, "logo still on the sign-in page");
 });
 await step("Settings", "Budget period change persists", owner, async () => {
   const budget = () => owner.locator("section", { hasText: "Budget period" }).locator("select");

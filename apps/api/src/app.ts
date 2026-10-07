@@ -60,14 +60,15 @@ export async function buildApp(
       }),
   });
   const box = createSecretBox(cfg.secret);
-  const mail = createMailer({ db, cfg, box });
+  const storage = opts.storage ?? createLocalStorage(cfg.storageDir);
+  const mail = createMailer({ db, cfg, box, storage });
   const ctx = {
     db,
     cfg,
     auth: createAuth(db, cfg, sha256, mail),
     box,
     mail,
-    storage: opts.storage ?? createLocalStorage(cfg.storageDir),
+    storage,
     license: new LicenseService(db, cfg, opts.fetch),
   } as AppContext;
   ctx.connectors = createConnectors({

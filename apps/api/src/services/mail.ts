@@ -7,6 +7,7 @@ import { organization, type DB, type EmailSettingsStored } from "@aatmiq/db";
 import { DEFAULT_ACCENT, PRODUCT_NAME } from "@aatmiq/shared";
 import nodemailer, { type Transporter } from "nodemailer";
 import type { Config } from "../config";
+import type { Storage } from "./storage";
 import type { SecretBox } from "../crypto";
 
 export interface MailServer {
@@ -45,8 +46,11 @@ export function serverFromUrl(url: string, from: string | undefined): MailServer
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-/** Plain, readable HTML that works in every mail client (tables, inline styles, no images). */
-export function renderMail(m: OutgoingMail, brand: { productName: string; accent: string }) {
+/** Inline image id for the organization's logo in emails. */
+const LOGO_CID = "org-logo@aatmiq";
+
+/** Plain, readable HTML that works in every mail client (tables, inline styles; the logo is an inline attachment). */
+export function renderMail(m: OutgoingMail, brand: { productName: string; accent: string; logo?: { type: string; data: Buffer } | null }) {
   const p = (s: string) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#1f2328">${escape(s)}</p>`;
   const button = m.button
     ? `<p style="margin:22px 0"><a href="${escape(m.button.url)}" style="display:inline-block;background:#111418;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:8px">${escape(m.button.label)}</a></p>
@@ -56,15 +60,19 @@ export function renderMail(m: OutgoingMail, brand: { productName: string; accent
   const html = `<!doctype html><html><body style="margin:0;padding:24px;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border:1px solid #e3e6ea;border-radius:12px">
-<tr><td style="padding:22px 28px 6px;font-size:14px;font-weight:600;color:#1f2328"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${escape(brand.accent)};margin-right:8px"></span>${escape(brand.productName)}</td></tr>
+<tr><td style="padding:22px 28px 6px;font-size:14px;font-weight:600;color:#1f2328">${
+    brand.logo
+      ? `<img src="cid:${LOGO_CID}" alt="" height="24" style="height:24px;width:auto;vertical-align:middle;margin-right:8px;border:0">`
+      : `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${escape(brand.accent)};margin-right:8px"></span>`
+  }${escape(brand.productName)}</td></tr>
 <tr><td style="padding:12px 28px 26px">${m.lines.map(p).join("")}${button}${note}</td></tr>
 </table></td></tr></table></body></html>`;
   const text = [...m.lines, ...(m.button ? [`${m.button.label}: ${m.button.url}`] : []), ...(m.note ? [m.note] : [])].join("\n\n");
   return { html, text };
 }
 
-export function createMailer(opts: { db: DB; cfg: Config; box: SecretBox }) {
-  const { db, cfg, box } = opts;
+export function createMailer(opts: { db: DB; cfg: Config; box: SecretBox; storage?: Storage }) {
+  const { db, cfg, box, storage } = opts;
   let cached: { key: string; t: Transporter } | null = null;
 
   async function org() {
@@ -114,9 +122,24 @@ export function createMailer(opts: { db: DB; cfg: Config; box: SecretBox }) {
     return { productName: o?.productName ?? PRODUCT_NAME, accent: o?.accentColor ?? DEFAULT_ACCENT };
   }
 
+  /** The uploaded logo for the email header. SVG is left out: most mail clients don't show it. */
+  async function emailLogo() {
+    const logo = (await org())?.logo;
+    if (!logo || !storage || logo.type === "image/svg+xml") return null;
+    return { type: logo.type, data: await storage.get(logo.key) };
+  }
+
   async function deliver(s: MailServer, m: OutgoingMail) {
-    const { html, text } = renderMail(m, await brand());
-    await transporter(s).sendMail({ from: s.from, to: m.to, subject: m.subject, text, html });
+    const logo = await emailLogo().catch(() => null);
+    const { html, text } = renderMail(m, { ...(await brand()), logo });
+    await transporter(s).sendMail({
+      from: s.from,
+      to: m.to,
+      subject: m.subject,
+      text,
+      html,
+      attachments: logo ? [{ filename: `logo.${logo.type.split("/")[1]}`, content: logo.data, contentType: logo.type, cid: LOGO_CID }] : undefined,
+    });
   }
 
   return {

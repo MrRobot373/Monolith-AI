@@ -43,7 +43,7 @@ import { TopBar, TopBarButton } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
 import { useChats } from "@/components/app/sidebar";
 import { Button } from "@/components/ui/button";
-import { LogoMark } from "@/components/ui/logo";
+import { AppLogo } from "@/components/org-logo";
 import { Meter, Tooltip } from "@/components/ui/misc";
 import { Skeleton } from "@/components/ui/spinner";
 import { MoveToProjectDialog, ProjectIcon } from "@/components/projects/projects";
@@ -857,7 +857,7 @@ function MessageBlock({
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }} className="group mb-8">
       <div className="mb-2 flex items-center gap-2 text-[12.5px] text-fg-subtle">
-        <LogoMark className="size-4" />
+        <AppLogo className="size-4" />
         <span>{modelLabel}</span>
         {m.streaming && (
           <span className="bg-[linear-gradient(90deg,var(--fg-subtle)_0%,var(--fg)_50%,var(--fg-subtle)_100%)] bg-[length:200%_100%] bg-clip-text text-transparent animate-shimmer">

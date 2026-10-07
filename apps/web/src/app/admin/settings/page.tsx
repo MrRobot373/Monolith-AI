@@ -3,18 +3,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, KeyRound, TriangleAlert } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { EmailSettings } from "@/components/admin/email-settings";
 import { Section } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { LogoMark } from "@/components/ui/logo";
+import { OrgLogo } from "@/components/org-logo";
 import { Badge, Card, Switch } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlay";
 import { Skeleton } from "@/components/ui/spinner";
-import { get, put } from "@/lib/api";
+import { ApiError, del, get, put } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { applyAccent } from "@/lib/theme";
 
@@ -27,6 +27,7 @@ interface OrgSettings {
   promptLogging: boolean;
   retentionDays: number | null;
   hasLicense: boolean;
+  logoUrl: string | null;
 }
 
 const ACCENTS = ["#22D3EE", "#60A5FA", "#A78BFA", "#34D399", "#FBBF24", "#F472B6", "#FB7185", "#FAFAFA"];
@@ -36,9 +37,11 @@ export default function SettingsPage() {
   const s = useQuery({ queryKey: ["admin-settings"], queryFn: () => get<OrgSettings>("/api/admin/settings") });
   const [form, setForm] = useState<OrgSettings | null>(null);
   const [confirmLogging, setConfirmLogging] = useState(false);
+  // Loaded once: a refetch (after a save or a logo upload) mustn't wipe edits not saved yet.
   useEffect(() => {
-    if (s.data) setForm(s.data);
+    if (s.data) setForm((f) => f ?? s.data);
   }, [s.data]);
+  const logoUrl = s.data?.logoUrl ?? null;
 
   const save = useMutation({
     mutationFn: (body: Partial<OrgSettings>) => put("/api/admin/settings", body),
@@ -65,6 +68,7 @@ export default function SettingsPage() {
             <Field label="Organization name">
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
             </Field>
+            <LogoField url={logoUrl} />
             <Field label="Product name" hint="White-label the product for your team, e.g. “Acme AI”.">
               <Input value={form.productName} onChange={(e) => set("productName", e.target.value)} />
             </Field>
@@ -101,7 +105,7 @@ export default function SettingsPage() {
           <div className="rounded-xl border border-border bg-bg-subtle p-4">
             <div className="mb-3 text-[11px] font-medium tracking-wide text-fg-subtle uppercase">Preview</div>
             <div className="flex items-center gap-2">
-              <LogoMark className="size-6" />
+              <OrgLogo src={logoUrl} className="size-6" />
               <span className="font-semibold">{form.productName || "Aatmiq"}</span>
             </div>
             <div className="mt-4 rounded-lg bg-surface-2 px-3 py-2 text-[13px]">Summarize this week&apos;s tickets</div>
@@ -203,6 +207,72 @@ export default function SettingsPage() {
           Make sure this matches your employee privacy policy.
         </div>
       </Dialog>
+    </div>
+  );
+}
+
+/** Upload or remove the organization's logo. It saves on its own, apart from "Save branding". */
+function LogoField({ url }: { url: string | null }) {
+  const qc = useQueryClient();
+  const input = useRef<HTMLInputElement>(null);
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["admin-settings"] });
+    qc.invalidateQueries({ queryKey: ["me"] });
+    qc.invalidateQueries({ queryKey: ["public-status"] });
+  };
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/admin/settings/logo", { method: "PUT", credentials: "include", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new ApiError(res.status, data.error ?? "Upload failed", data.code);
+      return data as { logoUrl: string };
+    },
+    onSuccess: () => {
+      toast.success("Logo updated");
+      refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const remove = useMutation({
+    mutationFn: () => del("/api/admin/settings/logo"),
+    onSuccess: () => {
+      toast.success("Logo removed");
+      refresh();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    // Not a <Field>: that is a <label>, and clicking its text would open the file picker.
+    <div className="space-y-1.5">
+      <span className="block text-[12.5px] font-medium text-fg-muted">Logo</span>
+      <div className="flex items-center gap-3">
+        <div className="flex size-12 items-center justify-center rounded-xl border border-border bg-bg-subtle p-1.5">
+          <OrgLogo src={url} className="size-full" />
+        </div>
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          className="hidden"
+          data-testid="logo-input"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) upload.mutate(f);
+            e.target.value = "";
+          }}
+        />
+        <Button size="sm" onClick={() => input.current?.click()} loading={upload.isPending} data-testid="logo-upload">
+          {url ? "Replace" : "Upload logo"}
+        </Button>
+        {url && (
+          <Button size="sm" variant="ghost" onClick={() => remove.mutate()} loading={remove.isPending} data-testid="logo-remove">
+            Remove
+          </Button>
+        )}
+      </div>
+      <span className="block text-xs text-fg-subtle">Square works best. PNG, JPEG, WebP or SVG, up to 512 KB. Shown on the sign-in page, in the app, in emails and as the browser tab icon.</span>
     </div>
   );
 }

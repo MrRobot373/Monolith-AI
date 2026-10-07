@@ -17,6 +17,7 @@ import { z } from "zod";
 import { getOrg, parse, requireUser, requireWorkspaceCap, type AppContext } from "../context";
 import { forbidden } from "../errors";
 import { availableModels } from "../services/models";
+import { logoUrl } from "../services/branding";
 import { getQuotaStatus } from "../services/quota";
 
 export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -59,6 +60,7 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
         productName: org?.productName ?? PRODUCT_NAME,
         accentColor: org?.accentColor ?? DEFAULT_ACCENT,
         promptLogging: org?.promptLogging ?? false,
+        logoUrl: logoUrl(org?.logo),
       },
       workspaces,
       unreadNotifications: unread?.n ?? 0,

@@ -19,6 +19,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { VERIFY_CALLBACK } from "../auth";
 import { audit, getOrg, parse, type AppContext } from "../context";
 import { sha256 } from "../crypto";
+import { logoHeaders, logoUrl } from "../services/branding";
 import { badRequest, conflict, HttpError, notFound } from "../errors";
 
 function forwardCookies(reply: FastifyReply, headers: Headers) {
@@ -115,9 +116,19 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
             productName: org.productName ?? PRODUCT_NAME,
             accentColor: org.accentColor ?? DEFAULT_ACCENT,
             loginMessage: org.loginMessage,
+            logoUrl: logoUrl(org.logo),
           }
-        : { name: null, productName: PRODUCT_NAME, accentColor: DEFAULT_ACCENT, loginMessage: null },
+        : { name: null, productName: PRODUCT_NAME, accentColor: DEFAULT_ACCENT, loginMessage: null, logoUrl: null },
     };
+  });
+
+  /** Public: the organization's logo (the sign-in page shows it before anyone signs in). */
+  app.get<{ Querystring: { v?: string } }>("/api/public/logo", async (req, reply) => {
+    const logo = (await getOrg(db))?.logo;
+    if (!logo) throw notFound("No logo");
+    const data = await ctx.storage.get(logo.key).catch(() => null);
+    if (!data) throw notFound("No logo");
+    return reply.headers(logoHeaders(logo.type, req.query.v === logo.version)).send(data);
   });
 
   /** First-run setup: org + owner + default workspace (+ demo model in dev). */

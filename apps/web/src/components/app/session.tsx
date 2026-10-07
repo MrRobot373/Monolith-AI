@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { ApiError, get, post } from "@/lib/api";
-import { applyAccent } from "@/lib/theme";
+import { applyAccent, applyFavicon } from "@/lib/theme";
 import type { Me } from "@/lib/types";
 
 interface SessionValue {
@@ -43,6 +43,7 @@ export function SessionGate({ children, requireAdmin }: { children: ReactNode; r
   }, [error, router, pathname]);
 
   useEffect(() => applyAccent(me?.org.accentColor), [me?.org.accentColor]);
+  useEffect(() => applyFavicon(me?.org.logoUrl), [me?.org.logoUrl]);
 
   const setupFirst = !!me?.user.twoFactorSetupRequired;
   useEffect(() => {

@@ -4,14 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
-import { LogoMark } from "@/components/ui/logo";
+import { OrgLogo } from "@/components/org-logo";
 import { get } from "@/lib/api";
-import { applyAccent } from "@/lib/theme";
+import { applyAccent, applyFavicon } from "@/lib/theme";
 import type { PublicStatus } from "@/lib/types";
 
 export function usePublicStatus() {
   const q = useQuery({ queryKey: ["public-status"], queryFn: () => get<PublicStatus>("/api/public/status") });
   useEffect(() => applyAccent(q.data?.org.accentColor), [q.data?.org.accentColor]);
+  useEffect(() => applyFavicon(q.data?.org.logoUrl), [q.data?.org.logoUrl]);
   return q;
 }
 
@@ -22,7 +23,7 @@ export function AuthShell({ title, subtitle, children, footer }: { title: ReactN
     <div className="relative flex min-h-dvh flex-col items-center justify-center bg-canvas px-4 py-12">
       <div className="relative w-full max-w-[400px] animate-rise">
         <Link href="/" className="mb-6 flex items-center justify-center gap-2" aria-label={`${product} home`}>
-          <LogoMark className="size-7" />
+          <OrgLogo src={data?.org.logoUrl} className="size-7" />
           <span className="text-[14px] text-fg">{data?.org.name || product}</span>
         </Link>
         <div className="rounded-2xl border border-border bg-bg p-7 shadow-soft">

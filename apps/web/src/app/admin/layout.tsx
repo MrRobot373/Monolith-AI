@@ -10,6 +10,7 @@ import { SessionGate, useSession } from "@/components/app/session";
 import { WorkspaceTile } from "@/components/app/sidebar";
 import { SidebarStateProvider } from "@/components/app/sidebar-state";
 import { LicenseBanner } from "@/components/admin/license";
+import { OrgLogo } from "@/components/org-logo";
 import { get } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
@@ -57,7 +58,7 @@ function AdminNav() {
   return (
     <aside className="flex w-full shrink-0 flex-col border-border bg-bg-subtle md:h-full md:w-[232px] md:border-r">
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-        <WorkspaceTile name={me.org.name} />
+        {me.org.logoUrl ? <OrgLogo src={me.org.logoUrl} className="size-5" /> : <WorkspaceTile name={me.org.name} />}
         <div className="min-w-0">
           <div className="truncate text-[13px] text-fg">{me.org.name}</div>
           <div className="text-[11.5px] text-fg-subtle">{me.isAdmin ? "Admin console" : "Workspace admin"}</div>
