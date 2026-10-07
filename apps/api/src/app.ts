@@ -39,7 +39,7 @@ import { createMailer } from "./services/mail";
 import { createInProcessJobs, createRedisJobs, type Jobs } from "./services/jobs";
 import { BrowserService, findChromium } from "./services/browser";
 import { startEgressProxy, type EgressProxy } from "./services/egress";
-import { WorkRunner } from "./services/work";
+import { getWorkSettings, WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
 import type { AddressInfo } from "node:net";
 import { chmod, mkdir } from "node:fs/promises";
@@ -83,7 +83,16 @@ export async function buildApp(
   const upstreamProxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || null;
   ctx.browser = new BrowserService({
     executablePath: findChromium(),
-    egress: () => (egress ??= startEgressProxy({ allowedHosts: () => ctx.browser.allowedHosts, upstream: upstreamProxy, log: (m) => app.log.info(m) })),
+    egress: () =>
+      (egress ??= startEgressProxy({
+        allowedHosts: () => ctx.browser.allowedHosts,
+        upstream: upstreamProxy,
+        log: (m) => app.log.info(m),
+        // Task containers reach it over their network, with their token; otherwise only this machine's browser does.
+        ...(cfg.workIsolation === "container"
+          ? { host: "0.0.0.0", port: cfg.egressPort ?? 3128, authorize: (token: string) => ctx.work.proxyAllowed(token) }
+          : { port: cfg.egressPort ?? 0 }),
+      })),
     runtimeDir: join(cfg.workDir ?? ".data/work", ".browser"),
     log: (msg, err) => app.log.warn(err, msg),
   });
@@ -199,6 +208,11 @@ export async function buildApp(
     }
     // Document processing and housekeeping (temporary chats, license check-in): see services/jobs.ts.
     await ctx.jobs.start();
+    // Container mode: task containers use the egress proxy from their first command.
+    if (ctx.work.mode === "container") {
+      ctx.browser.allowedHosts = (await getWorkSettings(db)).browserAllowedHosts;
+      await ctx.browser.egress();
+    }
     void ctx.work.recover().catch((e) => app.log.warn(e, "recovering Work AI tasks failed"));
     stopScheduler = startScheduler(ctx, (msg, err) => app.log.warn(err, msg));
   });

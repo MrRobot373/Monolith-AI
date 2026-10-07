@@ -3,3 +3,4 @@ export { createDshEngine, dshCli, mapEvent, networkEnv, processLauncher, type La
 export { buildPatch, DISABLED_ROWS, PROVIDER_ID } from "./dsh/patch";
 export { classifyRisk } from "./policy";
 export { harnessFile, harnessRoot } from "./files";
+export { containerArgs, containerEnv, containerLauncher, containerName, egressToken, removeStaleContainers, type ContainerLimits, type ContainerOptions } from "./dsh/container";

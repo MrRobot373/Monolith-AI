@@ -42,6 +42,9 @@ Chat (section `work` in usage reports).
   options, for sites that need JavaScript, logins or forms. See *Browser* below. **Internal sites it
   may open** lists hosts on your private network it may reach anyway (`intranet.acme.com`,
   `*.wiki.acme.internal`); everything else private is refused.
+- **Containers** (only in container mode, below): **CPUs** and **memory** per task (default 2 CPUs,
+  4096 MB) and **Internet**: *public internet, through Aatmiq* (default) or *none*. Changes apply
+  to tasks started afterwards.
 - **Let commands use the network**: off by default, which makes network commands ask first.
 - **Tasks per person at once** (others queue) and **how long a finished task stays warm** for instant follow-ups.
 - **Connectors**: apps and MCP servers (streamable HTTP) the agent can use as tools. **Add
@@ -144,16 +147,18 @@ What protects what, and the limits:
 | **Per-task token** | Internal endpoints (models, approvals, search) only answer a running task | Random 256-bit token, valid while the runtime lives. |
 | **Approvals** | A person decides on risky steps | Fails closed: no answer, an error or a stopped task count as *no*. DSH's own approval policy is pinned to *ask* (D28). Requests expire after 24 hours. |
 | **Quotas and license** | Spending stays within allowances | Checked on every model call, so a long task stops when the allowance runs out. |
+| **Container per task** (container mode) | Network, CPU, memory and processes; the rest of the API container | See *Container mode* below. The per-task user and token still apply; the container replaces the command sandbox. |
 
-Limits today, to know when deploying:
+Limits, to know when deploying:
 
-- **Network**: commands can reach the network the API container can reach (the database still needs
-  its password, internal endpoints need a task token). "Ask before network use" is an approval rule,
-  not a firewall. Use Docker network policies, or wait for container mode (below), if tasks must be
-  cut off from the network.
+- **Network**: in the default (process) mode, commands can reach the network the API container can
+  reach (the database still needs its password, internal endpoints need a task token). "Ask before
+  network use" is an approval rule, not a firewall. Container mode cuts tasks off from everything
+  but Aatmiq and, if allowed, the public internet through Aatmiq's proxy.
 - **Reads**: a task can read world-readable system files (the OS, the app's code). Secrets are not
   world-readable.
-- **Resources**: no per-task CPU or memory limits yet beyond the container's own.
+- **Resources**: per-task CPU, memory and process limits only in container mode; otherwise only the
+  API container's own.
 - **Connectors**: the agent runtime never holds connector credentials. Its MCP traffic goes to
   Aatmiq's proxy (`/api/internal/work/mcp/:name`, per-task token), which adds the person's own OAuth
   token (refreshing it) or the shared headers and forwards the request. OAuth connectors are only
@@ -186,9 +191,53 @@ agent.
 - The Docker image includes Chromium (about 1 GB more). Elsewhere, set `BROWSER_PATH`; without a
   browser the setting is greyed out and the tools aren't offered.
 
-Planned next (P2.1): **container mode**, with one container per person or task through a launcher
-(`packages/harness` already separates the launcher), giving network isolation and resource limits
-as in D5.
+### Container mode
+
+With `WORK_ISOLATION=container` (P2.1, D32) each Work AI task's runtime runs in **its own Docker
+container**, started by the API through the Docker socket (`packages/harness/src/dsh/container.ts`,
+a launcher like the process one: `docker run -i` carries the same JSON-RPC over stdio).
+
+- **Files**: only the task's own folder is mounted, read-write, at the same path (a sub-path of the
+  `files` volume, or a bind mount when task folders are on the host's disk). The system is
+  read-only, `/tmp` is a private 1 GB tmpfs, and the image's data folder is an empty root-owned
+  tmpfs, so the task folder is the only place it can keep files.
+- **User and privileges**: the task's own uid (as in process mode), every capability dropped,
+  `no-new-privileges`, `--init`.
+- **Limits**: CPUs and memory from Admin → Work AI → Containers (memory without extra swap), 1024
+  processes. Running out of memory affects only that task.
+- **Network**: tasks join `aatmiq_tasks`, an internal Docker network on which the only other
+  member is the API (as `aatmiq-api`): no internet, no database, no other services. With
+  *Internet: public internet, through Aatmiq*, `HTTPS_PROXY`/`HTTP_PROXY` point at the API's
+  egress proxy (port 3128, the browser's; see *Browser*): public addresses only, plus the internal
+  sites listed under Browser. The proxy knows the task by a password derived from its token
+  (commands see that, never the token), so a task set to *none*, or anything else on the network,
+  is refused even if it sets the proxy by hand.
+- **Secrets**: the task token reaches the container through the docker CLI's environment, never
+  its command line, so it doesn't show in a process list.
+- **Clean-up**: stopping a task, or its runtime going idle, removes the container (`--rm`, and
+  `docker rm -f` if the CLI dies); on start the API removes containers left from before a restart
+  (label `aatmiq.task`).
+- **What stays as before**: the browser runs in the API (as the task's user, through the same
+  proxy); Aatmiq Code's agent works in the person's IDE workspace (process mode).
+
+Turning it on with Compose:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.containers.yml --env-file deploy/.env up -d --build
+```
+
+`deploy/docker-compose.containers.yml` sets the variables below, gives the API the Docker socket
+and creates the `aatmiq_tasks` network. Task containers start from the API's own image (`aatmiq-api`,
+or `AATMIQ_API_IMAGE` if you tag it differently), so nothing else needs building.
+
+**The Docker socket is root on the host.** Whoever controls the API process can start any
+container. Where that matters, run Docker rootless, or put a socket proxy in front that only
+allows creating, inspecting and removing containers labelled `aatmiq.task` from this image. Tasks
+themselves never see the socket.
+
+Known limits: task containers share one network, so a server one task starts could be reached by
+another task's commands (it can't reach anything else); the egress proxy only covers HTTP(S) and
+whatever honours `HTTPS_PROXY` (other protocols get no network at all).
 
 ## Running it
 
@@ -205,8 +254,13 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile sea
 |---|---|---|
 | `WORK_DIR` | `/data/work` (`.data/work` in dev) | Task folders |
 | `WORK_SANDBOX` | `on` | `off` only where the kernel has neither Landlock (Linux 5.13+) nor usable bubblewrap |
-| `WORK_ISOLATION` | `auto` | `auto`: per-task Unix user when running as root. `off`: tasks run as the API's user (development only) |
-| `WORK_CONTROL_URL` | `http://127.0.0.1:<port>/api/internal/work` | How the runtime reaches the API (only change it for custom launchers) |
+| `WORK_ISOLATION` | `auto` | `auto`: per-task Unix user when running as root. `container`: a container per task (above). `off`: tasks run as the API's user (development only) |
+| `WORK_CONTROL_URL` | `http://127.0.0.1:<port>/api/internal/work` | How the runtime reaches the API. Container mode: required, as task containers reach it (`http://aatmiq-api:4000/api/internal/work`) |
+| `WORK_CONTAINER_IMAGE` | — | Container mode: the image tasks start from (the API image) |
+| `WORK_CONTAINER_NETWORK` | `aatmiq_tasks` | Container mode: the internal network tasks join |
+| `WORK_CONTAINER_VOLUME`, `WORK_CONTAINER_VOLUME_ROOT` | —, `/data` | Container mode: the Docker volume holding `WORK_DIR` and where it's mounted in the API container (task folders are mounted from it by sub-path). Empty: task folders are bind-mounted at the same path, for when `WORK_DIR` is a host folder |
+| `EGRESS_PORT` | `3128` in container mode | Port of the egress proxy that task containers use |
+| `DOCKER_CLI` | `docker` | The Docker CLI (the image includes one); `DOCKER_HOST` is passed on for a socket proxy |
 | `AATMIQ_DSH_CLI` | `/opt/dsh/…/bin.js` in the image | The agent runtime's CLI. The image installs DeepSeek Harness at `/opt/dsh` from `deploy/dsh/package-lock.json` (npm, so its plugins' peer packages are included); in development it comes from `packages/harness`' dev dependency. Keep both versions in step. |
 
 **Development**: `pnpm dev` runs tasks as your own user unless you run the API as root. The fake model
@@ -253,6 +307,10 @@ Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/appro
 - `apps/api/src/work.test.ts`: the whole flow through the API with the real runtime: metering,
   follow-ups, approvals, SSE, restart from history, skills, MCP connector with approval, schedules,
   isolation, cancel.
+- `tests/e2e/run-containers.sh`: container mode on the Compose stack: the task's user, limits and
+  folder from inside its container, a read-only system, the network (an allowed internal host through
+  the proxy, the database refused, nothing direct, *none* refused even by hand), new limits for the
+  next task, and clean-up on stop and after an API restart.
 - `tests/e2e/run-work.sh`: 27 browser checks (task timeline, plan, files, approvals, search, the
   agent's browser on an internal site before and after the admin allows it, uploads, stop and
   continue, isolation, skills, schedules, connectors, light theme, phone layout).

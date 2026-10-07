@@ -12,6 +12,7 @@ import { createDshEngine } from "./dsh/engine";
 import { buildPatch } from "./dsh/patch";
 import { APPROVAL_PRESETS } from "@aatmiq/shared";
 import { classifyRisk } from "./policy";
+import { containerArgs, containerEnv, egressToken, type ContainerOptions } from "./dsh/container";
 import { cleanArgs, planReminder, stripReminders } from "../dsh-plugin/tooling.mjs";
 import type { HarnessEvent, TaskSpec } from "./types";
 
@@ -209,6 +210,61 @@ describe("tool-call cleanup", () => {
     expect(planReminder(todos, 7)).not.toBeNull();
     expect(planReminder(todos.map((t) => ({ ...t, status: "completed" })), 3)).toBeNull();
     expect(stripReminders(`ok\n\n${planReminder(todos, 3)}`)).toBe("ok");
+  });
+});
+
+describe("container mode", () => {
+  const opts: ContainerOptions = {
+    image: "aatmiq-api:1.2",
+    network: "aatmiq_tasks",
+    volume: { name: "aatmiq_files", root: "/data" },
+    proxyUrl: "http://aatmiq-api:3128",
+    noProxy: ["aatmiq-api"],
+    limits: { cpus: 2, memoryMb: 4096, pidsLimit: 1024, network: "proxy" },
+  };
+  const spec = {
+    taskId: "t-123",
+    workdir: "/data/work/t-123/files",
+    homeDir: "/data/work/t-123/runtime",
+    uid: 100042,
+    token: "secret-token-value",
+    container: { cpus: 1.5, memoryMb: 2048, pidsLimit: 512, network: "proxy" as const },
+  } as unknown as TaskSpec;
+  const env = { AATMIQ_TOKEN: "secret-token-value", HOME: "/data/work/t-123/runtime", HTTPS_PROXY: "http://corp:8080" };
+
+  it("mounts only the task folder from the volume, with the task's user, limits and no privileges", () => {
+    const args = containerArgs(opts, { cli: "/opt/dsh/bin.js", argv: ["--profile", "sdk"], cwd: spec.workdir, env, spec });
+    const joined = args.join(" ");
+    expect(args.slice(0, 4)).toEqual(["run", "-i", "--rm", "--init"]);
+    expect(joined).toContain("--mount type=volume,src=aatmiq_files,dst=/data/work/t-123,volume-subpath=work/t-123");
+    expect(joined).toContain("--tmpfs /data:rw,noexec,nosuid,nodev,size=1m,mode=755");
+    expect(joined).toContain("--user 100042:100042");
+    expect(joined).toContain("--network aatmiq_tasks");
+    expect(joined).toContain("--cpus 1.5 --memory 2048m --memory-swap 2048m --pids-limit 512");
+    expect(joined).toContain("--cap-drop ALL --security-opt no-new-privileges --read-only");
+    expect(joined).toContain("--name aatmiq-task-t-123 --label aatmiq.task=t-123");
+    expect(args.slice(-6)).toEqual(["--entrypoint", "node", "aatmiq-api:1.2", "/opt/dsh/bin.js", "--profile", "sdk"]);
+    // Values never reach the command line; the CLI reads them from its environment.
+    expect(joined).not.toContain("secret-token-value");
+    expect(joined).toContain("--env AATMIQ_TOKEN");
+  });
+
+  it("binds the same path without a volume, and refuses a folder outside the volume", () => {
+    expect(containerArgs({ ...opts, volume: null }, { cli: "c", argv: [], cwd: spec.workdir, env: {}, spec }).join(" ")).toContain("--mount type=bind,src=/data/work/t-123,dst=/data/work/t-123");
+    expect(() => containerArgs({ ...opts, volume: { name: "v", root: "/srv" } }, { cli: "c", argv: [], cwd: spec.workdir, env: {}, spec })).toThrow("isn't inside the volume root");
+  });
+
+  it("internet only through Aatmiq's proxy with a credential from the task's token (Aatmiq itself direct), or none", () => {
+    const e = containerEnv(opts, env, spec);
+    const cred = egressToken("secret-token-value");
+    expect(cred).toMatch(/^[0-9a-f]{64}$/);
+    expect(e.HTTPS_PROXY).toBe(`http://task:${cred}@aatmiq-api:3128`);
+    expect(e.http_proxy).toBe(`http://task:${cred}@aatmiq-api:3128`);
+    expect(e.NO_PROXY).toBe("localhost,127.0.0.1,aatmiq-api");
+    expect(e.AATMIQ_TOKEN).toBe("secret-token-value");
+    const none = containerEnv(opts, env, { ...spec, container: { ...spec.container!, network: "none" } } as TaskSpec);
+    expect(none.HTTPS_PROXY).toBeUndefined();
+    expect(none.https_proxy).toBeUndefined();
   });
 });
 

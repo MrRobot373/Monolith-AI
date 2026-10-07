@@ -35,7 +35,7 @@
 | Single sign-on: Google, Microsoft Entra ID, any OpenID Connect provider (Okta, Keycloak…), invite-only or domain auto-join, "require SSO" ([details](docs/04-single-sign-on.md)) | ✅ (SAML: P4) |
 | Licensing: Ed25519 license keys verified offline, seats/sections/features/workspace limits, daily check-ins (counts only), grace periods, Admin → License ([details](docs/05-license-server.md)) | ✅ |
 | License server + Super Admin console: customers, issue/change/revoke licenses, check-ins, release channel | ✅ `apps/license-server`, `apps/license-console` |
-| Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), a browser the agent drives (forms ask first, no private network), MCP connectors, skills, schedules, per-task isolation, metering ([details](docs/06-work-ai.md)) | ✅ |
+| Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), a browser the agent drives (forms ask first, no private network), MCP connectors, skills, schedules, per-task isolation (own Unix user, or optionally its own container with CPU/memory limits and no network beyond Aatmiq's proxy), metering ([details](docs/06-work-ai.md)) | ✅ |
 | Connectors: catalog of 45 apps (Gmail, Google Calendar/Drive/Docs, Slack, GitHub, GitLab, Notion, Canva, Jira…), each person signs in to their own account, checked against the real services ([setup](docs/09-connectors.md)) | ✅ |
 | Built-in skill library: 59 skills for software, data, documents and business work, admins switch each on or off ([list](docs/08-skills.md)) | ✅ |
 | Code: Aatmiq Code (Code-OSS) in the browser, per-person IDE as your own user, terminals, Git (clone, your name on commits), Open VSX extensions, and the Aatmiq panel: a coding agent with approvals and diffs; optionally on its own hostname (`IDE_URL`) so extensions can't act on Aatmiq ([details](docs/07-code.md)) | ✅ (desktop app next) |
@@ -86,7 +86,8 @@ pnpm --filter @aatmiq/license test
 pnpm --filter @aatmiq/harness test   # runs the real agent runtime against a fake model
 LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatmiq/license-server test
 # Browser suites (see tests/e2e/README.md): full.mjs (product), run-work.sh (Work AI; E2E_SCRIPT=code.mjs for Code,
-#   account.mjs for email/password reset/email confirmation/two-step sign-in) and run-licensing.sh
+#   account.mjs for email/password reset/email confirmation/two-step sign-in), run-licensing.sh, and
+#   run-containers.sh (Work AI container mode on the Compose stack)
 # Connectors against the real services (needs internet): cd apps/api && npx tsx ../../tests/connectors/check.mts
 ```
 
@@ -103,6 +104,8 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile sea
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile minio up -d --build
 # background jobs in a separate worker with Valkey (set REDIS_URL=redis://valkey:6379 in .env first):
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile worker up -d --build
+# each Work AI task in its own container (gives the API the Docker socket; see docs/06-work-ai.md):
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.containers.yml --env-file deploy/.env up -d --build
 ```
 
 The API applies database migrations automatically on start. For invitations and password resets by email, set `SMTP_URL` and `MAIL_FROM` in `deploy/.env` or use Admin → Settings → Email. Uploads (documents, project files, the logo) go to the `files` volume, or to an S3-compatible bucket when `S3_BUCKET` is set (AWS S3, MinIO, Ceph, SeaweedFS, Cloudflare R2…; see `deploy/.env.example`). The API checks it can write, read and delete there before it starts, and `docker compose exec api node dist/copy-files-to-s3.js` moves an existing install's files into the bucket. Work AI task folders and IDE homes always stay on the server's disk. Background jobs (processing uploads, deleting expired temporary chats, the license check-in) run inside the API by default; with `REDIS_URL` set they go through a queue to the `worker` service (`node dist/worker.js`, same image; run several to scale), get retries, and run once however many API copies there are. Admin → Overview shows where they run and whether a worker is alive. Either way, documents left half-processed by a restart are picked up again. Put a TLS reverse proxy (Caddy, Nginx, Traefik) in front of port 3000. For Aatmiq Code, also give the IDE its own hostname (`IDE_URL=https://ide.yourcompany.com`, routed to the same port) so extensions run apart from Aatmiq ([why](docs/07-code.md#security-notes)). The API refuses changes from any origin other than `APP_URL`, so `APP_URL` must be the address people actually use. Set `LICENSE_PUBLIC_KEY` (from your order) in `deploy/.env`; without it the server runs in development mode.

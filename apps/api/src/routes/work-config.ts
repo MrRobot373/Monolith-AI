@@ -238,7 +238,7 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
         week: sql<number>`count(*) filter (where ${workTask.createdAt} > now() - interval '7 days')::int`,
       })
       .from(workTask);
-    return { settings, defaults: DEFAULT_WORK_SETTINGS, licensed: await ctx.license.hasSection("work"), stats: counts, browserInstalled: ctx.browser.available };
+    return { settings, defaults: DEFAULT_WORK_SETTINGS, licensed: await ctx.license.hasSection("work"), stats: counts, browserInstalled: ctx.browser.available, isolation: ctx.work.mode };
   });
 
   app.put("/api/admin/work", async (req) => {
@@ -250,7 +250,9 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     const merged = { ...(org.s ?? {}), ...b };
     await db.update(organization).set({ workSettings: merged }).where(eq(organization.id, org.id));
     await audit(ctx, { actor: u, action: "work.settings.updated", targetType: "organization", targetId: org.id, meta: b });
-    return { ...DEFAULT_WORK_SETTINGS, ...merged };
+    const saved = { ...DEFAULT_WORK_SETTINGS, ...merged };
+    ctx.browser.allowedHosts = saved.browserAllowedHosts;
+    return saved;
   });
 
   /** Try a SearXNG server before saving it. */

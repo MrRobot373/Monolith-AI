@@ -1,0 +1,32 @@
+# Container mode for Work AI: each task runs in its own container with only its folder, a read-only
+# system, CPU and memory limits (Admin → Work AI → Containers) and no network except Aatmiq (the
+# internet, when allowed, only through Aatmiq's filtering proxy).
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.containers.yml --env-file deploy/.env up -d --build
+#
+# The API gets the Docker socket to start task containers. Access to that socket is root on the
+# host: run Docker rootless, or put a socket proxy in front, where that matters (docs/06-work-ai.md).
+services:
+  api:
+    environment:
+      WORK_ISOLATION: container
+      # The image task containers start from: this API's own image.
+      WORK_CONTAINER_IMAGE: ${AATMIQ_API_IMAGE:-aatmiq-api}
+      WORK_CONTAINER_NETWORK: aatmiq_tasks
+      # Task folders live in the files volume (mounted at /data here); each task gets only its own.
+      WORK_CONTAINER_VOLUME: aatmiq_files
+      WORK_CONTAINER_VOLUME_ROOT: /data
+      # How task containers reach the API (models, approvals) and its egress proxy (port 3128).
+      WORK_CONTROL_URL: http://aatmiq-api:4000/api/internal/work
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      default: {}
+      tasks:
+        aliases: [aatmiq-api]
+
+networks:
+  # Internal: task containers on it reach only the API, not the internet or the other services.
+  tasks:
+    name: aatmiq_tasks
+    internal: true

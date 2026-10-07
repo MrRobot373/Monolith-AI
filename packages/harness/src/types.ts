@@ -48,6 +48,8 @@ export interface TaskSpec {
   gid?: number;
   /** "on": commands may only change the task folder (bwrap/Landlock). "off": rely on `uid` isolation alone. */
   sandbox?: "on" | "off";
+  /** Container mode: this task's limits (the container launcher reads them; process mode ignores them). */
+  container?: { cpus: number; memoryMb: number; pidsLimit: number; network: "proxy" | "none" };
 }
 
 export type HarnessEvent =

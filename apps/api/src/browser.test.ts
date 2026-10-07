@@ -7,7 +7,7 @@ import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { existsSync, statSync } from "node:fs";
 import { chmod, chown, mkdir, mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,6 +27,37 @@ describe("egress rules", () => {
     expect(hostAllowed("acme.internal", ["*.acme.internal"])).toBe(false);
     expect(hostAllowed("evilacme.internal", ["*.acme.internal"])).toBe(false);
     expect(hostAllowed("x.acme.com", ["intranet.acme.com"])).toBe(false);
+  });
+});
+
+// Container mode: the proxy listens for task containers, which must bring a token whose task may go out.
+describe("the egress proxy for task containers", () => {
+  const ip = Object.values(networkInterfaces()).flat().find((a) => a && a.family === "IPv4" && !a.internal)?.address;
+  (ip ? it : it.skip)("serves other machines only with the token of a task that may go out", async () => {
+    const target = createServer((_req, res) => res.end("ok"));
+    await new Promise<void>((r) => target.listen(0, "127.0.0.1", r));
+    const tport = (target.address() as { port: number }).port;
+    const p = await startEgressProxy({ allowedHosts: () => ["site.test"], upstream: null, host: "0.0.0.0", authorize: (t) => t === "good", resolve: async () => ["127.0.0.1"] });
+    const port = Number(new URL(p.url).port);
+    const ask = (from: string, line: string, auth?: string) =>
+      new Promise<string>((resolve) => {
+        const header = auth ? `Proxy-Authorization: Basic ${Buffer.from(auth).toString("base64")}\r\n` : "";
+        const s = connect(port, from, () => s.write(`${line}\r\nHost: site.test:${tport}\r\n${header}\r\n`));
+        s.once("data", (d) => {
+          resolve(d.toString().split("\r\n")[0]!);
+          s.destroy();
+        });
+      });
+    const tunnel = `CONNECT site.test:${tport} HTTP/1.1`;
+    expect(await ask(ip!, tunnel)).toBe("HTTP/1.1 407 Proxy Authentication Required");
+    expect(await ask(ip!, tunnel, "task:bad")).toBe("HTTP/1.1 403 Forbidden");
+    expect(await ask(ip!, tunnel, "task:good")).toBe("HTTP/1.1 200 Connection Established");
+    expect(await ask(ip!, `GET http://site.test:${tport}/ HTTP/1.1`)).toBe("HTTP/1.1 407 Proxy Authentication Required");
+    expect(await ask(ip!, `GET http://site.test:${tport}/ HTTP/1.1`, "task:good")).toBe("HTTP/1.1 200 OK");
+    // This machine's own browser needs no token.
+    expect(await ask("127.0.0.1", tunnel)).toBe("HTTP/1.1 200 Connection Established");
+    await p.close();
+    target.close();
   });
 });
 

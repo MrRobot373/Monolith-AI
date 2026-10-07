@@ -189,6 +189,11 @@ export class BrowserService {
     return !!this.opts.executablePath;
   }
 
+  /** The egress proxy (started on first use), also used by task containers in container mode. */
+  egress() {
+    return this.opts.egress();
+  }
+
   private async wrapper(): Promise<string> {
     const p = join(this.opts.runtimeDir, "aatmiq-chromium");
     await mkdir(this.opts.runtimeDir, { recursive: true });

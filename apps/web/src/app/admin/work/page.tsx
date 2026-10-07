@@ -7,7 +7,7 @@ import { ConnectorsSection } from "@/components/admin/connectors";
 import { Section } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Card, Switch } from "@/components/ui/misc";
 import { Skeleton } from "@/components/ui/spinner";
 import { StatTile } from "@/components/admin/charts";
@@ -22,11 +22,16 @@ interface WorkSettings {
   idleMinutes: number;
   browser: boolean;
   browserAllowedHosts: string[];
+  containerCpus: number;
+  containerMemoryMb: number;
+  containerNetwork: "proxy" | "none";
 }
 interface AdminWork {
   settings: WorkSettings;
   licensed: boolean;
   browserInstalled: boolean;
+  /** "container" when the server runs each task in its own Docker container. */
+  isolation: "container" | "process";
   stats: { running: number; queued: number; week: number };
 }
 
@@ -156,6 +161,25 @@ export default function AdminWorkPage() {
           </div>
         </Card>
       </Section>
+
+      {d.isolation === "container" && (
+        <Section title="Containers" description="Each task runs in its own container with only its folder, a read-only system and these limits.">
+          <Card className="grid gap-4 p-5 sm:grid-cols-3" data-testid="container-settings">
+            <Field label="CPUs per task">
+              <Input type="number" min={0.25} max={64} step={0.25} value={form.containerCpus} onChange={(e) => setForm({ ...form, containerCpus: Math.max(0.25, Math.min(64, Number(e.target.value) || 1)) })} />
+            </Field>
+            <Field label="Memory per task (MB)">
+              <Input type="number" min={256} max={262144} step={256} value={form.containerMemoryMb} onChange={(e) => setForm({ ...form, containerMemoryMb: Math.max(256, Math.min(262144, Math.round(Number(e.target.value) || 1024))) })} />
+            </Field>
+            <Field label="Internet" hint="Private addresses are refused, except the internal sites listed under Browser.">
+              <Select value={form.containerNetwork} onChange={(e) => setForm({ ...form, containerNetwork: e.target.value as WorkSettings["containerNetwork"] })} data-testid="container-network">
+                <option value="proxy">Public internet, through Aatmiq</option>
+                <option value="none">None (only Aatmiq itself)</option>
+              </Select>
+            </Field>
+          </Card>
+        </Section>
+      )}
 
       <Section title="Limits">
         <Card className="divide-y divide-border">

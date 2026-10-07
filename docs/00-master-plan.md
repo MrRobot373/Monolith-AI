@@ -74,7 +74,7 @@ Plain assistant. **No tool calling.**
 
 ### 4.3 Section 2 — Work AI (agent harness, "Cowork")
 The user assigns a task and the agent carries it out.
-- Engine: DSH wrapped by `packages/harness`. Each task runs as its own Unix user with commands confined to its folder (D25); per-user containers follow in P2.1. See [06-work-ai.md](06-work-ai.md).
+- Engine: DSH wrapped by `packages/harness`. Each task runs as its own Unix user with commands confined to its folder (D25), or in its own container with CPU/memory limits and no network beyond Aatmiq's proxy (container mode, P2.1, D32). See [06-work-ai.md](06-work-ai.md).
 - Tools: file system, shell, code execution, web search (self-hosted SearXNG, so searches stay private), browser, skills.
 - Connectors (via MCP): Slack, Gmail, Google Drive, Google Calendar, GitHub, GitLab, Jira, Notion, Confluence… The admin enables them; each user signs in to their own accounts.
 - Task UI: plan → live steps timeline → tool calls with inputs/outputs → approvals for risky actions → final result/artifacts.
@@ -223,7 +223,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 |---|---|---|
 | **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw with password reset, email confirmation and two-step sign-in that admins can require, email via SMTP, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
 | **P1 Chat** ✅ | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
-| **P2 Work AI** ✅ | DSH adapter, sandboxing (per-task user + Landlock; containers in P2.1), tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules ([details](06-work-ai.md)) | Cowork-class agent |
+| **P2 Work AI** ✅ | DSH adapter, sandboxing (per-task user + Landlock; container per task in P2.1 ✅), tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules ([details](06-work-ai.md)) | Cowork-class agent |
 | **P3 Code** ✅ (web) | Code-OSS build with our patch set, branding, Open VSX, web IDE in Aatmiq, Aatmiq panel wired to the harness ([details](07-code.md)); desktop build next | Cursor-class IDE |
 | **P4 Enterprise** | SAML/OIDC, audit exports, retention policies, Helm/K8s, offline licenses, backups, SOC2-style docs | Mid-size readiness |
 | **Parallel** | Marketing site + Super Admin license server (license server + console ✅) | Sales and customer management |
@@ -233,8 +233,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 ### Still open (2026-10-07)
 - **Before wide release:** a `main` branch and CI on every push; a real sign-in once per connector a
   customer turns on ([09-connectors.md](09-connectors.md)).
-- **Planned features:** desktop IDE (P3), container mode for Work AI (P2.1), project tasks with
-  Work AI (Projects phase C).
+- **Planned features:** desktop IDE (P3), project tasks with Work AI (Projects phase C).
 - **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.

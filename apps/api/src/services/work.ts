@@ -28,7 +28,7 @@ import {
   sql,
   type DB,
 } from "@aatmiq/db";
-import { createDshEngine, type ConnectorSpec, type HarnessEngine, type HarnessEvent, type TaskRuntime } from "@aatmiq/harness";
+import { containerLauncher, createDshEngine, egressToken, removeStaleContainers, type ConnectorSpec, type HarnessEngine, type HarnessEvent, type TaskRuntime } from "@aatmiq/harness";
 import { DEFAULT_WORK_SETTINGS, PRODUCT_NAME, type WorkSettingsValue } from "@aatmiq/shared";
 import { librarySkills, shipsFile, type LibraryCategory } from "@aatmiq/skills";
 
@@ -65,6 +65,8 @@ interface Live {
   /** Where the agent works and as whom (the browser uses the same). */
   workdir?: string;
   runUid?: number;
+  /** Container mode: the task may use the egress proxy (Admin → Work AI → Containers → Internet). */
+  internet?: boolean;
   idleTimer?: NodeJS.Timeout;
 }
 
@@ -121,6 +123,8 @@ export class WorkRunner {
   private seqs = new Map<string, number>();
   private approvalWaiters = new Map<string, Set<() => void>>();
   private engine: HarnessEngine;
+  /** Container mode: Work AI tasks run here (Aatmiq Code's agent stays in the person's IDE workspace). */
+  private containerEngine: HarnessEngine | null = null;
   private stopped = false;
 
   constructor(
@@ -128,6 +132,32 @@ export class WorkRunner {
     private opts: { controlUrl: () => string; engine?: HarnessEngine; log?: (msg: string, err?: unknown) => void },
   ) {
     this.engine = opts.engine ?? createDshEngine();
+    const c = ctx.cfg.workContainer;
+    if (ctx.cfg.workIsolation === "container" && c && !opts.engine) {
+      const apiHost = new URL(ctx.cfg.workControlUrl ?? "http://aatmiq-api:4000").hostname;
+      this.containerEngine = createDshEngine({
+        launcher: containerLauncher({
+          docker: c.docker,
+          image: c.image,
+          network: c.network,
+          volume: c.volume,
+          proxyUrl: `http://${apiHost}:${ctx.cfg.egressPort ?? 3128}`,
+          noProxy: [apiHost],
+          limits: { cpus: 2, memoryMb: 4096, pidsLimit: 1024, network: "proxy" },
+        }),
+      });
+    }
+  }
+
+  /** Whether a task container may use the egress proxy: its credential, and the setting it started with. */
+  proxyAllowed(credential: string): boolean {
+    for (const l of this.live.values()) if (l.internet && egressToken(l.token) === credential) return true;
+    return false;
+  }
+
+  /** "container" when Work AI tasks run in their own Docker containers. */
+  get mode(): "container" | "process" {
+    return this.containerEngine ? "container" : "process";
   }
 
   get dir() {
@@ -277,6 +307,8 @@ export class WorkRunner {
       do {
         this.pumpAgain = false;
         const settings = await getWorkSettings(this.ctx.db);
+        // The egress proxy (browser, task containers) lets through the internal hosts listed now.
+        if (this.ctx.browser) this.ctx.browser.allowedHosts = settings.browserAllowedHosts;
         const queued = await this.ctx.db
           .select({ id: workTask.id, userId: workTask.userId })
           .from(workTask)
@@ -322,7 +354,11 @@ export class WorkRunner {
       await this.prepareFolder(taskId, runUid);
       if (code) await this.ctx.code.prepare(task.userId, workdir);
       const [org] = await db.select({ productName: organization.productName }).from(organization).limit(1);
-      const runtime = await this.engine.start(
+      // Container mode: Work AI tasks get their own container; the container is their sandbox.
+      const inContainer = !code && !!this.containerEngine;
+      const engine = inContainer ? this.containerEngine! : this.engine;
+      l.internet = inContainer && settings.containerNetwork === "proxy";
+      const runtime = await engine.start(
         {
           taskId,
           workdir,
@@ -337,7 +373,10 @@ export class WorkRunner {
           skillsDir,
           connectors: await this.connectorSpecs(task.userId, token),
           productName: org?.productName ?? PRODUCT_NAME,
-          sandbox: this.ctx.cfg.workSandbox ?? "on",
+          sandbox: inContainer ? "off" : (this.ctx.cfg.workSandbox ?? "on"),
+          ...(inContainer
+            ? { container: { cpus: settings.containerCpus, memoryMb: settings.containerMemoryMb, pidsLimit: 1024, network: settings.containerNetwork } }
+            : {}),
           ...(this.isolated ? { uid: runUid, gid: runUid } : {}),
           ...(code
             ? {
@@ -514,6 +553,7 @@ export class WorkRunner {
 
   /** After a restart nothing is running: unfinished tasks fail visibly, queued ones start again. */
   async recover() {
+    if (this.containerEngine) await removeStaleContainers(this.ctx.cfg.workContainer?.docker);
     const stale = await this.ctx.db
       .select({ id: workTask.id })
       .from(workTask)

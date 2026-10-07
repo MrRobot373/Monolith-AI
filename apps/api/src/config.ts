@@ -20,8 +20,15 @@ export interface Config {
   workControlUrl?: string | null;
   /** "on": commands can only change the task folder (bwrap/Landlock). "off" where the kernel offers neither. */
   workSandbox?: "on" | "off";
-  /** "auto": each task runs as its own Unix user when the API runs as root. "off": same user as the API. */
-  workIsolation?: "auto" | "off";
+  /**
+   * "auto": each task runs as its own Unix user when the API runs as root. "off": same user as the API.
+   * "container": each Work AI task also runs in its own Docker container (see workContainer).
+   */
+  workIsolation?: "auto" | "off" | "container";
+  /** Container mode: the image, network and volume task containers use. */
+  workContainer?: { image: string; network: string; volume: { name: string; root: string } | null; docker: string } | null;
+  /** Port the browser's (and task containers') egress proxy listens on; 0 = any, on 127.0.0.1 only. */
+  egressPort?: number;
   /** Aatmiq Code homes (one per person). */
   codeDir?: string;
   /**
@@ -59,7 +66,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workDir: env.WORK_DIR ?? ".data/work",
     workControlUrl: env.WORK_CONTROL_URL || null,
     workSandbox: env.WORK_SANDBOX === "off" ? "off" : "on",
-    workIsolation: env.WORK_ISOLATION === "off" ? "off" : "auto",
+    workIsolation: env.WORK_ISOLATION === "off" ? "off" : env.WORK_ISOLATION === "container" ? "container" : "auto",
+    workContainer: loadWorkContainer(env),
+    egressPort: Number(env.EGRESS_PORT ?? (env.WORK_ISOLATION === "container" ? 3128 : 0)),
     codeDir: env.CODE_DIR ?? ".data/code",
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
     ideUrl: loadIdeUrl(env.IDE_URL, env.APP_URL ?? "http://localhost:3000"),
@@ -105,4 +114,17 @@ export function loadIdeUrl(value: string | undefined, appUrl: string): string | 
   if (u.pathname !== "/" || u.search || u.hash) throw new Error("IDE_URL must be just the address, without a path");
   if (u.host === new URL(appUrl).host) throw new Error("IDE_URL must be a different hostname from APP_URL");
   return u.origin;
+}
+
+/** Container mode needs an image and a control URL the task network can reach. */
+export function loadWorkContainer(env: NodeJS.ProcessEnv) {
+  if (env.WORK_ISOLATION !== "container") return null;
+  if (!env.WORK_CONTAINER_IMAGE) throw new Error("WORK_ISOLATION=container needs WORK_CONTAINER_IMAGE (the API image, e.g. aatmiq-api)");
+  if (!env.WORK_CONTROL_URL) throw new Error("WORK_ISOLATION=container needs WORK_CONTROL_URL, the API as task containers reach it (e.g. http://aatmiq-api:4000/api/internal/work)");
+  return {
+    image: env.WORK_CONTAINER_IMAGE,
+    network: env.WORK_CONTAINER_NETWORK || "aatmiq_tasks",
+    volume: env.WORK_CONTAINER_VOLUME ? { name: env.WORK_CONTAINER_VOLUME, root: env.WORK_CONTAINER_VOLUME_ROOT || "/data" } : null,
+    docker: env.DOCKER_CLI || "docker",
+  };
 }

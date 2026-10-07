@@ -5,6 +5,10 @@
  * that host. It connects to exactly the address it checked (no DNS-rebinding gap); behind a
  * corporate proxy (HTTPS_PROXY) public sites go through that one, while internal hosts an admin
  * allowed are reached directly (a corporate proxy usually can't reach them).
+ *
+ * In container mode task containers use it too: they send their task token as the proxy password,
+ * and a task whose admin setting gives it no internet is refused (loopback, this machine's own
+ * browser, needs no token).
  */
 import { lookup } from "node:dns/promises";
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -56,6 +60,11 @@ export interface EgressOptions {
   upstream: string | null;
   /** Resolve names (tests replace it). */
   resolve?: (host: string) => Promise<string[]>;
+  /** Where to listen: 127.0.0.1 and any port by default; container mode listens for task containers. */
+  host?: string;
+  /** For clients other than this machine: whether the task with this token may go out. Unset: none may. */
+  authorize?: (token: string) => boolean;
+  port?: number;
   log?: (msg: string) => void;
 }
 
@@ -131,12 +140,26 @@ export async function startEgressProxy(opts: EgressOptions): Promise<EgressProxy
     s.on("error", onError);
   }
 
+  /** Null when the client may use the proxy; otherwise the status to refuse it with. */
+  function denied(req: IncomingMessage): "407 Proxy Authentication Required" | "403 Forbidden" | null {
+    const ip = req.socket.remoteAddress ?? "";
+    if (ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1") return null;
+    const basic = /^Basic\s+(\S+)$/i.exec(req.headers["proxy-authorization"] ?? "")?.[1];
+    const token = basic ? Buffer.from(basic, "base64").toString().split(":").slice(1).join(":") : "";
+    if (!token) return "407 Proxy Authentication Required";
+    return opts.authorize?.(token) ? null : "403 Forbidden";
+  }
+  const NO_TOKEN = "Proxy-Authenticate: Basic realm=\"aatmiq\"\r\n";
+  const NO_INTERNET = encodeURIComponent("this task has no internet access");
+
   async function onConnect(req: IncomingMessage, client: Duplex, head: Buffer) {
+    client.on("error", () => undefined);
+    const no = denied(req);
+    if (no) return client.end(`HTTP/1.1 ${no}\r\n${no.startsWith("407") ? NO_TOKEN : `X-Aatmiq-Blocked: ${NO_INTERNET}\r\n`}Content-Length: 0\r\n\r\n`);
     const m = /^\[?([^\]]+?)\]?:(\d+)$/.exec(req.url ?? "");
     if (!m) return client.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     const [, host, portStr] = m;
     const port = Number(portStr);
-    client.on("error", () => undefined);
     let address: string | null;
     try {
       address = await check(host!);
@@ -159,6 +182,11 @@ export async function startEgressProxy(opts: EgressOptions): Promise<EgressProxy
   }
 
   async function onRequest(req: IncomingMessage, res: ServerResponse) {
+    const no = denied(req);
+    if (no) {
+      res.writeHead(Number(no.slice(0, 3)), no.startsWith("407") ? { "proxy-authenticate": 'Basic realm="aatmiq"' } : { "x-aatmiq-blocked": NO_INTERNET }).end();
+      return;
+    }
     let target: URL;
     try {
       target = new URL(req.url ?? "");
@@ -194,7 +222,7 @@ export async function startEgressProxy(opts: EgressOptions): Promise<EgressProxy
 
   const server: Server = createServer((req, res) => void onRequest(req, res));
   server.on("connect", (req, socket, head) => void onConnect(req, socket, head));
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  await new Promise<void>((r) => server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", r));
   const addr = server.address() as { port: number };
   return {
     url: `http://127.0.0.1:${addr.port}`,

@@ -12,6 +12,11 @@ export const DEFAULT_WORK_SETTINGS = {
   browser: true,
   /** Internal hosts the browser may open anyway (private addresses are refused otherwise). */
   browserAllowedHosts: [] as string[],
+  /** Container mode: CPUs, memory and internet access per task. */
+  containerCpus: 2,
+  containerMemoryMb: 4096,
+  /** "proxy": public internet through Aatmiq's filtering proxy. "none": no internet. */
+  containerNetwork: "proxy" as "proxy" | "none",
 };
 export type WorkSettingsValue = typeof DEFAULT_WORK_SETTINGS;
 
@@ -23,6 +28,9 @@ export const workSettingsSchema = z.object({
   idleMinutes: z.number().int().min(1).max(240).optional(),
   disabledLibrarySkills: z.array(z.string().max(80)).max(500).optional(),
   browser: z.boolean().optional(),
+  containerCpus: z.number().min(0.25).max(64).optional(),
+  containerMemoryMb: z.number().int().min(256).max(262_144).optional(),
+  containerNetwork: z.enum(["proxy", "none"]).optional(),
   browserAllowedHosts: z
     .array(z.string().trim().toLowerCase().regex(/^(\*\.)?[a-z0-9.-]+$|^[0-9a-f:.]+$/, "Use host names like intranet.acme.com or *.acme.internal"))
     .max(200)

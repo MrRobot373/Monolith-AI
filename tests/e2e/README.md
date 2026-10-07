@@ -59,6 +59,21 @@ then a person without it only gets the setup page (also at phone width) until it
 E2E_SCRIPT=$PWD/tests/e2e/account.mjs tests/e2e/run-work.sh
 ```
 
+## Work AI container mode
+
+`run-containers.sh` starts the Compose stack with `deploy/docker-compose.containers.yml` (images
+`aatmiq-api:dev` and `aatmiq-web:dev`, on :3999) and the fake model on the host, then
+`containers.mjs` checks from inside real task containers: the task's own user, CPU and memory
+limits (cgroup v1 or v2), only its own folder, a read-only system; the network (an allowed internal
+host through Aatmiq's proxy, the database refused, nothing direct, and *Internet: none* refused even
+with the proxy set by hand); new limits for the next task; clean-up on stop and after an API
+restart. `KEEP=1` leaves the stack running.
+
+```bash
+docker build -f deploy/Dockerfile.api -t aatmiq-api:dev . && docker build -f deploy/Dockerfile.web -t aatmiq-web:dev .
+tests/e2e/run-containers.sh
+```
+
 ## Screenshots of every page
 
 `screens.mjs` captures each app page in dark, light and phone views with sample data (after
