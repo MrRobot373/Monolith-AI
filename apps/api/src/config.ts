@@ -24,6 +24,11 @@ export interface Config {
   workIsolation?: "auto" | "off";
   /** Aatmiq Code homes (one per person). */
   codeDir?: string;
+  /**
+   * Serve the IDE from its own address (https://ide.acme.com), apart from APP_URL, so extensions
+   * can never act on Aatmiq as the person. Empty: the IDE is under APP_URL/code/ide.
+   */
+  ideUrl?: string | null;
   /** Minutes an IDE without open windows keeps running. */
   codeIdleMinutes?: number;
   /** Outgoing mail server (smtp://user:pass@host:587 or smtps://…:465). Overrides Admin → Settings → Email. */
@@ -57,6 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workIsolation: env.WORK_ISOLATION === "off" ? "off" : "auto",
     codeDir: env.CODE_DIR ?? ".data/code",
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
+    ideUrl: loadIdeUrl(env.IDE_URL, env.APP_URL ?? "http://localhost:3000"),
     smtpUrl: env.SMTP_URL || null,
     mailFrom: env.MAIL_FROM || null,
     redisUrl: env.REDIS_URL || null,
@@ -84,4 +90,19 @@ export function loadS3(env: NodeJS.ProcessEnv): S3Config | null {
     sse,
     createBucket: env.S3_CREATE_BUCKET === "true",
   };
+}
+
+/** IDE_URL as an origin; it must be a different host from APP_URL (otherwise nothing is separated). */
+export function loadIdeUrl(value: string | undefined, appUrl: string): string | null {
+  if (!value) return null;
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    throw new Error("IDE_URL must be a full address, for example https://ide.acme.com");
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("IDE_URL must start with https://");
+  if (u.pathname !== "/" || u.search || u.hash) throw new Error("IDE_URL must be just the address, without a path");
+  if (u.host === new URL(appUrl).host) throw new Error("IDE_URL must be a different hostname from APP_URL");
+  return u.origin;
 }

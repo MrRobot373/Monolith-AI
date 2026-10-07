@@ -57,7 +57,9 @@ export async function buildApp(
     forceCloseConnections: true,
     serverFactory: (handler) =>
       createServer((req: IncomingMessage, res: ServerResponse) => {
-        if (ideProxy?.matches(req.url)) void ideProxy.http(req, res);
+        const to = ideProxy?.route(req) ?? "app";
+        if (to === "ide") void ideProxy!.http(req, res);
+        else if (to === "none") ideProxy!.refuse(req, res);
         else handler(req, res);
       }),
   });
@@ -131,6 +133,18 @@ export async function buildApp(
   await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
 
   app.get("/api/health", async () => ({ ok: true }));
+
+  // Changes only from Aatmiq's own pages: a browser always sends Origin with cross-site writes, so
+  // another site (or the IDE's host, with IDE_URL) can't make them with the person's cookies.
+  // Calls without Origin (servers, the agent runtime, scripts with tokens) are unaffected.
+  const APP_ORIGIN = new URL(cfg.appUrl).origin;
+  app.addHook("onRequest", async (req) => {
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return;
+    const path = req.url.split("?")[0]!;
+    if (!path.startsWith("/api/") || path.startsWith("/api/internal/")) return;
+    const origin = req.headers.origin;
+    if (origin && origin !== APP_ORIGIN) throw new HttpError(403, "Requests from other sites aren't allowed.", "bad_origin");
+  });
 
   // License enforcement for changes. Reading stays possible so nobody loses access to their history.
   //  - license not usable (missing, expired past grace, revoked): only sign-in, setup and entering a key work

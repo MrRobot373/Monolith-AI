@@ -74,6 +74,11 @@ export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T>
 export async function getSessionUser(ctx: AppContext, req: FastifyRequest): Promise<SessionUser | null> {
   const s = await ctx.auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
   if (!s) return null;
+  return userById(ctx, s.user.id);
+}
+
+/** The person behind a session that was already checked (active only), with the two-step rule applied. */
+export async function userById(ctx: AppContext, userId: string): Promise<SessionUser | null> {
   const [u] = await ctx.db
     .select({
       id: user.id,
@@ -89,7 +94,7 @@ export async function getSessionUser(ctx: AppContext, req: FastifyRequest): Prom
       ssoRequired: sql<boolean>`coalesce((select ${organization.ssoRequired} from ${organization} limit 1), false)`,
     })
     .from(user)
-    .where(eq(user.id, s.user.id));
+    .where(eq(user.id, userId));
   if (!u || u.status !== "active") return null;
   // Single sign-on users are exempt: the identity provider runs its own check.
   const usesPassword = u.hasPassword && (!u.ssoRequired || u.orgRole === "owner");

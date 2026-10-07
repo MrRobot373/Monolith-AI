@@ -71,10 +71,20 @@ added from the terminal (`~/.ssh`), since each person's home persists.
 - Isolation: each person's IDE, terminals and agent run as their own Unix user; homes are `0700`,
   the code root `0711`, documents and Work AI task folders are out of reach (needs the API to run as
   root, as in the Docker image).
-- **Same origin:** the IDE is served from the Aatmiq origin (`/code/ide`). Extension webviews run in
-  same-origin frames, so a malicious extension could send requests to Aatmiq as the person
+- **Its own host (`IDE_URL`, recommended):** the IDE is served from another hostname, for example
+  `https://ide.acme.com`, pointed at the same server as `APP_URL`. Opening a workspace returns a
+  one-time link (2 minutes) on the IDE host; the IDE host trades it for its own cookie
+  (`HttpOnly`, `Path=/code/ide`; `Secure; SameSite=None; Partitioned` over HTTPS so it works in the
+  Aatmiq frame), tied to the Aatmiq session that asked: signing out of Aatmiq ends it within 30
+  seconds, and it lasts at most 12 hours. The IDE host serves nothing but the IDE (Aatmiq's pages
+  and API answer 404 there), and Aatmiq stops serving `/code/ide`. Extensions and webviews then run
+  on an origin with no Aatmiq session; Aatmiq's API refuses changes whose `Origin` isn't `APP_URL`,
+  and the browser won't let the IDE origin read Aatmiq's responses. "Open in new tab" gets a fresh
+  link each time.
+- **Without `IDE_URL`:** the IDE is served from the Aatmiq origin (`/code/ide`). Extension webviews
+  run in same-origin frames, so a malicious extension could send requests to Aatmiq as the person
   (cookies are `HttpOnly` and never forwarded to the IDE, but the browser would attach them to
-  requests to `/api`). Only install extensions you trust. A separate hostname for the IDE is planned.
+  requests to `/api`). Only install extensions you trust, or set `IDE_URL`.
 - The panel token is in the IDE's environment, so the person's own terminals and extensions can use
   it. It only allows agent tasks in that person's own Code workspaces, and it ends when the IDE stops.
 

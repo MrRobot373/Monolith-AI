@@ -36,6 +36,8 @@ x-app-env: &app-env
   S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
   S3_SSE: ${S3_SSE:-}
   S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-}
+  # The IDE on its own address (recommended), e.g. https://ide.yourcompany.com (see .env.example).
+  IDE_URL: ${IDE_URL:-}
   # Job queue (Redis/Valkey). With it, background jobs run in the worker service (--profile worker).
   REDIS_URL: ${REDIS_URL:-}
   JOB_CONCURRENCY: ${JOB_CONCURRENCY:-2}
@@ -79,6 +81,8 @@ services:
       api: { condition: service_healthy }
     environment:
       SHOW_MARKETING: "false"
+      # With IDE_URL, Aatmiq's pages aren't served on the IDE's host.
+      IDE_URL: ${IDE_URL:-}
     ports:
       - "${HTTP_PORT:-3000}:3000"
 

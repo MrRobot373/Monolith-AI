@@ -23,6 +23,19 @@ export default function CodeWorkspacePage() {
     retry: false,
   });
 
+  // Each address works once when the IDE has its own host, so a new tab gets a fresh one. The tab
+  // opens right away (so it isn't blocked as a pop-up) and is pointed at the address when it arrives.
+  const openInNewTab = async () => {
+    const tab = window.open("", "_blank");
+    if (!tab) return;
+    tab.opener = null;
+    try {
+      tab.location.href = (await post<{ url: string }>(`/api/code/workspaces/${id}/open`)).url;
+    } catch {
+      tab.close();
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar
@@ -35,7 +48,7 @@ export default function CodeWorkspacePage() {
         title={w?.name ?? "Workspace"}
         actions={
           open.data && (
-            <TopBarButton onClick={() => window.open(open.data.url, "_blank", "noopener")} data-testid="open-ide-tab">
+            <TopBarButton onClick={openInNewTab} data-testid="open-ide-tab">
               <ExternalLink /> <span className="hidden sm:inline">Open in new tab</span>
             </TopBarButton>
           )
@@ -61,7 +74,9 @@ export default function CodeWorkspacePage() {
             src={open.data.url}
             title={`${w?.name ?? "Workspace"} in Aatmiq Code`}
             className="absolute inset-0 h-full w-full border-0"
-            allow="clipboard-read; clipboard-write"
+            // On its own host (IDE_URL) the frame is cross-origin and inherits nothing, so name the
+            // features the IDE uses as a same-origin frame would have them (each still asks first).
+            allow="clipboard-read; clipboard-write; cross-origin-isolated; autoplay; usb; serial; hid; local-network-access"
             data-testid="ide-frame"
           />
         )}

@@ -10,7 +10,9 @@ import { rm } from "node:fs/promises";
 import { z } from "zod";
 import { parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, notFound } from "../errors";
-import { codeSlug, IDE_BASE_PATH } from "../services/code";
+import { fromNodeHeaders } from "better-auth/node";
+import { codeSlug } from "../services/code";
+import { ideOpenUrl } from "./code-proxy";
 
 /** Code is in the license and enabled for the person in at least one workspace (admins always). */
 export async function canUseCode(ctx: AppContext, u: SessionUser): Promise<boolean> {
@@ -119,7 +121,9 @@ export async function codeRoutes(app: FastifyInstance, ctx: AppContext) {
     await ctx.code.prepare(u.id, path);
     await ctx.code.ensure(u.id);
     await db.update(codeWorkspace).set({ lastOpenedAt: new Date() }).where(eq(codeWorkspace.id, w.id));
-    return { url: `${IDE_BASE_PATH}/?folder=${encodeURIComponent(path)}` };
+    const s = await ctx.auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+    // With IDE_URL: a one-time address on the IDE host (each call gives a new one).
+    return { url: await ideOpenUrl(ctx, u.id, s!.session.id, path) };
   });
 
 }

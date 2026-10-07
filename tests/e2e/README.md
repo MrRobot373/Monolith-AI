@@ -38,6 +38,8 @@ Git server, and access rules.
 
 ```bash
 E2E_SCRIPT=$PWD/tests/e2e/code.mjs tests/e2e/run-work.sh
+# the IDE on its own host (adds a check that it can't reach Aatmiq, and a fresh link per new tab):
+IDE_URL=http://ide.localhost:3300 E2E_SCRIPT=$PWD/tests/e2e/code.mjs tests/e2e/run-work.sh
 ```
 
 ## Accounts: email, password reset, email confirmation, two-step sign-in

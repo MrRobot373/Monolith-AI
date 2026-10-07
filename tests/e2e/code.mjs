@@ -75,6 +75,8 @@ const api = async (method, path, data) => {
   return { status: r.status(), json: await r.json().catch(() => null) };
 };
 const ide = () => page.frameLocator('[data-testid="ide-frame"]');
+// Set (e.g. http://ide.localhost:3300) when the stack serves the IDE from its own host.
+const IDE_URL = process.env.IDE_URL || "";
 const panel = () => ide().frameLocator("iframe.webview").frameLocator("iframe");
 const explorer = () => ide().locator(".explorer-folders-view");
 const waitFor = async (fn, ms = 30000) => {
@@ -113,7 +115,25 @@ await step("Code", "Create a workspace; the IDE opens inside Aatmiq", async () =
   await page.locator("aside").getByText("Billing service").waitFor();
   const frame = page.frames().find((f) => f.url().includes("/code/ide"));
   expect(/Aatmiq Code/.test((await frame?.title()) ?? ""), `title: ${await frame?.title()}`);
+  if (IDE_URL) expect(frame.url().startsWith(`${IDE_URL}/code/ide`), `IDE frame at ${frame.url()}`);
 });
+if (IDE_URL)
+  await step("Code", "On its own host the IDE can't reach Aatmiq, and a new tab gets a fresh link", async () => {
+    const frame = page.frames().find((f) => f.url().startsWith(`${IDE_URL}/code/ide`));
+    // From inside the IDE (where extensions run): Aatmiq's API is another origin and refuses.
+    const read = await frame.evaluate((app) => fetch(`${app}/api/me`, { credentials: "include" }).then((r) => r.status, () => "blocked"), APP);
+    expect(read === "blocked", `reading Aatmiq from the IDE: ${read}`);
+    const write = await frame.evaluate((app) => fetch(`${app}/api/me`, { method: "PATCH", credentials: "include", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => r.status, () => "blocked"), APP);
+    expect(write === "blocked", `changing Aatmiq from the IDE: ${write}`);
+    const own = await frame.evaluate(() => fetch("/api/me").then((r) => r.status));
+    expect(own === 404, `the IDE host's own /api: ${own}`);
+    // The browser logs the refused requests above (the IDE's CSP); they're what this step expects.
+    for (let i = consoleErrors.length - 1; i >= 0; i--) if (consoleErrors[i].includes(`${APP}/api/me`)) consoleErrors.splice(i, 1);
+    const [tab] = await Promise.all([page.waitForEvent("popup"), page.getByTestId("open-ide-tab").click()]);
+    await tab.waitForURL((u) => u.href.startsWith(`${IDE_URL}/code/ide`));
+    await tab.locator(".monaco-workbench").waitFor({ timeout: 40000 });
+    await tab.close();
+  });
 await step("Code", "The terminal runs as the person, with their Git identity", async () => {
   await ide().locator(".monaco-workbench").click({ position: { x: 700, y: 400 } });
   await page.keyboard.press("Control+Backquote");
@@ -209,8 +229,17 @@ await step("Manage", "Rename and delete workspaces", async () => {
 });
 await step("Manage", "Signed out, the IDE is not reachable", async () => {
   const anon = await browser.newContext();
-  const r = await anon.request.get(`${APP}/code/ide/`);
-  expect(r.status() === 401, `status ${r.status()}`);
+  if (IDE_URL) {
+    const p = await anon.newPage();
+    const r = await p.goto(`${IDE_URL}/code/ide/`);
+    expect(r.status() === 401, `IDE host status ${r.status()}`);
+    await p.getByText("Open your workspace from Aatmiq").waitFor();
+    const moved = await anon.request.get(`${APP}/code/ide/`);
+    expect(moved.status() === 404, `app host status ${moved.status()}`);
+  } else {
+    const r = await anon.request.get(`${APP}/code/ide/`);
+    expect(r.status() === 401, `status ${r.status()}`);
+  }
   await anon.close();
 });
 
