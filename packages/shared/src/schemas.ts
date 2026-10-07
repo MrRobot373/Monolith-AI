@@ -57,6 +57,8 @@ export const modelSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
   kind: z.enum(["chat", "embedding"]).default("chat"),
   contextLength: z.number().int().positive().max(10_000_000).optional(),
+  /** Accepts images. Detected from Ollama when not given. */
+  vision: z.boolean().optional(),
   sections: z.array(z.enum(SECTIONS)).default(["chat", "work", "code"]),
   enabled: z.boolean().default(true),
   costInPerM: z.number().nonnegative().optional(),
@@ -68,6 +70,7 @@ export const modelUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   kind: z.enum(["chat", "embedding"]).optional(),
   contextLength: z.number().int().positive().max(10_000_000).optional(),
+  vision: z.boolean().optional(),
   sections: z.array(z.enum(SECTIONS)).optional(),
   enabled: z.boolean().optional(),
   costInPerM: z.number().nonnegative().optional(),

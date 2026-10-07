@@ -8,6 +8,9 @@ export type ApprovalMode = "risky" | "always" | "never";
 export interface ConnectorSpec {
   /** Tool namespace: tools appear as mcp__<name>__<tool>. */
   name: string;
+  /** What people call it ("Gmail"), and whose account it is, for the agent's brief. */
+  displayName?: string;
+  account?: string | null;
   url: string;
   headers?: Record<string, string>;
   /** Tool-name globs (without the mcp__name__ prefix) that need a person's approval. "*" = all. */
@@ -21,7 +24,7 @@ export interface TaskSpec {
   /** Engine state for this task (session log, config). */
   homeDir: string;
   /** Model route served by Aatmiq's gateway. */
-  model: { key: string; name: string; contextWindow: number };
+  model: { key: string; name: string; contextWindow: number; vision?: boolean };
   /** Base URL of Aatmiq's internal API, reachable from the runtime. */
   controlUrl: string;
   /** Per-task secret for the gateway and control endpoints. */

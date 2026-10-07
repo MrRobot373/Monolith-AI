@@ -16,7 +16,7 @@ import {
   workspace,
   workspaceMember,
 } from "@aatmiq/db";
-import { keyStatus, listModels, testProvider } from "@aatmiq/model-gateway";
+import { keyStatus, listModels, modelInfo, testProvider } from "@aatmiq/model-gateway";
 import {
   BUDGET_PERIODS,
   brandingSchema,
@@ -155,6 +155,7 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         displayName: model.displayName,
         kind: model.kind,
         contextLength: model.contextLength,
+        vision: model.vision,
         sections: model.sections,
         enabled: model.enabled,
         costInPerM: model.costInPerM,
@@ -169,8 +170,14 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.models.manage");
     const body = parse(modelSchema, req.body);
-    await loadProvider(body.providerId);
-    const [m] = await db.insert(model).values(body).onConflictDoNothing().returning();
+    const p = await loadProvider(body.providerId);
+    // Fill in what the provider knows (Ollama reports image support and context length).
+    const info = body.vision === undefined || body.contextLength === undefined ? await modelInfo(providerCfg(p), body.modelKey) : {};
+    const [m] = await db
+      .insert(model)
+      .values({ ...body, vision: body.vision ?? info.vision ?? false, contextLength: body.contextLength ?? info.contextLength })
+      .onConflictDoNothing()
+      .returning();
     if (!m) throw badRequest("This model is already added for that provider.");
     await audit(ctx, { actor: u, action: "model.added", targetType: "model", targetId: m.id, meta: { modelKey: body.modelKey } });
     return m;

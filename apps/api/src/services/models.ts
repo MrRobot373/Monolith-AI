@@ -11,6 +11,7 @@ export interface AvailableModel {
   providerName: string;
   providerType: string;
   contextLength: number | null;
+  vision: boolean;
   isDefault: boolean;
 }
 
@@ -24,6 +25,7 @@ export async function availableModels(db: DB, workspaceId: string, section: Sect
       modelKey: model.modelKey,
       sections: model.sections,
       contextLength: model.contextLength,
+      vision: model.vision,
       providerName: modelProvider.name,
       providerType: modelProvider.type,
     })

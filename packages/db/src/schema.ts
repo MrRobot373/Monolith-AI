@@ -219,6 +219,8 @@ export const model = pgTable(
     displayName: text("display_name").notNull(),
     kind: modelKindEnum("kind").notNull().default("chat"),
     contextLength: integer("context_length"),
+    /** Accepts images as input (the agent can look at pictures and screenshots). */
+    vision: boolean("vision").notNull().default(false),
     sections: text("sections").array().notNull().default(sql`ARRAY['chat','work','code']::text[]`),
     enabled: boolean("enabled").notNull().default(true),
     costInPerM: real("cost_in_per_m"),
@@ -700,6 +702,12 @@ export const workSchedule = pgTable(
   (t) => [index("work_schedule_due_idx").on(t.enabled, t.nextRunAt)],
 );
 
+/**
+ * How a connector signs in: `none` (open server), `token` (shared headers the admin enters) or
+ * `oauth` (each person connects their own account).
+ */
+export const connectorAuthEnum = pgEnum("connector_auth", ["none", "token", "oauth"]);
+
 /** Org-level MCP servers the agent can use as tools (Slack, GitHub, Jira…). */
 export const connector = pgTable("connector", {
   id: id(),
@@ -707,14 +715,63 @@ export const connector = pgTable("connector", {
   name: text("name").notNull().unique(),
   displayName: text("display_name").notNull(),
   url: text("url").notNull(),
+  /** Catalog entry it was added from (packages/shared connectors catalog), if any. */
+  catalogId: text("catalog_id"),
+  auth: connectorAuthEnum("auth").notNull().default("none"),
   /** Request headers (e.g. Authorization), encrypted JSON. */
   headersEnc: text("headers_enc"),
+  /** OAuth client: entered by the admin, or registered automatically (dynamic client registration). */
+  oauthClientId: text("oauth_client_id"),
+  oauthClientSecretEnc: text("oauth_client_secret_enc"),
+  /** Space-separated scopes to request; empty means the catalog's or the server's defaults. */
+  oauthScopes: text("oauth_scopes"),
+  /** Discovered authorization server details and how the client was registered. */
+  oauthMeta: jsonb("oauth_meta").$type<ConnectorOAuthMeta>(),
   /** Tools whose names match are always approved by a person first (comma-separated globs). */
   approveTools: text("approve_tools").notNull().default("*"),
   enabled: boolean("enabled").notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+export type ConnectorOAuthMeta = {
+  resource: string;
+  issuer: string;
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+  revocationEndpoint?: string;
+  scopesSupported?: string[];
+  tokenAuthMethods?: string[];
+  /** How the client id was obtained: entered by an admin, dynamic registration, or a metadata document URL. */
+  client: "admin" | "dynamic" | "metadata";
+  /** The redirect URI the client was registered with (re-register if the app URL changes). */
+  redirectUri?: string;
+};
+
+/** A person's own sign-in to an OAuth connector (Gmail, Canva…). Tokens are encrypted. */
+export const connectorAccount = pgTable(
+  "connector_account",
+  {
+    id: id(),
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => connector.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accessTokenEnc: text("access_token_enc").notNull(),
+    refreshTokenEnc: text("refresh_token_enc"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    /** Who signed in, when the server says (an email or account name). */
+    label: text("label"),
+    /** `expired` when a refresh failed: the person has to connect again. */
+    status: text("status").notNull().default("ok"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("connector_account_user_idx").on(t.connectorId, t.userId)],
+);
 
 /* ───────────── Code (Aatmiq IDE) ───────────── */
 

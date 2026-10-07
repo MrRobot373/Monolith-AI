@@ -241,9 +241,15 @@ await step("Schedules", "Schedule a weekday task, preview runs, run it now", pag
 await step("Connectors", "Add an MCP connector and list its tools", page, async () => {
   await page.goto(`${APP}/admin/work`);
   await page.getByTestId("add-connector").click();
+  await page.getByTestId("catalog-canva").waitFor();
+  await page.getByTestId("catalog-search").fill("mail");
+  await page.getByTestId("catalog-gmail").waitFor();
+  await shot(page, "connector-catalog");
+  await page.getByTestId("catalog-custom").click();
   await page.getByTestId("connector-display-name").fill("Notes");
   await page.getByTestId("connector-url").fill(`${FAKE}/mcp`);
-  await page.locator('[role="dialog"] input.font-mono').last().fill("create_*");
+  await page.getByTestId("connector-approvals").selectOption("custom");
+  await page.getByTestId("connector-rule").fill("create_*");
   await page.getByTestId("save-connector").click();
   const row = page.getByTestId("connector-row").filter({ hasText: "Notes" });
   await row.waitFor();
@@ -261,6 +267,38 @@ await step("Connectors", "The agent uses the connector after approval", page, as
   await page.getByTestId("approve").click();
   await waitStatus(page, "completed");
   await page.getByTestId("task-answer").filter({ hasText: "Saved note #1: Ship Work AI" }).waitFor();
+});
+
+await step("Connectors", "Gmail from the catalog asks the admin for an OAuth app", page, async () => {
+  await page.goto(`${APP}/admin/work`);
+  await page.getByTestId("add-connector").click();
+  await page.getByTestId("catalog-gmail").click();
+  await page.getByTestId("redirect-uri").waitFor();
+  if (!(await page.getByTestId("redirect-uri").inputValue()).endsWith("/api/connectors/oauth/callback")) throw new Error("wrong redirect URI");
+  if (!(await page.getByTestId("save-connector").isDisabled())) throw new Error("Gmail saved without a client ID");
+  await shot(page, "connector-gmail-setup");
+  await page.keyboard.press("Escape");
+});
+await step("Connectors", "A person connects their own account (OAuth) and a task uses it", page, async () => {
+  await page.goto(`${APP}/admin/work`);
+  await page.getByTestId("add-connector").click();
+  await page.getByTestId("catalog-custom").click();
+  await page.getByTestId("connector-display-name").fill("Mail");
+  await page.getByTestId("connector-url").fill(`${FAKE}/oauth/mcp`);
+  await page.getByTestId("connector-auth").selectOption("oauth");
+  await page.getByTestId("save-connector").click();
+  await page.getByTestId("connector-row").filter({ hasText: "Each person signs in" }).waitFor();
+  await page.goto(`${APP}/app/work/connections`);
+  const row = page.getByTestId("connection-row").filter({ hasText: "Mail" });
+  await row.getByTestId("connect").click();
+  await page.waitForURL(/\/app\/work\/connections/);
+  await row.getByText("Signed in as asha@acme.test").waitFor();
+  await shot(page, "connections");
+  await page.goto(`${APP}/app/work`);
+  await send(page, "use mcp__mail__get_inbox {}");
+  await page.waitForURL(/\/app\/work\/[\w-]+$/);
+  await waitStatus(page, "completed");
+  await page.getByTestId("task-answer").filter({ hasText: "3 unread emails for asha@acme.test (via mail-token-1)" }).waitFor();
 });
 
 await step("Keys", "A provider key past its limit is skipped; admins see it resting", page, async () => {

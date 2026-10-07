@@ -1,18 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Plug, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ConnectorsSection } from "@/components/admin/connectors";
 import { Section } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/field";
-import { Badge, Card, Switch } from "@/components/ui/misc";
-import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
+import { Field, Input } from "@/components/ui/field";
+import { Card, Switch } from "@/components/ui/misc";
 import { Skeleton } from "@/components/ui/spinner";
 import { StatTile } from "@/components/admin/charts";
-import { del, get, patch, post, put } from "@/lib/api";
+import { get, post, put } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
 interface WorkSettings {
@@ -27,15 +26,6 @@ interface AdminWork {
   licensed: boolean;
   stats: { running: number; queued: number; week: number };
 }
-interface Connector {
-  id: string;
-  name: string;
-  displayName: string;
-  url: string;
-  approveTools: string;
-  enabled: boolean;
-  headerNames: string[];
-}
 
 const APPROVALS: { value: WorkSettings["approvals"]; title: string; desc: string }[] = [
   { value: "risky", title: "Before risky actions", desc: "Deleting files, system commands, network use, and connector tools you mark below. Recommended." },
@@ -46,11 +36,7 @@ const APPROVALS: { value: WorkSettings["approvals"]; title: string; desc: string
 export default function AdminWorkPage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["admin-work"], queryFn: () => get<AdminWork>("/api/admin/work") });
-  const connectors = useQuery({ queryKey: ["admin-connectors"], queryFn: () => get<Connector[]>("/api/admin/connectors") });
   const [form, setForm] = useState<WorkSettings | null>(null);
-  const [editing, setEditing] = useState<Connector | "new" | null>(null);
-  const [removing, setRemoving] = useState<Connector | null>(null);
-  const [tools, setTools] = useState<{ connector: Connector; tools: { name: string; description?: string }[] } | null>(null);
   useEffect(() => {
     if (q.data && !form) setForm(q.data.settings);
   }, [q.data, form]);
@@ -70,25 +56,6 @@ export default function AdminWorkPage() {
     onSuccess: (r) => (r.ok ? toast.success(`SearXNG works: ${r.results} results for a test search`) : toast.error(r.error ?? "Search failed")),
     onError: (e: Error) => toast.error(e.message),
   });
-  const refreshConnectors = () => qc.invalidateQueries({ queryKey: ["admin-connectors"] });
-  const toggle = useMutation({
-    mutationFn: (c: Connector) => patch(`/api/admin/connectors/${c.id}`, { enabled: !c.enabled }),
-    onSuccess: refreshConnectors,
-  });
-  const test = useMutation({
-    mutationFn: (c: Connector) => post<{ ok: boolean; error?: string; tools: { name: string; description?: string }[] }>(`/api/admin/connectors/${c.id}/test`),
-    onSuccess: (r, c) => (r.ok ? setTools({ connector: c, tools: r.tools }) : toast.error(r.error ?? "Couldn't connect")),
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const remove = useMutation({
-    mutationFn: (c: Connector) => del(`/api/admin/connectors/${c.id}`),
-    onSuccess: () => {
-      refreshConnectors();
-      setRemoving(null);
-      toast("Connector removed");
-    },
-  });
-
   if (!q.data || !form) return <Skeleton className="h-96 rounded-xl" />;
   const d = q.data;
   const dirty = JSON.stringify(form) !== JSON.stringify(d.settings);
@@ -173,160 +140,7 @@ export default function AdminWorkPage() {
         </Card>
       </Section>
 
-      <Section
-        title="Connectors"
-        description="MCP servers the agent can use as tools: your ticketing, CRM, chat or internal APIs. Credentials stay on this server."
-        actions={
-          <Button variant="outline" size="sm" onClick={() => setEditing("new")} data-testid="add-connector">
-            <Plus className="size-3.5" /> Add connector
-          </Button>
-        }
-      >
-        {connectors.data?.length === 0 ? (
-          <Card className="p-6 text-center text-[13px] text-fg-subtle">No connectors yet. Any server that speaks the Model Context Protocol over HTTP works.</Card>
-        ) : (
-          <Card className="divide-y divide-border">
-            {(connectors.data ?? []).map((c) => (
-              <div key={c.id} className="flex flex-wrap items-center gap-4 px-4 py-3.5" data-testid="connector-row">
-                <span className="flex size-9 items-center justify-center rounded-lg border border-border bg-bg">
-                  <Plug className="size-4 text-fg-muted" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-[13.5px] text-fg">
-                    {c.displayName} <span className="font-mono text-[11.5px] text-fg-subtle">{c.name}</span>
-                    {c.headerNames.length > 0 && <Badge>Authenticated</Badge>}
-                  </div>
-                  <div className="truncate text-[12px] text-fg-subtle">
-                    {c.url} · ask before: {c.approveTools === "*" ? "every tool" : c.approveTools || "nothing"}
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" loading={test.isPending && test.variables?.id === c.id} onClick={() => test.mutate(c)}>
-                  <Plug className="size-3.5" /> Test
-                </Button>
-                <Switch checked={c.enabled} onCheckedChange={() => toggle.mutate(c)} label={`Enable ${c.displayName}`} />
-                <Menu>
-                  <MenuTrigger asChild>
-                    <Button variant="ghost" size="icon-sm" aria-label={`Options for ${c.displayName}`}>
-                      <MoreHorizontal className="size-4" />
-                    </Button>
-                  </MenuTrigger>
-                  <MenuContent align="end">
-                    <MenuItem icon={<Pencil />} onSelect={() => setEditing(c)}>Edit</MenuItem>
-                    <MenuSeparator />
-                    <MenuItem icon={<Trash2 />} danger onSelect={() => setRemoving(c)}>Remove</MenuItem>
-                  </MenuContent>
-                </Menu>
-              </div>
-            ))}
-          </Card>
-        )}
-      </Section>
-
-      {editing && <ConnectorDialog key={editing === "new" ? "new" : editing.id} connector={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={refreshConnectors} />}
-      <Dialog open={!!tools} onOpenChange={(o) => !o && setTools(null)} title={`${tools?.connector.displayName} is connected`} description={`${tools?.tools.length ?? 0} tools available to the agent.`} className="max-w-lg">
-        <ul className="max-h-80 space-y-1 overflow-y-auto" data-testid="connector-tools">
-          {tools?.tools.map((t) => (
-            <li key={t.name} className="rounded-lg border border-border px-3 py-2">
-              <div className="font-mono text-[12.5px] text-fg">{t.name}</div>
-              {t.description && <div className="mt-0.5 line-clamp-2 text-[12px] text-fg-subtle">{t.description}</div>}
-            </li>
-          ))}
-        </ul>
-      </Dialog>
-      <Dialog
-        open={!!removing}
-        onOpenChange={(o) => !o && setRemoving(null)}
-        title={`Remove ${removing?.displayName}?`}
-        description="Tasks stop using its tools. Its stored credentials are deleted."
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setRemoving(null)}>Cancel</Button>
-            <Button variant="danger" loading={remove.isPending} onClick={() => removing && remove.mutate(removing)}>Remove</Button>
-          </>
-        }
-      />
+      <ConnectorsSection />
     </div>
-  );
-}
-
-function ConnectorDialog({ connector, onClose, onSaved }: { connector?: Connector; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    displayName: connector?.displayName ?? "",
-    name: connector?.name ?? "",
-    url: connector?.url ?? "",
-    headers: "",
-    approveTools: connector?.approveTools ?? "*",
-  });
-  const parseHeaders = () =>
-    Object.fromEntries(
-      form.headers
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map((l) => {
-          const i = l.indexOf(":");
-          return [l.slice(0, i).trim(), l.slice(i + 1).trim()];
-        })
-        .filter(([k]) => k),
-    ) as Record<string, string>;
-  const save = useMutation({
-    mutationFn: () => {
-      const headers = form.headers.trim() ? parseHeaders() : undefined;
-      return connector
-        ? patch(`/api/admin/connectors/${connector.id}`, { displayName: form.displayName, url: form.url, approveTools: form.approveTools, ...(headers ? { headers } : {}) })
-        : post("/api/admin/connectors", { ...form, headers });
-    },
-    onSuccess: () => {
-      onSaved();
-      onClose();
-      toast.success(connector ? "Connector saved" : "Connector added. Use “Test” to see its tools.");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  return (
-    <Dialog
-      open
-      onOpenChange={(o) => !o && onClose()}
-      title={connector ? `Edit ${connector.displayName}` : "Add a connector"}
-      description="An MCP server reachable from this server over HTTP (streamable HTTP transport)."
-      className="max-w-lg"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!form.displayName.trim() || !form.url.trim() || (!connector && !form.name.trim())} loading={save.isPending} onClick={() => save.mutate()} data-testid="save-connector">
-            {connector ? "Save" : "Add connector"}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Name">
-            <Input
-              autoFocus
-              value={form.displayName}
-              onChange={(e) => {
-                const v = e.target.value;
-                setForm((f) => ({ ...f, displayName: v, ...(connector ? {} : { name: v.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) }) }));
-              }}
-              placeholder="Jira"
-              data-testid="connector-display-name"
-            />
-          </Field>
-          <Field label="Tool prefix" hint="Lowercase; tools appear as prefix · tool.">
-            <Input value={form.name} disabled={!!connector} onChange={(e) => setForm({ ...form, name: e.target.value })} className="font-mono" />
-          </Field>
-        </div>
-        <Field label="Server URL">
-          <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="http://jira-mcp:3000/mcp" data-testid="connector-url" />
-        </Field>
-        <Field label="Request headers" hint={connector?.headerNames.length ? `Saved: ${connector.headerNames.join(", ")}. Enter new lines to replace them, or leave empty to keep them.` : "One per line, like Authorization: Bearer …. Stored encrypted."}>
-          <Textarea value={form.headers} onChange={(e) => setForm({ ...form, headers: e.target.value })} rows={2} className="font-mono text-[12px]" placeholder="Authorization: Bearer …" />
-        </Field>
-        <Field label="Ask before these tools" hint="Comma-separated names or patterns, like create_*, delete_*. * asks before every tool; empty never asks.">
-          <Input value={form.approveTools} onChange={(e) => setForm({ ...form, approveTools: e.target.value })} className="font-mono" />
-        </Field>
-      </div>
-    </Dialog>
   );
 }

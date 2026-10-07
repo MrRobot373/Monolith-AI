@@ -34,6 +34,7 @@ interface ModelRow {
   displayName: string;
   kind: "chat" | "embedding";
   contextLength: number | null;
+  vision: boolean;
   sections: string[];
   enabled: boolean;
 }
@@ -63,7 +64,7 @@ export default function ModelsPage() {
   });
   const removeProvider = useMutation({ mutationFn: (id: string) => del(`/api/admin/providers/${id}`), onSuccess: invalidate });
   const updateModel = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; enabled?: boolean; sections?: string[] }) => patch(`/api/admin/models/${id}`, body),
+    mutationFn: ({ id, ...body }: { id: string; enabled?: boolean; sections?: string[]; vision?: boolean }) => patch(`/api/admin/models/${id}`, body),
     onSuccess: invalidate,
     onError: (e: Error) => toast.error(e.message),
   });
@@ -180,6 +181,18 @@ export default function ModelsPage() {
                         </button>
                       );
                     })}
+                    <Tooltip content={m.vision ? "Sees images: the agent can look at pictures and screenshots" : "Text only. Turn on if this model accepts images"}>
+                      <button
+                        onClick={() => updateModel.mutate({ id: m.id, vision: !m.vision })}
+                        className={cn(
+                          "ml-1 rounded-md border px-1.5 py-0.5 text-[11.5px] transition-colors",
+                          m.vision ? "border-border-strong bg-surface-3 text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
+                        )}
+                        data-testid="model-vision"
+                      >
+                        Images
+                      </button>
+                    </Tooltip>
                   </div>
                   )}
                 </Td>

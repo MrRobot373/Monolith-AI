@@ -9,6 +9,7 @@
  * See docs/07-code.md.
  */
 import { codeUser, eq, user, type DB } from "@aatmiq/db";
+import { networkEnv } from "@aatmiq/harness";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -180,7 +181,7 @@ export class CodeServers {
           ...identity,
           AATMIQ_CONTROL_URL: this.opts.controlUrl(),
           AATMIQ_CODE_TOKEN: token,
-          ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}),
+          ...networkEnv(),
         },
         stdio: ["ignore", "ignore", "pipe"],
         detached: true,

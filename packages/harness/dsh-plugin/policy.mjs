@@ -43,8 +43,12 @@ export function classifyRisk(call, policy) {
   if (mcp) {
     const conn = policy.connectors.find((c) => c.name === mcp[1]);
     if (policy.approvals === "always") return `Uses the ${mcp[1]} connector (${mcp[2]})`;
+    // "*,!get_*": ask before every tool except those matching a !pattern.
     const globs = conn?.approveTools ?? ["*"];
-    return globs.some((g) => globToRegExp(g).test(mcp[2])) ? `Uses the ${mcp[1]} connector (${mcp[2]})` : null;
+    const never = globs.filter((g) => g.startsWith("!")).map((g) => g.slice(1));
+    const ask = globs.filter((g) => !g.startsWith("!"));
+    const asks = ask.some((g) => globToRegExp(g).test(mcp[2])) && !never.some((g) => globToRegExp(g).test(mcp[2]));
+    return asks ? `Uses the ${mcp[1]} connector (${mcp[2]})` : null;
   }
   if (policy.approvals === "always") return CHANGING_TOOLS.has(name) ? "Every action is reviewed in this organization" : null;
   if (name === "bash" || name === "pwsh") {

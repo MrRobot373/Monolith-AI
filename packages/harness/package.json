@@ -23,6 +23,7 @@
     "yaml": "^2.8.1"
   },
   "devDependencies": {
+    "@aatmiq/shared": "workspace:*",
     "@deepseek-ai/dsh": "0.2.0-rc.2",
     "@types/node": "^22.18.0",
     "vitest": "^3.2.4"

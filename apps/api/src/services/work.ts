@@ -14,6 +14,7 @@ import {
   asc,
   codeWorkspace,
   connector,
+  connectorAccount,
   desc,
   eq,
   inArray,
@@ -27,7 +28,7 @@ import {
   sql,
   type DB,
 } from "@aatmiq/db";
-import { createDshEngine, type HarnessEngine, type HarnessEvent, type TaskRuntime } from "@aatmiq/harness";
+import { createDshEngine, type ConnectorSpec, type HarnessEngine, type HarnessEvent, type TaskRuntime } from "@aatmiq/harness";
 import { DEFAULT_WORK_SETTINGS, PRODUCT_NAME, type WorkSettingsValue } from "@aatmiq/shared";
 import { randomBytes } from "node:crypto";
 import { chmod, chown, mkdir, readdir, rm, writeFile } from "node:fs/promises";
@@ -295,14 +296,14 @@ export class WorkRunner {
           taskId,
           workdir,
           homeDir,
-          model: { key: m.id, name: m.displayName, contextWindow: m.contextLength ?? 32_768 },
+          model: { key: m.id, name: m.displayName, contextWindow: m.contextLength ?? 32_768, vision: m.vision },
           controlUrl: this.opts.controlUrl(),
           token,
           approvals: settings.approvals,
           askForNetwork: !settings.allowNetwork,
           webSearch: !!settings.searxngUrl,
           skillsDir,
-          connectors: await this.connectorSpecs(),
+          connectors: await this.connectorSpecs(task.userId, token),
           productName: org?.productName ?? PRODUCT_NAME,
           sandbox: this.ctx.cfg.workSandbox ?? "on",
           ...(this.isolated ? { uid: runUid, gid: runUid } : {}),
@@ -510,6 +511,12 @@ export class WorkRunner {
     if (l) l.lastError = message;
   }
 
+  /** A later model call worked, so an earlier failure the runtime retried past doesn't fail the task. */
+  clearError(taskId: string) {
+    const l = this.live.get(taskId);
+    if (l) l.lastError = null;
+  }
+
   async requestApproval(taskId: string, a: { callId: string | null; toolName: string; reason: string | null }) {
     const { db } = this.ctx;
     // The tool call itself may still be on its way to the timeline.
@@ -621,16 +628,33 @@ export class WorkRunner {
     return dir;
   }
 
-  private async connectorSpecs() {
+  /**
+   * The connectors this person's task can use: open and shared-token ones, plus OAuth ones they've
+   * connected. All go through Aatmiq's MCP proxy with the task token, which adds the credentials.
+   */
+  private async connectorSpecs(userId: string, token: string): Promise<ConnectorSpec[]> {
     const rows = await this.ctx.db.select().from(connector).where(eq(connector.enabled, true));
-    return rows.map((c) => ({
-      name: c.name,
-      url: c.url,
-      headers: c.headersEnc ? (JSON.parse(this.ctx.box.decrypt(c.headersEnc)) as Record<string, string>) : undefined,
-      approveTools: c.approveTools
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    }));
+    const accounts = new Map(
+      (
+        await this.ctx.db
+          .select()
+          .from(connectorAccount)
+          .where(and(eq(connectorAccount.userId, userId), eq(connectorAccount.status, "ok")))
+      ).map((a) => [a.connectorId, a]),
+    );
+    return rows
+      .filter((c) => c.auth !== "oauth" || accounts.has(c.id))
+      .map((c) => ({
+        name: c.name,
+        displayName: c.displayName,
+        account: accounts.get(c.id)?.label ?? null,
+        url: `${this.opts.controlUrl()}/mcp/${encodeURIComponent(c.name)}`,
+        headers: { authorization: `Bearer ${token}` },
+        approveTools: c.approveTools
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      }));
   }
+
 }

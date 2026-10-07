@@ -389,6 +389,28 @@ export async function listModels(cfg: ProviderConfig, signal?: AbortSignal): Pro
   return (json.data ?? []).map((m) => m.id);
 }
 
+/** What a model can do, when the provider says (Ollama's /api/show). Empty when unknown. */
+export async function modelInfo(cfg: ProviderConfig, key: string, signal?: AbortSignal): Promise<{ vision?: boolean; contextLength?: number }> {
+  if (cfg.type !== "ollama" || !cfg.baseUrl) return {};
+  try {
+    const res = await fetchWithKeys(cfg, `${trimSlash(cfg.baseUrl).replace(/\/v1$/, "")}/api/show`, {
+      method: "POST",
+      headers: headers(cfg),
+      body: JSON.stringify({ model: key }),
+      signal: signal ?? AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return {};
+    const json = (await res.json()) as { capabilities?: string[]; model_info?: Record<string, unknown> };
+    const ctx = Object.entries(json.model_info ?? {}).find(([k]) => k.endsWith(".context_length"))?.[1];
+    return {
+      ...(Array.isArray(json.capabilities) ? { vision: json.capabilities.includes("vision") } : {}),
+      ...(typeof ctx === "number" && ctx > 0 ? { contextLength: ctx } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 export async function testProvider(cfg: ProviderConfig): Promise<ProviderTestResult> {
   const started = Date.now();
   try {

@@ -1,4 +1,5 @@
 // Fake model server: speaks Ollama (/api/tags) and OpenAI-compatible (/v1/*) with streaming + usage.
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 const MODELS = ["qwen3:8b", "deepseek-v4:32b", "gemma3:12b"];
 createServer(async (req, res) => {
@@ -19,6 +20,7 @@ createServer(async (req, res) => {
     ] }));
   }
   if (req.url === "/mcp") return fakeMcp(req, res);
+  if (req.url?.startsWith("/oauth") || req.url?.startsWith("/.well-known/oauth")) return fakeOAuthMcp(req, res);
   if (req.url === "/v1/chat/completions") {
     let body = ""; for await (const c of req) body += c;
     // Keys named "exhausted-…" behave like a key past its usage limit (for key rotation tests).
@@ -147,4 +149,42 @@ async function fakeMcp(req, res) {
     return reply({ content: [{ type: "text", text: notes.length ? notes.join("\n") : "No notes yet." }] });
   }
   return reply({});
+}
+
+// An MCP server behind OAuth 2.1 (MCP authorization): discovery, dynamic registration, PKCE.
+const BASE = `http://localhost:${process.env.FAKE_LLM_PORT ?? 11500}`;
+const oauth = { challenge: "" };
+async function fakeOAuthMcp(req, res) {
+  let raw = ""; for await (const c of req) raw += c;
+  const json = (status, obj, headers = {}) => { res.writeHead(status, { "content-type": "application/json", ...headers }); res.end(JSON.stringify(obj)); };
+  const url = new URL(req.url, BASE);
+  if (url.pathname === "/.well-known/oauth-protected-resource/oauth/mcp") return json(200, { resource: `${BASE}/oauth/mcp`, authorization_servers: [`${BASE}/oauth`] });
+  if (url.pathname === "/.well-known/oauth-authorization-server/oauth")
+    return json(200, { issuer: `${BASE}/oauth`, authorization_endpoint: `${BASE}/oauth/authorize`, token_endpoint: `${BASE}/oauth/token`, registration_endpoint: `${BASE}/oauth/register`, code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"] });
+  if (url.pathname === "/oauth/register") return json(201, { client_id: "e2e-client" });
+  if (url.pathname === "/oauth/authorize") {
+    oauth.challenge = url.searchParams.get("code_challenge") ?? "";
+    res.writeHead(302, { location: `${url.searchParams.get("redirect_uri")}?code=e2e-code&state=${url.searchParams.get("state")}` });
+    return res.end();
+  }
+  if (url.pathname === "/oauth/token") {
+    const f = Object.fromEntries(new URLSearchParams(raw));
+    if (f.grant_type === "authorization_code" && createHash("sha256").update(f.code_verifier ?? "").digest("base64url") === oauth.challenge)
+      return json(200, { access_token: "mail-token-1", refresh_token: "mail-refresh", expires_in: 3600, token_type: "Bearer", email: "asha@acme.test" });
+    if (f.grant_type === "refresh_token") return json(200, { access_token: "mail-token-2", expires_in: 3600, token_type: "Bearer" });
+    return json(400, { error: "invalid_grant" });
+  }
+  if (url.pathname === "/oauth/mcp") {
+    const token = /^Bearer (mail-token-\d)$/.exec(req.headers.authorization ?? "")?.[1];
+    if (!token) return json(401, { error: "unauthorized" }, { "www-authenticate": `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource/oauth/mcp"` });
+    if (req.method !== "POST") { res.statusCode = 405; return res.end(); }
+    const msg = JSON.parse(raw);
+    if (msg.id === undefined) { res.statusCode = 202; return res.end(); }
+    const reply = (result) => json(200, { jsonrpc: "2.0", id: msg.id, result }, { "mcp-session-id": "mail" });
+    if (msg.method === "initialize") return reply({ protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "mail", version: "1.0" } });
+    if (msg.method === "tools/list") return reply({ tools: [{ name: "get_inbox", description: "Latest emails", inputSchema: { type: "object", properties: {} } }] });
+    if (msg.method === "tools/call") return reply({ content: [{ type: "text", text: `3 unread emails for asha@acme.test (via ${token})` }] });
+    return reply({});
+  }
+  res.writeHead(404); res.end();
 }

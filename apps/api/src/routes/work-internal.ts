@@ -18,6 +18,12 @@ import { getQuotaStatus } from "../services/quota";
 import { getWorkSettings } from "../services/work";
 
 const BASE = "/api/internal/work";
+/** Statuses worth retrying: the server is busy or briefly broken, not refusing the request. */
+const TRANSIENT = new Set([408, 425, 500, 502, 503, 504, 529]);
+const RETRY_DELAYS_MS = [1500, 4000, 8000];
+/** How long a model server may take to start answering, and to go quiet mid-answer. */
+const FIRST_BYTE_MS = 150_000;
+const STALL_MS = 150_000;
 const internal = { config: { rateLimit: false } } as const;
 
 /** OpenAI-style error body, so the runtime reports a readable message. */
@@ -106,24 +112,45 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     }
 
     const abort = new AbortController();
-    let upstream: Response;
-    try {
-      // fetchWithKeys moves to the provider's next API key when one hits its limit.
-      upstream = await fetchWithKeys(provider, `${openAiBase(provider)}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...body, model: m.modelKey, ...(body.stream ? { stream_options: { include_usage: true } } : {}) }),
-        signal: abort.signal,
-      });
-    } catch (e) {
-      return refuse(502, `The model server couldn't be reached (${e instanceof Error ? e.message : "network error"}).`);
+    let upstream: Response | null = null;
+    let lastNetworkError = "";
+    // Busy or briefly failing model servers ("temporarily overloaded") get a few calm retries here,
+    // before the runtime ever sees an error.
+    for (let attempt = 0; attempt < RETRY_DELAYS_MS.length + 1; attempt++) {
+      try {
+        // fetchWithKeys moves to the provider's next API key when one hits its limit.
+        // A server that hasn't started answering after a while is stuck in a queue: try again.
+        const attemptAbort = new AbortController();
+        const slow = setTimeout(() => attemptAbort.abort(new Error("no answer in time")), FIRST_BYTE_MS);
+        try {
+          upstream = await fetchWithKeys(provider, `${openAiBase(provider)}/chat/completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...body, model: m.modelKey, ...(body.stream ? { stream_options: { include_usage: true } } : {}) }),
+            signal: AbortSignal.any([abort.signal, attemptAbort.signal]),
+          });
+        } finally {
+          clearTimeout(slow);
+        }
+        if (!TRANSIENT.has(upstream.status) || attempt === RETRY_DELAYS_MS.length) break;
+        const after = Number(upstream.headers.get("retry-after"));
+        await upstream.body?.cancel().catch(() => undefined);
+        await new Promise((r) => setTimeout(r, Number.isFinite(after) && after > 0 && after <= 10 ? after * 1000 : RETRY_DELAYS_MS[attempt]));
+      } catch (e) {
+        lastNetworkError = e instanceof Error ? e.message : "network error";
+        upstream = null;
+        if (abort.signal.aborted || attempt === RETRY_DELAYS_MS.length) break;
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      }
     }
+    if (!upstream) return refuse(502, `The model server couldn't be reached (${lastNetworkError}).`);
     if (!upstream.ok || !upstream.body) {
       const detail = (await upstream.text().catch(() => "")).slice(0, 300);
       await meter({ inputTokens: 0, outputTokens: 0, estimated: true }, "error");
       return refuse(upstream.status >= 400 ? upstream.status : 502, `The model server answered ${upstream.status}${detail ? `: ${detail}` : ""}`);
     }
 
+    work.clearError(t.taskId);
     if (!body.stream) {
       const json = (await upstream.json()) as { choices?: { message?: { content?: string } }[]; usage?: OpenAiChunk["usage"] };
       const text = json.choices?.[0]?.message?.content ?? "";
@@ -172,8 +199,12 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
       }
     };
     let status: "ok" | "error" | "aborted" = "ok";
+    // A stream that goes quiet for too long is cut, so the runtime retries instead of waiting forever.
+    let stall = setTimeout(() => abort.abort(), STALL_MS);
     try {
       for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) {
+        clearTimeout(stall);
+        stall = setTimeout(() => abort.abort(), STALL_MS);
         res.write(chunk);
         buf += decoder.decode(chunk, { stream: true });
         let nl: number;
@@ -186,6 +217,7 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     } catch {
       status = abort.signal.aborted ? "aborted" : "error";
     }
+    clearTimeout(stall);
     finished = true;
     res.end();
     await meter(usage ?? { inputTokens: inputGuess, outputTokens: estimateTokens(output), estimated: true }, status);

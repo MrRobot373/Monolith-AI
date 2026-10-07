@@ -39,10 +39,27 @@ Chat (section `work` in usage reports).
   Searches go only to that server (D27).
 - **Let commands use the network**: off by default, which makes network commands ask first.
 - **Tasks per person at once** (others queue) and **how long a finished task stays warm** for instant follow-ups.
-- **Connectors**: MCP servers (streamable HTTP) the agent can use as tools, such as Jira, a CRM or an
-  internal API. Request headers (tokens) are stored encrypted and never shown again. *Ask before
-  these tools* takes comma-separated names or patterns (`create_*, delete_*`; `*` = every tool).
-  **Test** connects and lists the tools.
+- **Connectors**: apps and MCP servers (streamable HTTP) the agent can use as tools. **Add
+  connector** opens a catalog of official remote servers (Gmail, Google Calendar/Drive/Docs/Sheets/
+  Slides, Canva, Figma, Notion, Slack, GitHub, Jira & Confluence, Linear, Asana, HubSpot, Stripe and
+  ~30 more, in `packages/shared/src/connectors.ts`) or takes any custom server. Three ways to sign in:
+  - **Each person signs in** (OAuth 2.1, the MCP authorization spec). People connect their own
+    account in **Work AI → Connections**, and tasks act with that person's access only. Where the
+    service supports dynamic client registration (Canva, Notion, Linear, Atlassian, Figma, Stripe…)
+    there is nothing to set up. Google, Slack, GitHub, HubSpot, Box, Zoom and Asana need an OAuth app
+    from the admin: the dialog shows the redirect URI (`<app>/api/connectors/oauth/callback`) and
+    the steps. Tokens are stored encrypted per person, refreshed when they expire, and revoked on
+    disconnect when the service supports it.
+  - **Shared token**: request headers the admin enters (stored encrypted, never shown again).
+  - **No sign-in**: open servers (DeepWiki, Microsoft Learn, AWS Knowledge, Hugging Face).
+
+  **Approvals** per connector: *ask before changes* (default; tools named `get_*`, `list_*`,
+  `search_*`, `read_*`… run freely), *every action*, *never*, or a custom rule of comma-separated
+  patterns (`create_*, delete_*`; `!pattern` never asks). **Test** lists the tools (with the admin's
+  own sign-in for OAuth connectors).
+- **Models**: mark the ones that accept images (**Images** on Admin → Models; detected
+  automatically for Ollama, along with the context length). The agent can then look at pictures and
+  screenshots (`read_image`).
 
 Who can use Work AI: it must be in the license (`work` section), the model must be enabled for
 the *Work AI* section and for the workspace, and members need Work AI enabled on their workspace
@@ -81,6 +98,9 @@ package installs and deletions, and the Aatmiq panel writing and testing code.
   `/api/internal/work/llm/v1` (OpenAI-compatible). There we check the license and quota, swap in the
   real model and provider key, stream the response through, meter usage (section `work`) and forward
   the text to the browser as it's written. The runtime never sees provider keys.
+  Busy servers ("temporarily overloaded", 5xx) get up to three calm retries before the runtime sees
+  an error; a call that hasn't started answering in 150 s, or goes quiet that long mid-answer, is
+  cut and retried. A failure the runtime then retries past doesn't fail the task.
 - **Our DSH plugin** (packages/harness/dsh-plugin/aatmiq.mjs) adds the approval policy
   (`tools/pre-execute` → *ask*), the approval answerer (a person decides in Aatmiq; long-poll; any
   failure counts as *no*), and the `aatmiq` web search provider. It also smooths over common
@@ -126,8 +146,10 @@ Limits today, to know when deploying:
 - **Reads**: a task can read world-readable system files (the OS, the app's code). Secrets are not
   world-readable.
 - **Resources**: no per-task CPU or memory limits yet beyond the container's own.
-- **Connectors** use organization-level credentials; each person signing in to their own accounts
-  (OAuth per user) comes later.
+- **Connectors**: the agent runtime never holds connector credentials. Its MCP traffic goes to
+  Aatmiq's proxy (`/api/internal/work/mcp/:name`, per-task token), which adds the person's own OAuth
+  token (refreshing it) or the shared headers and forwards the request. OAuth connectors are only
+  given to tasks of people who connected them.
 
 Planned next (P2.1): **container mode**, with one container per person or task through a launcher
 (`packages/harness` already separates the launcher), giving network isolation and resource limits
@@ -176,10 +198,15 @@ People (cookie session):
 | GET/POST/PATCH/DELETE | `/api/work/schedules[/:id]` · POST `/:id/run` · GET `/preview` | Schedules |
 
 Admins (`org.work.manage`): `GET/PUT /api/admin/work`, `POST /api/admin/work/test-search`,
-`GET/POST/PATCH/DELETE /api/admin/connectors[/:id]`, `POST /api/admin/connectors/:id/test`.
+`GET/POST/PATCH/DELETE /api/admin/connectors[/:id]`, `POST /api/admin/connectors/:id/test`,
+`GET /api/admin/connectors/catalog`.
+
+People: `GET /api/connectors`, `POST /api/connectors/:id/connect` → `{url}`,
+`DELETE /api/connectors/:id/connection`, `GET /api/connectors/oauth/callback`; public
+`GET /api/connectors/oauth/client.json` (client metadata document).
 
 Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/approvals`,
-`/approvals/:id?wait=`, `/search`.
+`/approvals/:id?wait=`, `/search`, `/mcp/:name` (MCP proxy).
 
 ## Tests
 

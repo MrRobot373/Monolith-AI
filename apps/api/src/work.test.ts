@@ -2,7 +2,9 @@
  * Work AI end to end through the API: a real DeepSeek Harness runtime, a scripted OpenAI-compatible
  * model and a fake SearXNG, against the test database (TEST_DATABASE_URL).
  */
-import { createDb, organization, sql, type DB } from "@aatmiq/db";
+import { connectorAccount, createDb, organization, sql, type DB } from "@aatmiq/db";
+import { APPROVAL_PRESETS } from "@aatmiq/shared";
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { createServer, type Server } from "node:http";
 import { mkdtemp } from "node:fs/promises";
@@ -25,8 +27,10 @@ let apiUrl = "";
 let workDir = "";
 let storageDir = "";
 const modelRequests: { role: string; content: unknown }[][] = [];
-const mcpCalls: { name: string; arguments?: Record<string, unknown> }[] = [];
+const mcpCalls: { name: string; arguments?: Record<string, unknown>; auth?: string }[] = [];
+const oauth = { registered: [] as Record<string, unknown>[], authorize: [] as Record<string, string>[], grants: [] as string[], challenge: "" };
 let lastTools: string[] = [];
+let busyRefused = false;
 
 /* ───────────── Fake model + SearXNG ───────────── */
 
@@ -48,6 +52,12 @@ function fakeModel(body: { messages: { role: string; content: unknown }[]; tools
   const userText = (m: { content: unknown }) => textOf(m.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
   const ask = [...body.messages].reverse().filter((m) => m.role === "user").map(userText).find((t) => t && !/^Current runtime context/.test(t)) ?? "";
   const asked = ask.split("</earlier-conversation>").at(-1)!;
+  // A busy model server: the first try is refused, like Ollama's "temporarily overloaded".
+  if (asked.includes("busy-server") && !busyRefused) {
+    busyRefused = true;
+    res.writeHead(503, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: "model is temporarily overloaded, please retry shortly" } }));
+  }
   let call: [string, unknown] | null = null;
   let m: RegExpExecArray | null;
   if ((m = /run: (.+)/s.exec(asked))) call = ["bash", { description: "Run it", command: m[1]!.trim() }];
@@ -129,9 +139,63 @@ d("Work AI", () => {
             ],
           });
         if (msg.method === "tools/call") {
-          mcpCalls.push(msg.params);
+          mcpCalls.push({ ...msg.params, auth: req.headers.authorization });
           return reply({ content: [{ type: "text", text: `Saved note: ${msg.params.arguments?.text ?? ""}` }] });
         }
+        return reply({});
+      }
+      // An MCP server protected by OAuth 2.1 (MCP authorization): discovery, registration, PKCE, refresh.
+      const json = (status: number, obj: unknown, headers: Record<string, string> = {}) => {
+        res.writeHead(status, { "content-type": "application/json", ...headers });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.url === "/.well-known/oauth-protected-resource/oauth/mcp") return json(200, { resource: `${fakeUrl}/oauth/mcp`, authorization_servers: [`${fakeUrl}/oauth`] });
+      if (req.url === "/.well-known/oauth-authorization-server/oauth")
+        return json(200, {
+          issuer: `${fakeUrl}/oauth`,
+          authorization_endpoint: `${fakeUrl}/oauth/authorize`,
+          token_endpoint: `${fakeUrl}/oauth/token`,
+          registration_endpoint: `${fakeUrl}/oauth/register`,
+          code_challenge_methods_supported: ["S256"],
+          token_endpoint_auth_methods_supported: ["none"],
+        });
+      if (req.url === "/oauth/register") {
+        oauth.registered.push(JSON.parse(raw));
+        return json(201, { client_id: "dyn-client" });
+      }
+      if (req.url?.startsWith("/oauth/authorize")) {
+        const q = Object.fromEntries(new URL(req.url, fakeUrl).searchParams);
+        oauth.authorize.push(q);
+        oauth.challenge = q.code_challenge ?? "";
+        res.writeHead(302, { location: `${q.redirect_uri}?code=code-1&state=${q.state}` });
+        return res.end();
+      }
+      if (req.url === "/oauth/token") {
+        const f = Object.fromEntries(new URLSearchParams(raw));
+        oauth.grants.push(f.grant_type ?? "");
+        if (f.grant_type === "authorization_code") {
+          const ok = f.code === "code-1" && f.client_id === "dyn-client" && createHash("sha256").update(f.code_verifier ?? "").digest("base64url") === oauth.challenge;
+          return ok ? json(200, { access_token: "at-1", refresh_token: "rt-1", expires_in: 3600, token_type: "Bearer", email: "asha@mail.example" }) : json(400, { error: "invalid_grant" });
+        }
+        if (f.grant_type === "refresh_token" && f.refresh_token === "rt-1") return json(200, { access_token: "at-2", expires_in: 3600, token_type: "Bearer" });
+        return json(400, { error: "invalid_grant" });
+      }
+      if (req.url === "/oauth/mcp") {
+        const token = /^Bearer (at-\d)$/.exec(req.headers.authorization ?? "")?.[1];
+        if (!token) return json(401, { error: "unauthorized" }, { "www-authenticate": `Bearer resource_metadata="${fakeUrl}/.well-known/oauth-protected-resource/oauth/mcp"` });
+        if (req.method !== "POST") return res.writeHead(405).end();
+        const msg = JSON.parse(raw);
+        if (msg.id === undefined) return res.writeHead(202).end();
+        const reply = (result: unknown) => json(200, { jsonrpc: "2.0", id: msg.id, result }, { "mcp-session-id": "m1" });
+        if (msg.method === "initialize") return reply({ protocolVersion: msg.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "mail", version: "1" } });
+        if (msg.method === "tools/list")
+          return reply({
+            tools: [
+              { name: "get_profile", description: "Who is signed in", inputSchema: { type: "object", properties: {} } },
+              { name: "send_message", description: "Send an email", inputSchema: { type: "object", properties: { to: { type: "string" } }, required: ["to"] } },
+            ],
+          });
+        if (msg.method === "tools/call") return reply({ content: [{ type: "text", text: `${msg.params.name} with token=${token}` }] });
         return reply({});
       }
       if (req.url === "/v1/models") {
@@ -260,6 +324,14 @@ d("Work AI", () => {
     ]);
   }, 60_000);
 
+  it("rides out a briefly overloaded model server", async () => {
+    const r = await call("POST", "/api/work/tasks", { workspaceId, prompt: "busy-server: say hi" });
+    const t = await waitStatus(r.json.id, "completed", "failed");
+    expect(busyRefused).toBe(true);
+    expect(t.task).toMatchObject({ status: "completed", error: null });
+    expect(t.task.result).toContain("busy-server");
+  }, 60_000);
+
   it("streams the timeline over SSE", async () => {
     const res = await fetch(`${apiUrl}/api/work/tasks/${taskId}/stream?after=2`, { headers: { cookie: owner.cookie } });
     const reader = res.body!.getReader();
@@ -331,10 +403,70 @@ d("Work AI", () => {
     await call("POST", `/api/work/approvals/${pending[0].id}`, { decision: "approve" });
     const done = await waitStatus(t.json.id, "completed", "failed");
     expect(done.task.error).toBeNull();
-    expect(mcpCalls.at(-1)).toMatchObject({ name: "create_note", arguments: { text: "buy milk" } });
+    // Through Aatmiq's MCP proxy: the runtime never had the header, the server still got it.
+    expect(mcpCalls.at(-1)).toMatchObject({ name: "create_note", arguments: { text: "buy milk" }, auth: "Bearer notes-secret" });
     expect(done.events.find((e) => e.kind === "tool_result")?.data.text).toContain("Saved note: buy milk");
     await call("PATCH", `/api/admin/connectors/${c.json.id}`, { enabled: false });
   }, 60_000);
+
+  it("connects OAuth apps per person and calls them through the proxy, refreshing tokens", async () => {
+    const c = await call("POST", "/api/admin/connectors", { name: "mail", displayName: "Mail", url: `${fakeUrl}/oauth/mcp`, auth: "oauth" });
+    expect(c.status).toBe(200);
+    expect(c.json).toMatchObject({ auth: "oauth", approveTools: APPROVAL_PRESETS.changes, accounts: 0 });
+    const mine = async () => ((await call("GET", "/api/connectors")).json as { name: string; connected: boolean; account: { label: string } | null }[]).find((x) => x.name === "mail")!;
+    expect(await mine()).toMatchObject({ connected: false });
+
+    // Not connected yet: tasks don't get its tools.
+    const before = await call("POST", "/api/work/tasks", { workspaceId, prompt: "hello there" });
+    await waitStatus(before.json.id, "completed", "failed");
+    expect(lastTools.some((t) => t.startsWith("mcp__mail__"))).toBe(false);
+
+    // Sign in: dynamic registration, PKCE, resource indicator, then the callback stores the tokens.
+    const start = await app.inject({ method: "POST", url: `/api/connectors/${c.json.id}/connect`, headers: { origin: APP_URL, cookie: owner.cookie, "content-type": "application/json" }, payload: "{}" });
+    expect(start.statusCode).toBe(200);
+    const authUrl = new URL(start.json().url);
+    expect(authUrl.searchParams.get("client_id")).toBe("dyn-client");
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authUrl.searchParams.get("resource")).toBe(`${fakeUrl}/oauth/mcp`);
+    expect(oauth.registered[0]).toMatchObject({ redirect_uris: [`${APP_URL}/api/connectors/oauth/callback`], token_endpoint_auth_method: "none" });
+    const stateCookie = String(start.headers["set-cookie"]).split(";")[0];
+    const back = await fetch(authUrl, { redirect: "manual" });
+    const cb = new URL(back.headers.get("location")!);
+    const done = await app.inject({ method: "GET", url: `/api/connectors/oauth/callback${cb.search}`, headers: { cookie: `${owner.cookie}; ${stateCookie}` } });
+    expect(done.statusCode).toBe(302);
+    expect(done.headers.location).toBe("/app/work/connections?connected=mail");
+    expect(await mine()).toMatchObject({ connected: true, account: { label: "asha@mail.example" } });
+    const [acc] = await db.select().from(connectorAccount);
+    expect(acc!.accessTokenEnc).not.toContain("at-1");
+
+    // A replayed callback is refused.
+    const replay = await app.inject({ method: "GET", url: `/api/connectors/oauth/callback${cb.search}`, headers: { cookie: owner.cookie } });
+    expect(replay.headers.location).toContain("connector_error=");
+
+    // The task gets the tools, reads freely, and the call carries the person's own token.
+    const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: "use mcp__mail__get_profile {}" });
+    const r1 = await waitStatus(t.json.id, "completed", "failed", "needs_approval");
+    expect(r1.task.status).toBe("completed");
+    expect(lastTools).toContain("mcp__mail__send_message");
+    expect(r1.events.find((e) => e.kind === "tool_result")?.data.text).toContain("get_profile with token=at-1");
+    expect(JSON.stringify(modelRequests.at(-1))).toContain("Mail (asha@mail.example)");
+
+    // An expired token is refreshed on the way; sending asks first.
+    await db.update(connectorAccount).set({ expiresAt: new Date(Date.now() - 1000) });
+    const t2 = await call("POST", "/api/work/tasks", { workspaceId, prompt: 'use mcp__mail__send_message {"to":"boss@example.com"}' });
+    await waitStatus(t2.json.id, "needs_approval");
+    const pending = (await call("GET", "/api/work/approvals")).json;
+    expect(pending[0]).toMatchObject({ toolName: "mcp__mail__send_message" });
+    await call("POST", `/api/work/approvals/${pending[0].id}`, { decision: "approve" });
+    const r2 = await waitStatus(t2.json.id, "completed", "failed");
+    expect(r2.events.find((e) => e.kind === "tool_result")?.data.text).toContain("send_message with token=at-2");
+    expect(oauth.grants).toEqual(["authorization_code", "refresh_token"]);
+
+    // Disconnecting removes it from tasks again.
+    expect((await call("DELETE", `/api/connectors/${c.json.id}/connection`)).status).toBe(200);
+    expect(await mine()).toMatchObject({ connected: false, account: null });
+    await call("PATCH", `/api/admin/connectors/${c.json.id}`, { enabled: false });
+  }, 90_000);
 
   it("schedules recurring tasks", async () => {
     expect((await call("POST", "/api/work/schedules", { workspaceId, name: "Too often", prompt: "x", cron: "* * * * *" })).status).toBe(400);

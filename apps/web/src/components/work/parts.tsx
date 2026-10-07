@@ -51,9 +51,10 @@ const TABS = [
   { href: "/app/work", label: "Tasks", exact: true },
   { href: "/app/work/schedules", label: "Scheduled" },
   { href: "/app/work/skills", label: "Skills" },
+  { href: "/app/work/connections", label: "Connections" },
 ];
 
-/** Tasks · Scheduled · Skills, under the top bar of Work AI's list pages. */
+/** Tasks · Scheduled · Skills · Connections, under the top bar of Work AI's list pages. */
 export function WorkTabs() {
   const pathname = usePathname();
   return (

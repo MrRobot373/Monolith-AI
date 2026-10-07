@@ -28,6 +28,7 @@ import type { LicenseService } from "./services/license";
 import type { Storage } from "./services/storage";
 import type { WorkRunner } from "./services/work";
 import type { CodeServers } from "./services/code";
+import type { Connectors } from "./services/connectors";
 import { badRequest, forbidden, notFound, unauthorized } from "./errors";
 
 export interface AppContext {
@@ -39,6 +40,7 @@ export interface AppContext {
   license: LicenseService;
   work: WorkRunner;
   code: CodeServers;
+  connectors: Connectors;
 }
 
 export interface SessionUser {

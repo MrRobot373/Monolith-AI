@@ -100,6 +100,28 @@ export function mapEvent(ev: DshSessionEvent): HarnessEvent | null {
   }
 }
 
+/**
+ * The deployment's network settings, passed through so tasks work behind a corporate proxy or a
+ * TLS-inspecting firewall (the CA file must be readable by task users, e.g. under /etc/ssl).
+ */
+const NETWORK_ENV = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+];
+
+/** The NETWORK_ENV variables set in this process. */
+export function networkEnv(): Record<string, string> {
+  return Object.fromEntries(NETWORK_ENV.filter((k) => process.env[k]).map((k) => [k, process.env[k]!]));
+}
+
 /** Environment for the runtime: nothing from the API process leaks in (no database URL, no secrets). */
 function runtimeEnv(spec: TaskSpec): NodeJS.ProcessEnv {
   return {
@@ -111,7 +133,7 @@ function runtimeEnv(spec: TaskSpec): NodeJS.ProcessEnv {
     NODE_ENV: "production",
     DSH_PERMISSION_MODE: spec.sandbox === "off" ? "danger-full-access" : "workspace-write",
     AATMIQ_TOKEN: spec.token,
-    ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}),
+    ...networkEnv(),
   };
 }
 
@@ -150,12 +172,48 @@ export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs
       });
 
       const transport = new JsonRpcLineTransport(child.stdout!, child.stdin!);
+      // The task's own session; subagents run in sessions of their own. Their steps are shown, but
+      // their messages, plans and turn ends are theirs: the task ends when its own turn does and no
+      // subagent is still working (a finished subagent wakes the main agent for another turn).
+      const sessionId = `session-${randomUUID().replaceAll("-", "")}`;
+      const children = new Set<string>();
+      let held: HarnessEvent | null = null;
+      let rootRunning = false;
+      let settle: NodeJS.Timeout | undefined;
+      const releaseHeld = () => {
+        clearTimeout(settle);
+        settle = setTimeout(() => {
+          if (held && !rootRunning && children.size === 0) {
+            const e = held;
+            held = null;
+            onEvent(e);
+          }
+        }, 3000);
+      };
       transport.onNotification((method, params) => {
         if (method === "session.event") {
           const mapped = mapEvent(params.event as DshSessionEvent);
-          if (mapped) onEvent(mapped);
+          if (!mapped) return;
+          if (params.sessionId !== sessionId) {
+            if (mapped.type === "tool_call" || mapped.type === "tool_result") onEvent(mapped);
+            return;
+          }
+          if (mapped.type === "turn_end" && children.size > 0) {
+            held = mapped;
+            return;
+          }
+          if (mapped.type === "user" && held) held = null; // the main agent was woken for another turn
+          onEvent(mapped);
         } else if (method === "session.status") {
-          onEvent({ type: "status", status: params.status === "running" ? "running" : "idle" });
+          if (params.sessionId !== sessionId) return;
+          rootRunning = params.status === "running";
+          if (rootRunning) held = null;
+          onEvent({ type: "status", status: rootRunning ? "running" : "idle" });
+        } else if (method === "subagent.started") {
+          children.add(String(params.childSessionId));
+        } else if (method === "subagent.finished") {
+          children.delete(String(params.childSessionId));
+          if (held && children.size === 0) releaseHeld();
         }
       });
       transport.start();
@@ -177,7 +235,6 @@ export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs
         throw e;
       }
 
-      const sessionId = `session-${randomUUID().replaceAll("-", "")}`;
       const runtime: TaskRuntime = {
         sessionId,
         get alive() {

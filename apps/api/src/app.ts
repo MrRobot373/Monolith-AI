@@ -1,4 +1,5 @@
-import type { DB } from "@aatmiq/db";
+import { organization, type DB } from "@aatmiq/db";
+import { PRODUCT_NAME } from "@aatmiq/shared";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -29,6 +30,8 @@ import { codeInternalRoutes } from "./routes/code-internal";
 import { createCodeProxy } from "./routes/code-proxy";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { workInternalRoutes } from "./routes/work-internal";
+import { connectorRoutes } from "./routes/connectors";
+import { createConnectors } from "./services/connectors";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
 import type { AddressInfo } from "node:net";
@@ -62,6 +65,13 @@ export async function buildApp(
     storage: opts.storage ?? createLocalStorage(cfg.storageDir),
     license: new LicenseService(db, cfg, opts.fetch),
   } as AppContext;
+  ctx.connectors = createConnectors({
+    db,
+    box: ctx.box,
+    appUrl: cfg.appUrl,
+    productName: async () => (await db.select({ p: organization.productName }).from(organization).limit(1))[0]?.p ?? PRODUCT_NAME,
+    fetch: opts.fetch,
+  });
   // The agent runtime calls back into this server (models, approvals, search).
   ctx.work = new WorkRunner(ctx, {
     engine: opts.workEngine,
@@ -136,6 +146,7 @@ export async function buildApp(
   await workConfigRoutes(app, ctx);
   await codeRoutes(app, ctx);
   await codeInternalRoutes(app, ctx);
+  await connectorRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));

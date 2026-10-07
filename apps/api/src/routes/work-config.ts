@@ -1,13 +1,12 @@
 /**
- * Work AI configuration: skills (org + personal), schedules, MCP connectors and the org policy.
+ * Work AI configuration: skills (org + personal), schedules and the org policy. Connectors: routes/connectors.ts.
  */
-import { and, asc, connector, eq, ne, or, organization, skill, sql, workSchedule, workTask } from "@aatmiq/db";
-import { connectorSchema, DEFAULT_WORK_SETTINGS, orgCan, scheduleSchema, skillSchema, workSettingsSchema } from "@aatmiq/shared";
+import { and, asc, eq, ne, or, organization, skill, sql, workSchedule, workTask } from "@aatmiq/db";
+import { DEFAULT_WORK_SETTINGS, orgCan, scheduleSchema, skillSchema, workSettingsSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit, parse, requireOrgCap, requireUser, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, notFound } from "../errors";
-import { probeMcp } from "../services/mcp";
 import { resolveModel } from "../services/models";
 import { assertReasonable, nextRun, runSchedule } from "../services/schedules";
 import { getWorkSettings, slugify } from "../services/work";
@@ -186,90 +185,6 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
       runs.push(from.toISOString());
     }
     return { runs };
-  });
-
-  /* ───────────── Connectors (admin) ───────────── */
-
-  const connectorView = (c: typeof connector.$inferSelect) => {
-    const { headersEnc, ...rest } = c;
-    let headerNames: string[] = [];
-    try {
-      headerNames = headersEnc ? Object.keys(JSON.parse(box.decrypt(headersEnc))) : [];
-    } catch {
-      headerNames = [];
-    }
-    return { ...rest, headerNames };
-  };
-
-  app.get("/api/admin/connectors", async (req) => {
-    const u = await requireUser(ctx, req);
-    requireOrgCap(u, "org.work.manage");
-    return (await db.select().from(connector).orderBy(asc(connector.displayName))).map(connectorView);
-  });
-
-  app.post("/api/admin/connectors", async (req) => {
-    const u = await requireUser(ctx, req);
-    requireOrgCap(u, "org.work.manage");
-    const b = parse(connectorSchema, req.body);
-    const [exists] = await db.select({ id: connector.id }).from(connector).where(eq(connector.name, b.name));
-    if (exists) throw badRequest("A connector with that name already exists.");
-    const { headers, ...rest } = b;
-    const [c] = await db
-      .insert(connector)
-      .values({ ...rest, headersEnc: headers && Object.keys(headers).length ? box.encrypt(JSON.stringify(headers)) : null })
-      .returning();
-    await audit(ctx, { actor: u, action: "work.connector.added", targetType: "connector", targetId: c!.id, meta: { name: b.name, url: b.url } });
-    return connectorView(c!);
-  });
-
-  const connectorUpdateSchema = z.object({
-    displayName: z.string().trim().min(1).max(60).optional(),
-    url: z.url().optional(),
-    /** Replaces all headers; omit to keep them. */
-    headers: z.record(z.string(), z.string()).optional(),
-    approveTools: z.string().trim().max(500).optional(),
-    enabled: z.boolean().optional(),
-  });
-  app.patch<{ Params: { id: string } }>("/api/admin/connectors/:id", async (req) => {
-    const u = await requireUser(ctx, req);
-    requireOrgCap(u, "org.work.manage");
-    const { headers, ...b } = parse(connectorUpdateSchema, req.body);
-    const [c] = await db
-      .update(connector)
-      .set({
-        ...b,
-        ...(headers !== undefined ? { headersEnc: Object.keys(headers).length ? box.encrypt(JSON.stringify(headers)) : null } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(connector.id, req.params.id))
-      .returning();
-    if (!c) throw notFound("Connector not found");
-    await audit(ctx, { actor: u, action: "work.connector.updated", targetType: "connector", targetId: c.id, meta: { ...b, headersChanged: headers !== undefined } });
-    return connectorView(c);
-  });
-
-  app.delete<{ Params: { id: string } }>("/api/admin/connectors/:id", async (req) => {
-    const u = await requireUser(ctx, req);
-    requireOrgCap(u, "org.work.manage");
-    const [c] = await db.delete(connector).where(eq(connector.id, req.params.id)).returning();
-    if (!c) throw notFound("Connector not found");
-    await audit(ctx, { actor: u, action: "work.connector.deleted", targetType: "connector", targetId: c.id, meta: { name: c.name } });
-    return { ok: true };
-  });
-
-  /** Connect to the server and list its tools. */
-  app.post<{ Params: { id: string } }>("/api/admin/connectors/:id/test", async (req) => {
-    const u = await requireUser(ctx, req);
-    requireOrgCap(u, "org.work.manage");
-    const [c] = await db.select().from(connector).where(eq(connector.id, req.params.id));
-    if (!c) throw notFound("Connector not found");
-    try {
-      const headers = c.headersEnc ? (JSON.parse(box.decrypt(c.headersEnc)) as Record<string, string>) : {};
-      const r = await probeMcp(c.url, headers);
-      return { ok: true, ...r };
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : "Couldn't connect.", tools: [] };
-    }
   });
 
   /* ───────────── Org policy (admin) ───────────── */

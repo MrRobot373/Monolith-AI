@@ -314,6 +314,9 @@ importers:
         specifier: ^2.8.1
         version: 2.9.1
     devDependencies:
+      '@aatmiq/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@deepseek-ai/dsh':
         specifier: 0.2.0-rc.2
         version: 0.2.0-rc.2(c1cf7336bcba0070c57d19504814b21a)

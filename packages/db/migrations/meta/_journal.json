@@ -57,6 +57,13 @@
       "when": 1791268847597,
       "tag": "0007_code",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791344313502,
+      "tag": "0008_connectors",
+      "breakpoints": true
     }
   ]
 }

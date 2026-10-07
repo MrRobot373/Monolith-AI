@@ -59,7 +59,29 @@ export const connectorSchema = z.object({
     .regex(/^[a-z0-9_-]{1,32}$/, "Use 1–32 lowercase letters, digits, - or _"),
   displayName: z.string().trim().min(1).max(60),
   url: z.url(),
+  /** Catalog entry this came from (fills in defaults). */
+  catalogId: z.string().trim().max(60).nullable().optional(),
+  /** Defaults to "token" when headers are given, else "none". */
+  auth: z.enum(["none", "token", "oauth"]).optional(),
   headers: z.record(z.string(), z.string()).optional(),
-  approveTools: z.string().trim().max(500).default("*"),
+  /** OAuth app from the service (needed where it doesn't support automatic registration). */
+  oauthClientId: z.string().trim().max(500).nullable().optional(),
+  oauthClientSecret: z.string().trim().max(2000).nullable().optional(),
+  oauthScopes: z.string().trim().max(2000).nullable().optional(),
+  approveTools: z.string().trim().max(1000).default("*"),
   enabled: z.boolean().default(true),
+});
+
+export const connectorUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(60).optional(),
+  url: z.url().optional(),
+  auth: z.enum(["none", "token", "oauth"]).optional(),
+  /** Replaces all headers; omit to keep them. */
+  headers: z.record(z.string(), z.string()).optional(),
+  /** Replaces the OAuth app; omit to keep it, null to clear it. */
+  oauthClientId: z.string().trim().max(500).nullable().optional(),
+  oauthClientSecret: z.string().trim().max(2000).nullable().optional(),
+  oauthScopes: z.string().trim().max(2000).nullable().optional(),
+  approveTools: z.string().trim().max(1000).optional(),
+  enabled: z.boolean().optional(),
 });

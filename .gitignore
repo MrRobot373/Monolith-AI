@@ -11,3 +11,6 @@ test-results
 playwright-report
 .data
 *.tsbuildinfo
+
+# model matrix output
+tests/models/results

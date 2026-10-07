@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDshEngine } from "./dsh/engine";
 import { buildPatch } from "./dsh/patch";
+import { APPROVAL_PRESETS } from "@aatmiq/shared";
 import { classifyRisk } from "./policy";
 import { cleanArgs, planReminder, stripReminders } from "../dsh-plugin/tooling.mjs";
 import type { HarnessEvent, TaskSpec } from "./types";
@@ -139,6 +140,11 @@ describe("risk policy", () => {
   it("follows connector rules and the always/never modes", () => {
     expect(classifyRisk({ name: "mcp__github__create_issue", args: {} }, p)).toContain("github");
     expect(classifyRisk({ name: "mcp__github__list_issues", args: {} }, p)).toBeNull();
+    const changes = { ...p, connectors: [{ name: "gmail", approveTools: APPROVAL_PRESETS.changes.split(",") }] };
+    expect(classifyRisk({ name: "mcp__gmail__search_threads", args: {} }, changes)).toBeNull();
+    expect(classifyRisk({ name: "mcp__gmail__get_message", args: {} }, changes)).toBeNull();
+    expect(classifyRisk({ name: "mcp__gmail__create_draft", args: {} }, changes)).toContain("gmail");
+    expect(classifyRisk({ name: "mcp__gmail__send", args: {} }, changes)).toContain("gmail");
     expect(classifyRisk({ name: "write", args: {} }, { ...p, approvals: "always" })).toBeTruthy();
     expect(classifyRisk({ name: "bash", args: { command: "rm x" } }, { ...p, approvals: "never" })).toBeNull();
   });
@@ -297,6 +303,20 @@ describe("DeepSeek Harness engine", () => {
     expect(results.at(-1)!.text).toContain("step-3");
     expect(results.some((r) => r.text.includes("plan-reminder"))).toBe(false);
   }, 60_000);
+
+  it("keeps the task open while a background subagent works, without mixing in its messages", async () => {
+    const script = [["subagent", { description: "Count", prompt: "run: echo from-the-subagent", run_in_background: true }]];
+    const { events } = await runTurn(`script: ${JSON.stringify(script)}`);
+    const ends = events.filter((e) => e.type === "turn_end");
+    expect(ends).toHaveLength(1);
+    const endAt = events.indexOf(ends[0]!);
+    // The subagent's command shows as a step, before the task's single turn end.
+    const subResult = events.findIndex((e) => e.type === "tool_result" && e.text.includes("from-the-subagent"));
+    expect(subResult).toBeGreaterThan(-1);
+    expect(subResult).toBeLessThan(endAt);
+    // Its own answer isn't the task's answer.
+    expect(events.filter((e) => e.type === "assistant").some((e) => (e as { text: string }).text.startsWith("Result: from-the-subagent"))).toBe(false);
+  }, 90_000);
 
   it("searches the web through Aatmiq", async () => {
     const { events } = await runTurn("search: travel policy flights");

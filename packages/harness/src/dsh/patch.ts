@@ -39,6 +39,13 @@ export const DISABLED_ROWS = [
   "tool-goal",
 ];
 
+/** Names the connected apps, so the agent knows which tools reach which service (and whose account). */
+function connectedApps(spec: TaskSpec): string {
+  if (spec.connectors.length === 0) return "";
+  const apps = spec.connectors.map((c) => `${c.displayName ?? c.name}${c.account ? ` (${c.account})` : ""}: tools named mcp__${c.name}__…`);
+  return `Connected apps you can use through their tools: ${apps.join("; ")}. Use them when the person refers to that service.`;
+}
+
 export function buildPatch(spec: TaskSpec): string {
   const rows: Record<string, unknown>[] = [
     {
@@ -52,7 +59,8 @@ export function buildPatch(spec: TaskSpec): string {
             baseURL: `${spec.controlUrl}/llm/v1`,
             apiKeyEnv: "AATMIQ_TOKEN",
             retryPolicy: { mode: "normal", maxRetries: 2 },
-            models: [{ id: spec.model.key, name: spec.model.name, contextWindow: spec.model.contextWindow }],
+            // Image input lets read_image (and pasted screenshots) reach models that can see.
+            models: [{ id: spec.model.key, name: spec.model.name, contextWindow: spec.model.contextWindow, input: spec.model.vision ? ["text", "image"] : ["text"] }],
           },
         },
       },
@@ -73,7 +81,12 @@ export function buildPatch(spec: TaskSpec): string {
           .filter(Boolean)
           .join(" "),
         // Long absolute task paths get mistyped by models; relative paths don't.
-        personaSuffix: "Your working folder is {{cwd}}. Refer to files with paths relative to it (for example `report.md` or `data/sales.csv`), not absolute paths.",
+        personaSuffix: [
+          "Your working folder is {{cwd}}. Refer to files with paths relative to it (for example `report.md` or `data/sales.csv`), not absolute paths.",
+          connectedApps(spec),
+        ]
+          .filter(Boolean)
+          .join("\n"),
       },
     },
     { id: "web", name: "@deepseek-ai/dsh-web", config: { searchProvider: PROVIDER_ID, fetchProvider: "http" } },
