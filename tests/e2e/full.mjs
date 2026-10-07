@@ -941,11 +941,12 @@ await step("Settings", "Branding: product name, accent and sign-in message", own
   await pub.screenshot({ path: `${OUT}branded-login.png` });
 });
 await step("Settings", "Budget period change persists", owner, async () => {
-  await owner.locator("select").selectOption("week");
+  const budget = () => owner.locator("section", { hasText: "Budget period" }).locator("select");
+  await budget().selectOption("week");
   await owner.locator("section", { hasText: "Budget period" }).locator("button:has-text('Save')").click();
   await wait(600);
   await owner.reload();
-  expect((await owner.locator("select").inputValue()) === "week", "not saved");
+  expect((await budget().inputValue()) === "week", "not saved");
 });
 await step("Settings", "Conversation recording needs confirmation and shows a notice", owner, async () => {
   await owner.locator("section", { hasText: "Record conversations" }).locator('button[role="switch"]').click();
