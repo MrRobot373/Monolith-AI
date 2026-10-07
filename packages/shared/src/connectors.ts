@@ -60,7 +60,7 @@ export const APPROVAL_PRESETS = {
 } as const;
 
 const GOOGLE_SETUP =
-  "In Google Cloud: enable the product's API and its MCP API (for example gmail.googleapis.com and gmailmcp.googleapis.com), configure the OAuth consent screen, then create an OAuth client of type “Web application” with the redirect URI shown here. One client works for all Google connectors.";
+  "In Google Cloud: enable the product's API and its MCP API (for example gmail.googleapis.com and gmailmcp.googleapis.com), configure the OAuth consent screen (choose “Internal” if everyone is in your Google Workspace: then Google needs no app verification), then create an OAuth client of type “Web application” with the redirect URI shown here. One client works for all Google connectors.";
 const GOOGLE_DOCS = "https://developers.google.com/workspace/guides/configure-mcp-servers";
 
 export const CONNECTOR_CATALOG: CatalogConnector[] = [

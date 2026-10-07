@@ -54,6 +54,8 @@ Chat (section `work` in usage reports).
   - **Shared token**: request headers the admin enters (stored encrypted, never shown again).
   - **No sign-in**: open servers (DeepWiki, Microsoft Learn, AWS Knowledge, Hugging Face).
 
+  What to set up at each service, Google verification, and the check against the real services:
+  [09-connectors.md](09-connectors.md).
   **Approvals** per connector: *ask before changes* (default; tools named `get_*`, `list_*`,
   `search_*`, `read_*`… run freely), *every action*, *never*, or a custom rule of comma-separated
   patterns (`create_*, delete_*`; `!pattern` never asks). **Test** lists the tools (with the admin's
