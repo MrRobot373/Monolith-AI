@@ -5,6 +5,7 @@ import { ArrowUpRight, KeyRound, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { EmailSettings } from "@/components/admin/email-settings";
 import { Section } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
@@ -133,6 +134,8 @@ export default function SettingsPage() {
           <Button onClick={() => save.mutate({ budgetPeriod: form.budgetPeriod })}>Save</Button>
         </Card>
       </Section>
+
+      <EmailSettings />
 
       <Section title="Data & privacy">
         <Card className="divide-y divide-border">

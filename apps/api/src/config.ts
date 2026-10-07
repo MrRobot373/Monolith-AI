@@ -22,6 +22,10 @@ export interface Config {
   codeDir?: string;
   /** Minutes an IDE without open windows keeps running. */
   codeIdleMinutes?: number;
+  /** Outgoing mail server (smtp://user:pass@host:587 or smtps://…:465). Overrides Admin → Settings → Email. */
+  smtpUrl?: string | null;
+  /** Sender for SMTP_URL, e.g. "Aatmiq <ai@acme.com>". */
+  mailFrom?: string | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -44,5 +48,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workIsolation: env.WORK_ISOLATION === "off" ? "off" : "auto",
     codeDir: env.CODE_DIR ?? ".data/code",
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
+    smtpUrl: env.SMTP_URL || null,
+    mailFrom: env.MAIL_FROM || null,
   };
 }

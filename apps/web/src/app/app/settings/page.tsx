@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/app/page-header";
 import { useSession } from "@/components/app/session";
 import { RequestTokensDialog } from "@/components/chat/request-tokens";
+import { SecuritySettings } from "@/components/settings/security";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { Avatar, Badge, Card, Meter } from "@/components/ui/misc";
@@ -18,27 +19,28 @@ import { formatTokens, timeAgo } from "@/lib/format";
 import { applyTheme, readTheme, type ThemePref } from "@/lib/theme";
 import type { ChatSummary, QuotaStatus, TokenRequestRow } from "@/lib/types";
 
-const TABS = ["Profile", "Appearance", "Usage", "Archived chats"] as const;
+const TABS = ["Profile", "Security", "Appearance", "Usage", "Archived chats"] as const;
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Profile");
   useEffect(() => {
     if (window.location.hash === "#usage") setTab("Usage");
     if (window.location.hash === "#archived") setTab("Archived chats");
+    if (window.location.hash === "#security") setTab("Security");
   }, []);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <TopBar icon={<Settings />} title="Settings" />
       <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-2xl px-4 pt-10 pb-16 sm:px-6">
-        <PageHeader title="Settings" description="Manage your profile, appearance, usage and archived chats." />
-        <div className="mt-6 flex gap-1 border-b border-border">
+        <PageHeader title="Settings" description="Manage your profile, sign-in security, appearance, usage and archived chats." />
+        <div className="mt-6 flex gap-1 overflow-x-auto border-b border-border">
           {TABS.map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={cn(
-                "relative px-3 pb-2.5 text-sm transition-colors",
+                "relative shrink-0 px-3 pb-2.5 text-sm whitespace-nowrap transition-colors",
                 tab === t ? "text-fg" : "text-fg-muted hover:text-fg",
               )}
             >
@@ -49,6 +51,7 @@ export default function SettingsPage() {
         </div>
         <div key={tab} className="animate-rise pt-6">
           {tab === "Profile" && <Profile />}
+          {tab === "Security" && <SecuritySettings />}
           {tab === "Appearance" && <Appearance />}
           {tab === "Usage" && <Usage />}
           {tab === "Archived chats" && <ArchivedChats />}

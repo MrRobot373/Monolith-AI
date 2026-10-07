@@ -31,7 +31,9 @@ import { createCodeProxy } from "./routes/code-proxy";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { workInternalRoutes } from "./routes/work-internal";
 import { connectorRoutes } from "./routes/connectors";
+import { accountRoutes } from "./routes/account";
 import { createConnectors } from "./services/connectors";
+import { createMailer } from "./services/mail";
 import { WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
 import type { AddressInfo } from "node:net";
@@ -57,11 +59,14 @@ export async function buildApp(
         else handler(req, res);
       }),
   });
+  const box = createSecretBox(cfg.secret);
+  const mail = createMailer({ db, cfg, box });
   const ctx = {
     db,
     cfg,
-    auth: createAuth(db, cfg, sha256),
-    box: createSecretBox(cfg.secret),
+    auth: createAuth(db, cfg, sha256, mail),
+    box,
+    mail,
     storage: opts.storage ?? createLocalStorage(cfg.storageDir),
     license: new LicenseService(db, cfg, opts.fetch),
   } as AppContext;
@@ -147,6 +152,7 @@ export async function buildApp(
   await codeRoutes(app, ctx);
   await codeInternalRoutes(app, ctx);
   await connectorRoutes(app, ctx);
+  await accountRoutes(app, ctx);
 
   // Housekeeping: temporary chats older than a day are deleted.
   const purge = () => void purgeTemporaryChats(db).catch((e) => app.log.warn(e, "purging temporary chats failed"));

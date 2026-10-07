@@ -49,6 +49,9 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       if (req.url.startsWith("/api/auth/sign-up")) {
         throw new HttpError(403, "Accounts are created by invitation. Ask your admin for an invite.", "signup_disabled");
       }
+      if (req.method === "POST" && req.url.startsWith("/api/auth/request-password-reset") && !(await ctx.mail.configured())) {
+        throw new HttpError(503, "Email isn't set up on this server, so we can't send a reset link. Ask your admin for one.", "email_off");
+      }
       const isSignIn = req.method === "POST" && req.url.startsWith("/api/auth/sign-in/email");
       const email = isSignIn ? String((req.body as { email?: unknown } | undefined)?.email ?? "").toLowerCase() : "";
       if (isSignIn && email && recentFailures(email).length >= FAIL_MAX) {

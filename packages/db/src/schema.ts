@@ -77,6 +77,8 @@ export const organization = pgTable("organization", {
   ssoRequired: boolean("sso_required").notNull().default(false),
   /** Work AI policy set by org admins (see WorkSettings). */
   workSettings: jsonb("work_settings").$type<Partial<WorkSettings>>(),
+  /** Outgoing email (SMTP) for invitations and password resets; the password is encrypted. */
+  emailSettings: jsonb("email_settings").$type<EmailSettingsStored>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -94,6 +96,8 @@ export const user = pgTable("user", {
   jobTitle: text("job_title"),
   customInstructions: text("custom_instructions"),
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+  /** Two-step sign-in with an authenticator app (Better Auth two-factor plugin). */
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -135,6 +139,23 @@ export const account = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [index("account_user_idx").on(t.userId)],
+);
+
+/** Authenticator-app secrets and backup codes, both encrypted by Better Auth. */
+export const twoFactor = pgTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: boolean("verified").notNull().default(true),
+    failedVerificationCount: integer("failed_verification_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  },
+  (t) => [index("two_factor_user_idx").on(t.userId)],
 );
 
 export const verification = pgTable("verification", {
@@ -560,6 +581,18 @@ export const projectSource = pgTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.documentId] }), index("psource_doc_idx").on(t.documentId)],
 );
+
+/** Outgoing mail server as stored (the password is encrypted with the app secret). */
+export interface EmailSettingsStored {
+  host: string;
+  port: number;
+  /** "tls": implicit TLS (465); "starttls": upgrade after connecting (587); "none": plain (local relays only). */
+  security: "tls" | "starttls" | "none";
+  username: string | null;
+  passwordEnc: string | null;
+  /** Sender address, e.g. "Aatmiq <ai@acme.com>". */
+  from: string;
+}
 
 /* ───────────── Work AI ───────────── */
 

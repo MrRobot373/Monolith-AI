@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Link2, MoreHorizontal, Search, ShieldCheck, UserMinus, UserPlus, UserCheck, X } from "lucide-react";
+import { Check, Copy, KeyRound, Link2, MoreHorizontal, Search, ShieldCheck, ShieldOff, Smartphone, UserMinus, UserPlus, UserCheck, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Section, Table, Td } from "@/components/admin/table";
@@ -27,6 +27,7 @@ interface UserRow {
   lastActiveAt: string | null;
   createdAt: string;
   tokensThisPeriod: number;
+  twoFactorEnabled: boolean;
   workspaces: { workspaceId: string; name: string; role: "admin" | "member" }[];
 }
 interface InviteRow {
@@ -49,6 +50,8 @@ export default function UsersPage() {
   const invites = useQuery({ queryKey: ["admin-invites"], queryFn: () => get<InviteRow[]>("/api/admin/invites") });
   const [q, setQ] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [resetFor, setResetFor] = useState<UserRow | null>(null);
+  const [twoStepFor, setTwoStepFor] = useState<UserRow | null>(null);
 
   const filtered = useMemo(
     () => (users.data ?? []).filter((u) => `${u.name} ${u.email}`.toLowerCase().includes(q.toLowerCase())),
@@ -106,7 +109,14 @@ export default function UsersPage() {
                 {u.status === "deactivated" ? (
                   <Badge tone="danger">Deactivated</Badge>
                 ) : (
-                  <Badge tone={u.orgRole === "member" ? "neutral" : "accent"}>{u.orgRole === "owner" ? "Owner" : u.orgRole === "admin" ? "Admin" : "Member"}</Badge>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Badge tone={u.orgRole === "member" ? "neutral" : "accent"}>{u.orgRole === "owner" ? "Owner" : u.orgRole === "admin" ? "Admin" : "Member"}</Badge>
+                    {u.twoFactorEnabled && (
+                      <span title="Two-step sign-in is on" className="inline-flex text-fg-subtle" data-testid="two-factor-badge">
+                        <Smartphone className="size-3.5" />
+                      </span>
+                    )}
+                  </span>
                 )}
               </Td>
               <Td>
@@ -135,6 +145,13 @@ export default function UsersPage() {
                         <MenuItem icon={<ShieldCheck />} onSelect={() => update.mutate({ id: u.id, orgRole: "admin" })}>Make org admin</MenuItem>
                       ) : (
                         <MenuItem icon={<ShieldCheck />} onSelect={() => update.mutate({ id: u.id, orgRole: "member" })}>Remove admin role</MenuItem>
+                      )}
+                      <MenuSeparator />
+                      {u.status === "active" && (
+                        <MenuItem icon={<KeyRound />} onSelect={() => setResetFor(u)}>Send password reset link</MenuItem>
+                      )}
+                      {u.twoFactorEnabled && (
+                        <MenuItem icon={<ShieldOff />} onSelect={() => setTwoStepFor(u)}>Turn off two-step sign-in</MenuItem>
                       )}
                       <MenuSeparator />
                       {u.status === "active" ? (
@@ -177,6 +194,33 @@ export default function UsersPage() {
       </Section>
 
       <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+      {resetFor && <ResetLinkDialog person={resetFor} onClose={() => setResetFor(null)} />}
+      <Dialog
+        open={!!twoStepFor}
+        onOpenChange={(o) => !o && setTwoStepFor(null)}
+        title={`Turn off two-step sign-in for ${twoStepFor?.name ?? ""}?`}
+        description="Do this only if they lost their phone and backup codes. Their password alone will sign them in until they set it up again."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setTwoStepFor(null)}>Cancel</Button>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                try {
+                  await post(`/api/admin/users/${twoStepFor!.id}/two-factor/disable`);
+                  toast.success(`Two-step sign-in is off for ${twoStepFor!.name}`);
+                  qc.invalidateQueries({ queryKey: ["admin-users"] });
+                } catch (e) {
+                  toast.error((e as Error).message);
+                }
+                setTwoStepFor(null);
+              }}
+            >
+              Turn off
+            </Button>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -188,18 +232,19 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [orgRole, setOrgRole] = useState<"member" | "admin">("member");
   const [selected, setSelected] = useState<Record<string, "member" | "admin" | undefined>>({});
   const [link, setLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [emailed, setEmailed] = useState(false);
 
   const reset = () => {
     setEmail("");
     setOrgRole("member");
     setSelected({});
     setLink(null);
+    setEmailed(false);
   };
 
   const m = useMutation({
     mutationFn: () =>
-      post<{ link: string }>("/api/admin/invites", {
+      post<{ link: string; emailed: boolean }>("/api/admin/invites", {
         email,
         orgRole,
         workspaces: Object.entries(selected)
@@ -208,6 +253,7 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
       }),
     onSuccess: (r) => {
       setLink(r.link);
+      setEmailed(r.emailed);
       qc.invalidateQueries({ queryKey: ["admin-invites"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -221,7 +267,13 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
         if (!o) setTimeout(reset, 200);
       }}
       title={link ? "Invitation created" : "Invite someone"}
-      description={link ? "Share this link with them. It works once and expires in 7 days." : "They'll set their own password when they accept."}
+      description={
+        link
+          ? emailed
+            ? `We emailed the invitation to ${email}. You can also share this link. It works once and expires in 7 days.`
+            : "Share this link with them. It works once and expires in 7 days."
+          : "They'll set their own password when they accept."
+      }
       footer={
         link ? (
           <>
@@ -237,19 +289,7 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
       }
     >
       {link ? (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle p-2 pl-3">
-          <code className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">{link}</code>
-          <Button
-            size="sm"
-            onClick={() => {
-              navigator.clipboard.writeText(link);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />} {copied ? "Copied" : "Copy"}
-          </Button>
-        </div>
+        <CopyLink link={link} />
       ) : (
         <div className="space-y-4">
           <Field label="Email">
@@ -289,6 +329,62 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
           </Field>
         </div>
       )}
+    </Dialog>
+  );
+}
+
+function CopyLink({ link }: { link: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle p-2 pl-3" data-testid="copy-link">
+      <code className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">{link}</code>
+      <Button
+        size="sm"
+        onClick={() => {
+          navigator.clipboard.writeText(link);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+      >
+        {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />} {copied ? "Copied" : "Copy"}
+      </Button>
+    </div>
+  );
+}
+
+/** A one-time link to choose a new password: emailed to the person when email is set up, otherwise shown here. */
+function ResetLinkDialog({ person, onClose }: { person: UserRow; onClose: () => void }) {
+  const send = useMutation({
+    mutationFn: () => post<{ emailed: boolean; link?: string; email?: string; expiresInMinutes: number }>(`/api/admin/users/${person.id}/reset-link`),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const r = send.data;
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={r ? (r.emailed ? "Reset link sent" : "Reset link created") : `Reset ${person.name}'s password?`}
+      description={
+        r
+          ? r.emailed
+            ? `We emailed ${r.email} a link to choose a new password. It works once and expires in ${r.expiresInMinutes} minutes.`
+            : `Email isn't set up, so share this link with ${person.name} yourself. It works once and expires in ${r.expiresInMinutes} minutes.`
+          : `They'll get a one-time link to choose a new password, and be signed out on their devices once they do. Their password works until then.`
+      }
+      footer={
+        r ? (
+          <Button variant="primary" onClick={onClose}>Done</Button>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" loading={send.isPending} onClick={() => send.mutate()} data-testid="send-reset-link">
+              Create link
+            </Button>
+          </>
+        )
+      }
+    >
+      {r?.link && <CopyLink link={r.link} />}
     </Dialog>
   );
 }

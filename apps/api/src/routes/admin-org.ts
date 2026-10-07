@@ -35,6 +35,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   audit,
+  getOrg,
   parse,
   requireOrgCap,
   requireUser,
@@ -72,6 +73,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         jobTitle: user.jobTitle,
         lastActiveAt: user.lastActiveAt,
         createdAt: user.createdAt,
+        twoFactorEnabled: user.twoFactorEnabled,
         tokensThisPeriod: sql<number>`coalesce((select sum(${usageEvent.inputTokens} + ${usageEvent.outputTokens}) from ${usageEvent} where ${usageEvent.userId} = ${OUTER_USER_ID} and ${usageEvent.createdAt} >= ${start.toISOString()}), 0)::bigint`,
       })
       .from(user)
@@ -132,7 +134,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
       .orderBy(desc(invitation.createdAt));
   });
 
-  /** No SMTP yet: the invite link is returned so the admin can share it (docs/01-foundation.md §3). */
+  /** The link is always returned so the admin can share it; with email set up it is also emailed. */
   app.post("/api/admin/invites", async (req) => {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.users.invite");
@@ -171,7 +173,28 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
       })
       .returning({ id: invitation.id, expiresAt: invitation.expiresAt });
     await audit(ctx, { actor: u, action: "user.invited", targetType: "invitation", targetId: inv!.id, meta: { email } });
-    return { ...inv, email, link: `${cfg.appUrl}/invite/${token}` };
+    const link = `${cfg.appUrl}/invite/${token}`;
+    const org = await getOrg(db);
+    const { productName } = await ctx.mail.brand();
+    const emailed = await ctx.mail
+      .send({
+        to: email,
+        subject: `${u.name} invited you to ${org?.name ?? productName}`,
+        lines: [
+          "Hi,",
+          `${u.name} invited you to join ${org?.name ?? "your team"} on ${productName}, your organization's private AI workspace.`,
+        ],
+        button: { label: "Accept the invitation", url: link },
+        note: `The invitation expires in ${INVITE_TTL_DAYS} days.`,
+      })
+      .then(
+        (sent) => sent,
+        (e: Error) => {
+          req.log.warn({ err: e.message }, "invite email failed");
+          return false;
+        },
+      );
+    return { ...inv, email, link, emailed };
   });
 
   app.delete<{ Params: { id: string } }>("/api/admin/invites/:id", async (req) => {
