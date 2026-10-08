@@ -96,6 +96,14 @@ d("Single sign-on", () => {
     expect((await call(owner, "POST", `/api/admin/sso/${connId}/test`)).json.ok).toBe(true);
     const g = await call(owner, "POST", "/api/admin/sso", { type: "google", clientId: "g.apps.googleusercontent.com", clientSecret: "s", enabled: false });
     expect(g.json).toMatchObject({ name: "Google", issuer: "https://accounts.google.com", enabled: false });
+    // The desktop app learns where sign-in may take its windows (enabled providers only).
+    expect((await call(null, "GET", "/api/public/desktop")).json).toEqual({
+      product: "aatmiq",
+      name: "Aatmiq",
+      appOrigin: APP_URL,
+      ideOrigin: null,
+      signInOrigins: [new URL(idp.issuer).origin],
+    });
   });
 
   it("people without an account or invitation are turned away", async () => {

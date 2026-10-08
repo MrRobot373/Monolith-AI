@@ -6,7 +6,7 @@
 > **Chat**, **Work AI** (agent harness) and **Code** (VS Code–based IDE) in one product,
 > running on the customer's own servers with open-source models. Their data never leaves their infrastructure.
 
-Status: **P0–P3 built** (Foundation, Chat, Work AI, Code in the browser; see README "What works today") · Owner: Super Admin (product owner) · Last updated: 2026-10-07
+Status: **P0–P3 built** (Foundation, Chat, Work AI, Code in the browser and on the desktop; see README "What works today") · Owner: Super Admin (product owner) · Last updated: 2026-10-08
 
 ---
 
@@ -83,7 +83,7 @@ The user assigns a task and the agent carries it out.
 ### 4.4 Section 3 — Code (Aatmiq IDE)
 - **Fork of Code-OSS** (the MIT-licensed VS Code source), rebranded to Aatmiq.
 - Two builds from one fork:
-  - **Desktop app** (Electron) for Win/macOS/Linux; connects to the org server.
+  - **Desktop app** (Electron) for Win/macOS/Linux; connects to the org server (`apps/desktop`, D34).
   - **Web IDE** (the browser version served from the org server, like code-server) that opens inside the Aatmiq web app.
 - Workspaces live in the user's container, so the terminal, run/debug, git and extensions all work there. It is fully usable without AI.
 - Extensions come from **Open VSX** plus an optional private org registry. Microsoft's Marketplace is not permitted for forks.
@@ -224,16 +224,16 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
 | **P0 Foundation** ✅ | Monorepo, design system, auth (email/pw with password reset, email confirmation and two-step sign-in that admins can require, email via SMTP, Google/Microsoft/OIDC SSO), orgs/roles, admin portal (users, providers, models, grants, quotas, usage), model gateway, license client, Docker Compose | Installable, admin-manageable shell |
 | **P1 Chat** ✅ | Chat UI, streaming, folders/rename/search, document upload and retrieval with citations | **First sellable version** |
 | **P2 Work AI** ✅ | DSH adapter, sandboxing (per-task user + Landlock; container per task in P2.1 ✅), tools, SearXNG, MCP connectors, approvals, task UI, skills, schedules ([details](06-work-ai.md)) | Cowork-class agent |
-| **P3 Code** ✅ (web) | Code-OSS build with our patch set, branding, Open VSX, web IDE in Aatmiq, Aatmiq panel wired to the harness ([details](07-code.md)); desktop build next | Cursor-class IDE |
+| **P3 Code** ✅ | Code-OSS build with our patch set, branding, Open VSX, web IDE in Aatmiq, Aatmiq panel wired to the harness, desktop app for Windows/macOS/Linux ([details](07-code.md)) | Cursor-class IDE |
 | **P4 Enterprise** | SAML/OIDC, audit exports, retention policies, Helm/K8s, offline licenses, backups, SOC2-style docs | Mid-size readiness |
 | **Parallel** | Marketing site + Super Admin license server (license server + console ✅) | Sales and customer management |
 
 ---
 
-### Still open (2026-10-07)
+### Still open (2026-10-08)
 - **Before wide release:** a `main` branch and CI on every push; a real sign-in once per connector a
-  customer turns on ([09-connectors.md](09-connectors.md)).
-- **Planned features:** desktop IDE (P3).
+  customer turns on ([09-connectors.md](09-connectors.md)); a first run of the desktop workflow
+  (Windows and macOS packages) and code-signing certificates.
 - **Accounts:** a list of individual signed-in devices; a grace period for the two-step rule.
 - **P4 Enterprise:** SAML, LDAP, Helm, backups and restore, monitoring, audit export, offline
   licenses, signing-key rotation, billing.

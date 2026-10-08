@@ -1,0 +1,39 @@
+# Packages for Windows, macOS and Linux (pnpm --filter @aatmiq/desktop dist), built by
+# .github/workflows/desktop.yml on each system. Signing uses the usual electron-builder variables
+# when they're set (CSC_LINK/CSC_KEY_PASSWORD, APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID).
+appId: com.aatmiq.desktop
+productName: Aatmiq Code
+# The npm name (@aatmiq/desktop) isn't usable as a file name.
+executableName: aatmiq-code
+copyright: Copyright © Aatmiq
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+asar: true
+protocols:
+  - name: Aatmiq
+    schemes: [aatmiq]
+mac:
+  category: public.app-category.developer-tools
+  target: [dmg, zip]
+  hardenedRuntime: true
+  notarize: false
+win:
+  target: [nsis]
+deb:
+  # Debian package names can't contain @ or /.
+  packageName: aatmiq-code
+  artifactName: aatmiq-code_${version}_${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target: [AppImage, deb]
+  executableName: aatmiq-code
+  category: Development
+  maintainer: Aatmiq <support@aatmiq.com>
+  synopsis: Aatmiq Code, your organization's IDE

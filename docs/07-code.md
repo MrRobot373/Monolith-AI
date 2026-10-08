@@ -105,10 +105,48 @@ then `pnpm dev` as usual. Without root, IDEs run as your own user.
 **Upgrading the IDE**: change `version` and `sha256` in `apps/code/base.json`, build, and run the Code
 browser suite. If a patch anchor moved, the build stops and names it.
 
-## Desktop app (next)
+## Desktop app
 
-The plan (D2/D3) includes a desktop app. The same patch set will drive a Code-OSS desktop build
-(Electron) in CI that connects to the organization's server; it isn't part of this release.
+**Aatmiq Code for the desktop** (`apps/desktop`, D34) is an Electron app for Windows, macOS and
+Linux: a native window onto the organization's Aatmiq server. Workspaces, terminals, extensions and
+the Aatmiq panel run on the server exactly as in the browser; files never live on the laptop.
+
+For people:
+
+- First start asks for the server address (`aatmiq.acme.com`; `https://` is assumed). The app checks
+  that it's an Aatmiq server, then opens **Code**. Sign in as on the web (password, two-step, single
+  sign-on); the app remembers the server, the sign-in and the window size.
+- The IDE gets the keyboard: `Ctrl/⌘+W` closes an editor, `Ctrl+N` makes a new file, instead of
+  closing or opening browser tabs. **Open in new window** on a workspace gives it an app window.
+- **File → Switch Server…**, **New Window**, **Open in Browser**; **View** for zoom and full screen.
+  When the server can't be reached the window says so, with **Try again**.
+
+What remote pages may do (`apps/desktop/src/policy.ts`, unit-tested):
+
+- Windows show only Aatmiq (`APP_URL`), its IDE host (`IDE_URL`) and, while signing in, the
+  identity providers it uses, all learned from `GET /api/public/desktop`. Other links open in the
+  person's browser; `file:`, `javascript:` and other schemes go nowhere.
+- Pages run sandboxed and context-isolated, with no Node and no preload. Only the local connect
+  screen has a two-function bridge (connect, read state).
+- Permissions: clipboard, notifications and full screen for Aatmiq's own pages; location, camera,
+  microphone, USB/serial/HID and everything else are refused.
+- The server sees `AatmiqDesktop/<version>` in the user agent (the Code page then says "Open in new
+  window").
+- Links like `aatmiq://open?server=https://aatmiq.acme.com&path=/app/code/<id>` open a page of the
+  connected server; a link naming another server only fills in the connect screen.
+
+Building:
+
+```bash
+pnpm --filter @aatmiq/desktop start      # run against any server (first start asks for it)
+pnpm --filter @aatmiq/desktop dist       # packages for this system into apps/desktop/release
+```
+
+`.github/workflows/desktop.yml` builds all three systems (Windows NSIS installer, macOS dmg/zip for
+Intel and Apple silicon, Linux AppImage and .deb) by hand or for a `desktop-v*` tag. Packages are
+unsigned unless the signing secrets it lists are set; unsigned macOS apps need right-click → Open
+the first time, and Windows SmartScreen warns. The Linux packages are built and started in testing;
+the Windows and macOS packages are only built by that workflow (not yet run).
 
 ## API
 
@@ -123,6 +161,14 @@ IDE only (per-person token): `/api/internal/code/context`, `/tasks`, `/tasks/:id
 
 - `apps/api/src/code.test.ts`: workspaces, the proxy with and without a session, WebSocket upgrade
   rules, IDE running as the person's user in a private home.
+- `apps/desktop/test/policy.test.ts`: the desktop app's rules (server addresses, navigation, new
+  windows, permissions, `aatmiq://` links).
+- `tests/e2e/desktop.mjs` (12 checks, `E2E_SCRIPT=tests/e2e/desktop.mjs tests/e2e/run-work.sh`): the
+  real Electron app (under Xvfb when there's no display): the connect screen refusing bad addresses,
+  signing in, no Node or bridge in Aatmiq's pages, links to the browser, `file:` blocked, clipboard
+  allowed and location/camera refused, the IDE in its own window with the panel and a terminal,
+  `Ctrl+N`/`Ctrl+W` reaching the IDE, remembering the server and sign-in, Switch Server, the offline
+  page.
 - `tests/e2e/code.mjs` (13 checks, run with `E2E_SCRIPT=tests/e2e/code.mjs tests/e2e/run-work.sh`):
   the IDE inside Aatmiq, terminal identity, the panel creating a file, an approval-gated delete, steps
   opening files, cloning over HTTP, diffs of agent changes, a failed clone, rename/delete, signed-out

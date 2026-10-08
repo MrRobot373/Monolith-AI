@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Code2, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { TopBar, TopBarButton } from "@/components/app/frame";
 import { useSession } from "@/components/app/session";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,10 @@ export default function CodeWorkspacePage() {
     staleTime: Infinity,
     retry: false,
   });
+
+  // In the desktop app (apps/desktop) a new tab is a new window of the app.
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => setDesktop(navigator.userAgent.includes("AatmiqDesktop/")), []);
 
   // Each address works once when the IDE has its own host, so a new tab gets a fresh one. The tab
   // opens right away (so it isn't blocked as a pop-up) and is pointed at the address when it arrives.
@@ -49,7 +54,7 @@ export default function CodeWorkspacePage() {
         actions={
           open.data && (
             <TopBarButton onClick={openInNewTab} data-testid="open-ide-tab">
-              <ExternalLink /> <span className="hidden sm:inline">Open in new tab</span>
+              <ExternalLink /> <span className="hidden sm:inline">{desktop ? "Open in new window" : "Open in new tab"}</span>
             </TopBarButton>
           )
         }

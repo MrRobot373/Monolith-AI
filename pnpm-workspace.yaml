@@ -10,3 +10,5 @@ onlyBuiltDependencies:
   - koffi
   - node-pty
   - protobufjs
+  # Aatmiq desktop (apps/desktop): downloads the Electron runtime for this machine.
+  - electron

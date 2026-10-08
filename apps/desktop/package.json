@@ -1,0 +1,34 @@
+{
+  "name": "@aatmiq/desktop",
+  "productName": "Aatmiq Code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aatmiq Code for the desktop: a native window onto your organization's Aatmiq server (Windows, macOS, Linux).",
+  "author": "Aatmiq",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p . && node scripts/copy-static.mjs",
+    "typecheck": "tsc -p . --noEmit",
+    "electron:check": "node -e \"require('electron')\" 2>/dev/null || node node_modules/electron/install.js",
+    "start": "pnpm build && pnpm electron:check && electron .",
+    "test": "vitest run",
+    "test:e2e": "pnpm build && pnpm electron:check && node test/app.e2e.mjs",
+    "icons": "node scripts/icons.mjs",
+    "dist": "pnpm build && electron-builder --publish never"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "electron": "44.6.0",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.56.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "desktopName": "aatmiq-code.desktop",
+  "homepage": "https://aatmiq.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MrRobot373/Monolith-AI.git",
+    "directory": "apps/desktop"
+  }
+}

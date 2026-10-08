@@ -59,6 +59,18 @@ then a person without it only gets the setup page (also at phone width) until it
 E2E_SCRIPT=$PWD/tests/e2e/account.mjs tests/e2e/run-work.sh
 ```
 
+## Desktop app
+
+`desktop.mjs` drives the real Electron app (`apps/desktop`, built first) against the stack
+`run-work.sh` starts, under Xvfb when there's no display: connecting, signing in, what pages may and
+may not do, the IDE in its own window, remembering the server, the offline page. Needs the IDE build
+too. Screenshots go to `results-desktop/`.
+
+```bash
+pnpm --filter @aatmiq/desktop build
+E2E_SCRIPT=$PWD/tests/e2e/desktop.mjs LOG_DIR=$PWD/tests/e2e/results-desktop tests/e2e/run-work.sh
+```
+
 ## Work AI container mode
 
 `run-containers.sh` starts the Compose stack with `deploy/docker-compose.containers.yml` (images

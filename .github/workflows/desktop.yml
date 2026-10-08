@@ -1,0 +1,58 @@
+# Aatmiq Code desktop packages (apps/desktop) for Windows, macOS and Linux.
+# Runs by hand (Actions → Desktop → Run workflow) or for a tag like desktop-v0.1.0; the packages are
+# attached to the run. Signing: set CSC_LINK/CSC_KEY_PASSWORD (Windows, macOS) and
+# APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID (macOS notarization) as repository secrets;
+# without them the packages are unsigned.
+name: Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["desktop-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: --linux AppImage deb
+          - os: windows-latest
+            target: --win nsis
+          - os: macos-latest
+            target: --mac dmg zip --x64 --arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @aatmiq/desktop...
+      - run: pnpm --filter @aatmiq/desktop test
+      - run: pnpm --filter @aatmiq/desktop build
+      - name: Package
+        working-directory: apps/desktop
+        run: pnpm exec electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aatmiq-code-${{ runner.os }}
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+          if-no-files-found: error

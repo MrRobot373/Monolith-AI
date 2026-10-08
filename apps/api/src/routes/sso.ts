@@ -1,6 +1,7 @@
 import { account, and, asc, eq, gte, invitation, isNull, organization, sql, ssoConnection, user, workspace, workspaceMember } from "@aatmiq/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
+import { PRODUCT_NAME } from "@aatmiq/shared";
 import { z } from "zod";
 import { ssoTicketId } from "../auth";
 import { audit, getOrg, parse, requireOrgCap, requireUser, type AppContext } from "../context";
@@ -375,6 +376,37 @@ export async function ssoRoutes(app: FastifyInstance, ctx: AppContext) {
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : "Couldn't reach the provider." };
     }
+  });
+
+  /**
+   * For the desktop app (apps/desktop): that this is Aatmiq, and where its windows may go: the app,
+   * the IDE's own host, and the identity providers sign-in sends people to.
+   */
+  app.get("/api/public/desktop", async () => {
+    const org = await getOrg(db);
+    const conns = await db.select({ type: ssoConnection.type, issuer: ssoConnection.issuer }).from(ssoConnection).where(eq(ssoConnection.enabled, true));
+    // The issuer, and its authorization endpoint, which may live elsewhere (best effort: cached,
+    // and an unreachable provider doesn't hold the answer up).
+    const found = await Promise.all(
+      conns.map(async (c) => {
+        const d = await Promise.race([discover(c.issuer).catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 4000).unref())]);
+        return [c.issuer, d?.authorization_endpoint].flatMap((u) => {
+          try {
+            return u ? [new URL(u).origin] : [];
+          } catch {
+            return [];
+          }
+        });
+      }),
+    );
+    const signIn = new Set(found.flat());
+    return {
+      product: "aatmiq",
+      name: org?.productName ?? PRODUCT_NAME,
+      appOrigin: new URL(ctx.cfg.appUrl).origin,
+      ideOrigin: ctx.cfg.ideUrl ? new URL(ctx.cfg.ideUrl).origin : null,
+      signInOrigins: [...signIn],
+    };
   });
 
   /** For the sign-in page: which buttons to show. */

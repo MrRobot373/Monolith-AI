@@ -39,7 +39,8 @@
 | Work AI: agent tasks on DeepSeek Harness with a live timeline, plan, files, approvals for risky steps, follow-ups, queue, private web search (SearXNG), a browser the agent drives (forms ask first, no private network), MCP connectors, skills, schedules, per-task isolation (own Unix user, or optionally its own container with CPU/memory limits and no network beyond Aatmiq's proxy), metering ([details](docs/06-work-ai.md)) | ✅ |
 | Connectors: catalog of 45 apps (Gmail, Google Calendar/Drive/Docs, Slack, GitHub, GitLab, Notion, Canva, Jira…), each person signs in to their own account, checked against the real services ([setup](docs/09-connectors.md)) | ✅ |
 | Built-in skill library: 59 skills for software, data, documents and business work, admins switch each on or off ([list](docs/08-skills.md)) | ✅ |
-| Code: Aatmiq Code (Code-OSS) in the browser, per-person IDE as your own user, terminals, Git (clone, your name on commits), Open VSX extensions, and the Aatmiq panel: a coding agent with approvals and diffs; optionally on its own hostname (`IDE_URL`) so extensions can't act on Aatmiq ([details](docs/07-code.md)) | ✅ (desktop app next) |
+| Code: Aatmiq Code (Code-OSS) in the browser, per-person IDE as your own user, terminals, Git (clone, your name on commits), Open VSX extensions, and the Aatmiq panel: a coding agent with approvals and diffs; optionally on its own hostname (`IDE_URL`) so extensions can't act on Aatmiq ([details](docs/07-code.md)) | ✅ |
+| Desktop app: Aatmiq Code in a native window for Windows, macOS and Linux, connected to your server (sign-in as on the web, the IDE's own shortcuts, `aatmiq://` links); packages built by `.github/workflows/desktop.yml` ([details](docs/07-code.md#desktop-app)) | ✅ |
 
 ## Repository layout
 

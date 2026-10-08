@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connect to your server</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <main class="card">
+      <img class="logo" src="icon.svg" alt="" width="44" height="44" />
+      <h1>Aatmiq Code</h1>
+      <p class="lead">Connect to your organization's Aatmiq server. You sign in the same way as on the web.</p>
+      <form id="form" novalidate>
+        <label for="address">Server address</label>
+        <input id="address" name="address" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="aatmiq.yourcompany.com" required autofocus />
+        <p id="error" class="error" role="alert" hidden></p>
+        <button id="go" type="submit">Connect</button>
+      </form>
+      <p class="hint">Ask your admin for the address if you don't know it. It's the one you open Aatmiq at in your browser.</p>
+    </main>
+    <script src="connect.js"></script>
+  </body>
+</html>
