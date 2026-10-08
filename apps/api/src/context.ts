@@ -157,7 +157,7 @@ export async function getOrg(db: DB) {
 export async function audit(
   ctx: AppContext,
   entry: {
-    actor?: SessionUser | null;
+    actor?: (Pick<SessionUser, "id" | "email"> & Partial<SessionUser>) | null;
     action: string;
     workspaceId?: string | null;
     targetType?: string;

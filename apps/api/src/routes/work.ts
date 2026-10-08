@@ -67,7 +67,7 @@ async function requireQuota(ctx: AppContext, workspaceId: string, userId: string
 }
 
 /** Resolve a path inside the task folder; refuses anything that escapes it (.., symlinks). */
-async function safePath(root: string, rel: string) {
+export async function safePath(root: string, rel: string) {
   if (!rel || rel.includes("\0")) throw badRequest("Pick a file");
   const full = join(root, rel);
   if (relative(root, full).startsWith("..")) throw notFound("File not found");

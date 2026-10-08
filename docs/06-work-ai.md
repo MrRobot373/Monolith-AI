@@ -141,6 +141,24 @@ package installs and deletions, and the Aatmiq panel writing and testing code.
 - **Schedules** are checked every 30 seconds. A due schedule is claimed by moving its next run
   forward in one conditional update, so it runs once even with several API instances.
 
+## The agent's tools
+
+Every task gets these (tested one by one and in chains in `apps/api/src/tools.test.ts`):
+
+| Tools | What for |
+|---|---|
+| `bash` | Commands in the task folder (Python, Node, LibreOffice, pandoc, git…). A slow command moves to the background after its timeout. |
+| `read`, `write`, `edit`, `glob`, `grep` | Files in the task folder. |
+| `read_image` | Look at an image or screenshot (models that see images; others are told plainly). |
+| `todo_write` | The plan in the progress panel. |
+| `web_search`, `web_fetch` | Private web search through Aatmiq's SearXNG; fetch a public page (private and internal addresses refused). |
+| `browser_open`, `browser_click`, `browser_type`, `browser_select`, `browser_back`, `browser_read`, `browser_screenshot` | A real browser for pages that need JavaScript, clicks or forms ([Browser](#browser)). |
+| `documents_search`, `documents_read`, `documents_save` | The organization's documents in Aatmiq ([Documents](#documents)). |
+| `skill` | Load a skill (organization, personal or library) and follow it. |
+| `subagent`, `subagent_fork`, `list_agents`, `send_message`, `interrupt_agent` | Helpers for parts of a job, in the foreground or background; the task ends when the agent and every working helper are done. |
+| `job_list`, `job_output`, `job_kill` | Background commands and helpers. |
+| `mcp__<app>__<tool>` | Connected apps (admins add them; some need each person to connect). |
+
 ## Security model
 
 What protects what, and the limits:
@@ -196,6 +214,23 @@ agent.
   under *before every change* every page action asks; *never* asks nothing.
 - The Docker image includes Chromium (about 1 GB more). Elsewhere, set `BROWSER_PATH`; without a
   browser the setting is greyed out and the tools aren't offered.
+
+### Documents
+
+`documents_search`, `documents_read` and `documents_save` give the agent the same documents a person
+sees in Chat: their own, the ones shared with the workspace, and the sources of projects they can
+open. Each call goes to `/api/internal/work/documents…` with the task token, and Aatmiq answers as
+the task's person, so a colleague's private document never reaches the agent, by search or by id.
+
+- **Search** uses keyword and meaning search (embeddings, [10-team-server.md](10-team-server.md#documents-and-embeddings))
+  over the whole library, best passages first, each with its document, page, Confirmed /
+  Assumption / TBD label and `document_id`. Embedding tokens are metered under `work`.
+- **Read** gives a whole document in parts of 12,000 characters (`offset` continues), with page
+  markers.
+- **Save** puts a file from the task folder (or the Code workspace) into the person's private
+  documents, where it's read, indexed and searchable like an upload (up to 25 MB; PDF, Word, Excel,
+  text, Markdown, CSV, code and images). It's audited as an upload from the task. It asks first only
+  under *before every change*.
 
 ### Container mode
 
@@ -301,12 +336,23 @@ People: `GET /api/connectors`, `POST /api/connectors/:id/connect` → `{url}`,
 `GET /api/connectors/oauth/client.json` (client metadata document).
 
 Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/approvals`,
-`/approvals/:id?wait=`, `/search`, `/mcp/:name` (MCP proxy).
+`/approvals/:id?wait=`, `/search`, `/browser`, `/documents/search`, `/documents/:id?offset=`,
+`/documents/save`, `/mcp/:name` (MCP proxy).
 
 ## Tests
 
 - `packages/harness`: the real DSH runtime against a fake control server (commands, approvals,
-  rejection keeps files, confinement, per-task user, web search, browser tools and their approvals).
+  rejection keeps files, confinement, per-task user, web search, browser and documents tools and
+  their approvals).
+- `apps/api/src/tools.test.ts`: every tool the agent has, alone and in the chains people use, on
+  the real runtime: files (write → read → edit → grep → glob → bash), plan and shell, web search and
+  fetch (private addresses refused), documents (search → read → write → save, then searchable; only
+  what the person may open; long documents in parts; mistakes as plain answers; asking first under
+  *before every change*), a Word report and a spreadsheet made with the library skill and saved,
+  project sources and follow-ups, the browser (open → click → read → back → choose → submit with
+  approval → screenshot → read_image), a connected app with approval, skills, foreground,
+  forked and background helpers (an interrupted one no longer keeps the task open), and background
+  commands.
 - `apps/api/src/browser.test.ts`: real Chromium against a local site (page views, held form
   submissions, JavaScript pages, long pages, downloads, screenshots, the private-network rules, the
   corporate proxy, running as the task's user from a deep folder).

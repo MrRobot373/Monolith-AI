@@ -224,14 +224,16 @@ const LABEL_TEXT = { confirmed: "Confirmed", assumption: "Assumption, not confir
 export async function retrieve(
   db: DB,
   box: SecretBox,
-  opts: { workspaceId: string; userId: string; documentIds: string[]; query: string; k?: number },
+  /** Without documentIds: everything the person can open in the workspace, always ranked (the agent's search). */
+  opts: { workspaceId: string; userId: string; documentIds?: string[]; query: string; k?: number },
 ): Promise<{ chunks: RetrievedChunk[]; embedTokens: number; embeddingModelId: string | null }> {
   const k = opts.k ?? 6;
-  if (opts.documentIds.length === 0) return { chunks: [], embedTokens: 0, embeddingModelId: null };
+  const library = opts.documentIds === undefined;
+  if (opts.documentIds?.length === 0) return { chunks: [], embedTokens: 0, embeddingModelId: null };
   const access = and(
     accessibleDocs(opts.workspaceId, opts.userId),
     eq(document.status, "ready"),
-    inArray(document.id, opts.documentIds),
+    library ? undefined : inArray(document.id, opts.documentIds!),
     // Older versions that were replaced by a newer upload are left out.
     isNull(document.supersededById),
   );
@@ -248,7 +250,7 @@ export async function retrieve(
   const docs = await db.select({ id: document.id, chars: document.charCount }).from(document).where(access);
   if (docs.length === 0) return { chunks: [], embedTokens: 0, embeddingModelId: null };
   const total = docs.reduce((n, d) => n + (d.chars ?? 0), 0);
-  if (total <= WHOLE_DOC_CHARS) {
+  if (!library && total <= WHOLE_DOC_CHARS) {
     const all = await db
       .select(cols)
       .from(documentChunk)
@@ -301,7 +303,7 @@ export async function retrieve(
   }
 
   let chunks = [...ranked.values()].sort((a, b) => b.score - a.score).slice(0, k).map((r) => r.chunk);
-  if (chunks.length === 0) {
+  if (chunks.length === 0 && !library) {
     // Nothing matched (e.g. "summarize this"): fall back to the opening of each document.
     chunks = await db
       .select(cols)
@@ -366,4 +368,28 @@ export function buildContext(chunks: RetrievedChunk[], recollections: Recollecti
     "</sources>",
   ].join("\n");
   return { system, citations };
+}
+
+/** A document's text for reading, from its chunks in order (overlap removed), if the person can open it. */
+export async function documentText(db: DB, workspaceId: string, userId: string, documentId: string) {
+  const [doc] = await db
+    .select({ id: document.id, name: document.name, status: document.status, label: document.label, pageCount: document.pageCount })
+    .from(document)
+    .where(and(eq(document.id, documentId), accessibleDocs(workspaceId, userId)));
+  if (!doc) return null;
+  const chunks = await db
+    .select({ id: documentChunk.id, documentId: documentChunk.documentId, name: sql<string>`''`, page: documentChunk.page, content: documentChunk.content, ordinal: documentChunk.ordinal })
+    .from(documentChunk)
+    .where(eq(documentChunk.documentId, doc.id))
+    .orderBy(asc(documentChunk.ordinal));
+  const parts: string[] = [];
+  let page: number | null = null;
+  for (const c of dedupeOverlap(chunks)) {
+    if (c.page !== null && c.page !== page) {
+      page = c.page;
+      parts.push(`\n[page ${page}]\n`);
+    }
+    parts.push(c.content);
+  }
+  return { ...doc, text: parts.join("\n").replace(/\n{3,}/g, "\n\n").trim() };
 }

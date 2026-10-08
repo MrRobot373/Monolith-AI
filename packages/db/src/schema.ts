@@ -678,6 +678,14 @@ export interface WorkSettings {
   idleMinutes: number;
   /** Built-in library skills turned off for the organization. */
   disabledLibrarySkills: string[];
+  /** The agent may use a browser (open pages, click, fill in forms). */
+  browser: boolean;
+  /** Internal hosts the browser may open anyway (private addresses are refused otherwise). */
+  browserAllowedHosts: string[];
+  /** Container mode: CPUs, memory and internet access per task. */
+  containerCpus: number;
+  containerMemoryMb: number;
+  containerNetwork: "proxy" | "none";
 }
 
 /** Unix user ids for task runtimes (each task runs as its own user when the API runs as root). */

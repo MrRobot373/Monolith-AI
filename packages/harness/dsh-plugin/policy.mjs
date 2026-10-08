@@ -24,7 +24,7 @@ const NETWORK_COMMANDS = [
   [/\bgit\s+(clone|fetch|pull)\b/, "Downloads from a git server"],
 ];
 
-const CHANGING_TOOLS = new Set(["bash", "pwsh", "write", "edit", "str_replace_editor", "run_code", "web_fetch"]);
+const CHANGING_TOOLS = new Set(["bash", "pwsh", "write", "edit", "str_replace_editor", "run_code", "web_fetch", "documents_save"]);
 
 function globToRegExp(glob) {
   const esc = glob.trim().replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");

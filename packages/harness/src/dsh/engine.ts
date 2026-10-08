@@ -175,6 +175,7 @@ export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs
       // The task's own session; subagents run in sessions of their own. Their steps are shown, but
       // their messages, plans and turn ends are theirs: the task ends when its own turn does and no
       // subagent is still working (a finished subagent wakes the main agent for another turn).
+      // `children` holds the subagents working right now.
       const sessionId = `session-${randomUUID().replaceAll("-", "")}`;
       const children = new Set<string>();
       let held: HarnessEvent | null = null;
@@ -205,7 +206,15 @@ export function createDshEngine(opts: { launcher?: Launcher; initializeTimeoutMs
           if (mapped.type === "user" && held) held = null; // the main agent was woken for another turn
           onEvent(mapped);
         } else if (method === "session.status") {
-          if (params.sessionId !== sessionId) return;
+          if (params.sessionId !== sessionId) {
+            // A subagent that stopped working (an interrupted one never reports "finished") no
+            // longer holds the task open; one that's woken again (a message from the agent) does.
+            if (!children.has(String(params.sessionId)) && params.status !== "running") return;
+            if (params.status === "running") children.add(String(params.sessionId));
+            else children.delete(String(params.sessionId));
+            if (held && children.size === 0) releaseHeld();
+            return;
+          }
           rootRunning = params.status === "running";
           if (rootRunning) held = null;
           onEvent({ type: "status", status: rootRunning ? "running" : "idle" });

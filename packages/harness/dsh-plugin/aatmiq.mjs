@@ -7,6 +7,7 @@
  *  - approval/request:  the answerer: the question goes to Aatmiq, where a person approves or rejects it
  *  - web search:        a "aatmiq" provider that searches through Aatmiq (self-hosted SearXNG)
  *  - browser_* tools:   a browser run by Aatmiq for pages that need JavaScript, clicks or forms
+ *  - documents_* tools: search, read and save the organization's documents in Aatmiq
  *
  * Everything talks to Aatmiq's internal API with the per-task token from $AATMIQ_TOKEN.
  * Failures fail closed: an unanswerable approval is "unavailable", which DSH treats as a denial.
@@ -14,6 +15,7 @@
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { browserTools } from "./browser.mjs";
+import { documentTools } from "./documents.mjs";
 import { classifyRisk } from "./policy.mjs";
 import { cleanArgs, planReminder } from "./tooling.mjs";
 
@@ -127,7 +129,10 @@ export function apply(ctx, config) {
     for (const t of browserTools(defineTool, browser)) ctx.tools.register(t);
   }
 
-  // 6. Private web search through Aatmiq.
+  // 6. The organization's documents in Aatmiq.
+  if (config.documents !== false && defineTool) for (const t of documentTools(defineTool, call)) ctx.tools.register(t);
+
+  // 7. Private web search through Aatmiq.
   ctx.effect(() => ctx.web.registerSearchProvider({
     id: "aatmiq",
     available: () => !!config.webSearch,

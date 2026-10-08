@@ -5,14 +5,25 @@
  *   POST /api/internal/work/approvals                  ask a person before a risky action
  *   GET  /api/internal/work/approvals/:id?wait=25      long-poll for the decision
  *   POST /api/internal/work/search                     private web search (self-hosted SearXNG)
+ *   POST /api/internal/work/documents/search           the organization's documents (keyword + meaning search)
+ *   GET  /api/internal/work/documents/:id?offset=      one document's text, in parts
+ *   POST /api/internal/work/documents/save             a file from the task's folder into the person's documents
+ *   POST /api/internal/work/browser                    the agent's browser
  */
-import { eq, sql, usageEvent, workTask } from "@aatmiq/db";
+import { document, eq, sql, usageEvent, user, workTask } from "@aatmiq/db";
 import { estimateUsage, fetchWithKeys, openAiBase } from "@aatmiq/model-gateway";
 import { estimateTokens } from "@aatmiq/shared";
+import { readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { parse, type AppContext } from "../context";
-import { HttpError } from "../errors";
+import { audit, parse, type AppContext } from "../context";
+import { randomToken } from "../crypto";
+import { badRequest, HttpError, notFound } from "../errors";
+import { documentText, retrieve } from "../services/documents";
+import { isSupported, SUPPORTED_HINT } from "../services/extract";
+import { MAX_UPLOAD_BYTES } from "./documents";
+import { safePath } from "./work";
 import { resolveModel } from "../services/models";
 import { quotaFor } from "../services/quota";
 import { getWorkSettings } from "../services/work";
@@ -26,6 +37,21 @@ const RETRY_DELAYS_MS = [1500, 4000, 8000];
 const FIRST_BYTE_MS = 150_000;
 const STALL_MS = 150_000;
 const internal = { config: { rateLimit: false } } as const;
+/** documents_read gives a document in parts this long (about 3,000 tokens). */
+const READ_CHARS = 12_000;
+/** A search passage the agent sees (chunks are about 1,000 characters). */
+const PASSAGE_CHARS = 1_500;
+
+/** Content types for documents the agent saves (they're always downloaded, never shown inline). */
+const MIME: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", tif: "image/tiff", tiff: "image/tiff", bmp: "image/bmp",
+  csv: "text/csv", md: "text/markdown", json: "application/json",
+};
+const mimeOf = (name: string) => MIME[name.split(".").pop()!.toLowerCase()] ?? "text/plain";
 
 /** OpenAI-style error body, so the runtime reports a readable message. */
 function llmError(reply: FastifyReply, status: number, message: string, type = "aatmiq_error") {
@@ -269,6 +295,61 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
     } catch (e) {
       return reply.status(502).send({ error: `Web search failed: ${e instanceof Error ? e.message : "unknown error"}` });
     }
+  });
+
+  /* ───────────── Documents (the agent's documents_* tools) ───────────── */
+
+  const docSearchSchema = z.object({ query: z.string().trim().min(1).max(2000), limit: z.number().int().min(1).max(12).nullish() });
+  app.post(`${BASE}/documents/search`, internal, async (req) => {
+    const t = taskOf(req);
+    const b = parse(docSearchSchema, req.body);
+    // Only what the task's person may open: their own documents, workspace ones, their projects' sources.
+    const r = await retrieve(db, box, { workspaceId: t.workspaceId, userId: t.userId, query: b.query, k: b.limit ?? 6 });
+    if (r.embedTokens > 0)
+      await db.insert(usageEvent).values({ workspaceId: t.workspaceId, userId: t.userId, modelId: r.embeddingModelId, section: "work", inputTokens: r.embedTokens, outputTokens: 0 });
+    return {
+      results: r.chunks.map((c) => ({ documentId: c.documentId, name: c.name, page: c.page, label: c.label ?? null, text: c.content.slice(0, PASSAGE_CHARS) })),
+    };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { offset?: string } }>(`${BASE}/documents/:id`, internal, async (req) => {
+    const t = taskOf(req);
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) throw notFound("Document not found. Use a document_id from documents_search.");
+    const d = await documentText(db, t.workspaceId, t.userId, req.params.id);
+    if (!d) throw notFound("Document not found. Use a document_id from documents_search.");
+    const offset = Math.max(0, Math.min(d.text.length, Number(req.query.offset ?? 0) || 0));
+    const end = Math.min(d.text.length, offset + READ_CHARS);
+    return { name: d.name, label: d.label, status: d.status, text: d.text.slice(offset, end), more: end < d.text.length, next: end, total: d.text.length };
+  });
+
+  const docSaveSchema = z.object({ path: z.string().trim().min(1).max(1000), name: z.string().trim().min(1).max(200).nullish() });
+  app.post(`${BASE}/documents/save`, internal, async (req) => {
+    const t = taskOf(req);
+    const b = parse(docSaveSchema, req.body);
+    const missing = notFound(`There's no file ${b.path} in the working folder.`);
+    const full = await safePath(work.browserTarget(t.taskId).workdir, b.path).catch(() => {
+      throw missing;
+    });
+    const s = await stat(full).catch(() => null);
+    if (!s?.isFile()) throw missing;
+    if (s.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "Files can be up to 25 MB.", "too_large");
+    if (s.size === 0) throw badRequest("The file is empty.");
+    const file = basename(full);
+    // A chosen name keeps the file's extension, so Aatmiq knows how to read it.
+    let name = (b.name ?? file).replace(/[\\/]/g, "_").slice(0, 200);
+    if (b.name && !isSupported(name)) name = `${name}.${file.split(".").pop()}`.slice(0, 200);
+    if (!isSupported(name)) throw new HttpError(415, `This file type can't be a document. Documents can be ${SUPPORTED_HINT}.`, "unsupported");
+    const data = await readFile(full);
+    const storageKey = `${t.workspaceId}/${randomToken(18)}`;
+    await ctx.storage.put(storageKey, data);
+    const [doc] = await db
+      .insert(document)
+      .values({ workspaceId: t.workspaceId, ownerId: t.userId, name, mimeType: mimeOf(name), sizeBytes: data.length, storageKey, scope: "private" })
+      .returning({ id: document.id });
+    const [actor] = await db.select({ id: user.id, email: user.email }).from(user).where(eq(user.id, t.userId));
+    await audit(ctx, { actor, action: "document.uploaded", workspaceId: t.workspaceId, targetType: "document", targetId: doc!.id, meta: { name, size: data.length, fromTask: t.taskId } });
+    await ctx.jobs.document(doc!.id);
+    return { documentId: doc!.id, name };
   });
 
   /* ───────────── Browser (the agent's browser_* tools) ───────────── */

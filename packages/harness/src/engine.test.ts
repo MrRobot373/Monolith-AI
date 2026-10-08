@@ -14,6 +14,7 @@ import { APPROVAL_PRESETS } from "@aatmiq/shared";
 import { classifyRisk } from "./policy";
 import { containerArgs, containerEnv, egressToken, type ContainerOptions } from "./dsh/container";
 import { cleanArgs, planReminder, stripReminders } from "../dsh-plugin/tooling.mjs";
+import { formatResults } from "../dsh-plugin/documents.mjs";
 import type { HarnessEvent, TaskSpec } from "./types";
 
 let server: Server;
@@ -24,6 +25,7 @@ const searches: string[] = [];
 const browserCalls: Record<string, unknown>[] = [];
 const seenAuth = new Set<string>();
 const toolMessages: string[] = [];
+const documentCalls: { method: string; url: string; body: unknown }[] = [];
 
 function sse(res: import("node:http").ServerResponse, chunks: unknown[]) {
   res.writeHead(200, { "content-type": "text/event-stream" });
@@ -89,6 +91,14 @@ beforeAll(async () => {
       if (b.action === "click" && b.ref === 2 && !b.confirmSubmit) return json(422, { error: "[2] submits a form. If that's what the task needs, call browser_click again with confirm_submit: true." });
       if (b.action === "screenshot") return json(200, { file: "screenshots/shop.png", url: "https://shop.example/", title: "Shop" });
       return json(200, { url: "https://shop.example/", title: "Shop", text: '[1] textbox "Search"\n[2] button "Order"', truncated: false, downloads: [] });
+    }
+    if (url.startsWith("/documents")) {
+      documentCalls.push({ method: req.method!, url, body: raw ? JSON.parse(raw) : null });
+      if (url === "/documents/search")
+        return json(200, { results: [{ documentId: "doc-1", name: "Travel handbook.pdf", page: 4, label: "confirmed", text: "Hotels are capped at 9,000 rupees a night." }] });
+      if (url.startsWith("/documents/doc-1")) return json(200, { name: "Travel handbook.pdf", label: null, status: "ready", text: "[page 1]\nTravel rules.", more: true, next: 12000, total: 30000 });
+      if (url === "/documents/save") return json(200, { documentId: "doc-2", name: "summary.md" });
+      return json(404, { error: "Document not found. Use a document_id from documents_search." });
     }
     if (url === "/search") {
       searches.push(JSON.parse(raw).query);
@@ -168,6 +178,29 @@ describe("risk policy", () => {
     expect(classifyRisk({ name: "mcp__gmail__send", args: {} }, changes)).toContain("gmail");
     expect(classifyRisk({ name: "write", args: {} }, { ...p, approvals: "always" })).toBeTruthy();
     expect(classifyRisk({ name: "bash", args: { command: "rm x" } }, { ...p, approvals: "never" })).toBeNull();
+  });
+
+  it("documents: searching and reading never ask; saving asks only when every action is reviewed", () => {
+    for (const name of ["documents_search", "documents_read", "documents_save"]) expect(classifyRisk({ name, args: {} }, p)).toBeNull();
+    const always = { ...p, approvals: "always" as const };
+    expect(classifyRisk({ name: "documents_search", args: {} }, always)).toBeNull();
+    expect(classifyRisk({ name: "documents_read", args: {} }, always)).toBeNull();
+    expect(classifyRisk({ name: "documents_save", args: {} }, always)).toContain("Every action");
+  });
+});
+
+describe("documents tools", () => {
+  it("lists passages with where they come from and how sure they are", () => {
+    const text = formatResults("hotel cap", [
+      { documentId: "d1", name: "Handbook.pdf", page: 4, label: "confirmed", text: "Hotels: 9,000 a night." },
+      { documentId: "d2", name: "Draft.md", page: null, label: "assumption", text: "Maybe 8,000." },
+      { documentId: "d3", name: "Notes.txt", page: null, label: null, text: "Ask finance." },
+    ]);
+    expect(text).toContain('3 passages for "hotel cap"');
+    expect(text).toContain("[1] Handbook.pdf, page 4, Confirmed (document_id: d1)\nHotels: 9,000 a night.");
+    expect(text).toContain("[2] Draft.md, Assumption, not confirmed (document_id: d2)");
+    expect(text).toContain("[3] Notes.txt (document_id: d3)");
+    expect(formatResults("zebra", [])).toMatch(/^No passages in the organization's documents match "zebra"/);
   });
 });
 
@@ -425,6 +458,29 @@ describe("DeepSeek Harness engine", () => {
     expect(browserCalls).toEqual([]);
     const r = events.find((e) => e.type === "tool_result") as { text: string; isError: boolean };
     expect(r.isError).toBe(true);
+  }, 60_000);
+
+  it("works with the organization's documents through Aatmiq: search, read in parts, save", async () => {
+    documentCalls.length = 0;
+    const steps = [
+      ["documents_search", { query: "hotel cap", limit: 3 }],
+      ["documents_read", { document_id: "doc-1", offset: 0 }],
+      ["documents_read", { document_id: "nope" }],
+      ["documents_save", { path: "summary.md", name: "Summary" }],
+    ];
+    const { events } = await runTurn(`script: ${JSON.stringify(steps)}`);
+    expect(documentCalls.map((c) => `${c.method} ${c.url}`)).toEqual(["POST /documents/search", "GET /documents/doc-1?offset=0", "GET /documents/nope?offset=0", "POST /documents/save"]);
+    expect(documentCalls[0]!.body).toEqual({ query: "hotel cap", limit: 3 });
+    expect(documentCalls[3]!.body).toEqual({ path: "summary.md", name: "Summary" });
+    const results = events.filter((e) => e.type === "tool_result") as { text: string; isError: boolean }[];
+    expect(results[0]!.text).toContain("[1] Travel handbook.pdf, page 4, Confirmed (document_id: doc-1)");
+    expect(results[1]!.text).toContain("Document: Travel handbook.pdf");
+    expect(results[1]!.text).toContain("more: call documents_read with offset 12000");
+    expect(results[2]).toMatchObject({ isError: true });
+    expect(results[2]!.text).toContain("Document not found");
+    expect(results[3]!.text).toContain("Saved summary.md to the person's documents (document_id: doc-2)");
+    // Every call carried the task's token.
+    expect(seenAuth).toContain("Bearer task-secret-token");
   }, 60_000);
 
   it("searches the web through Aatmiq", async () => {
