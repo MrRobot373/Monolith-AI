@@ -239,7 +239,7 @@ The IDE fork lives in a **separate repo** (`aatmiq-ide`) because Code-OSS is hug
   licenses, signing-key rotation, billing.
 
 ## 13. Specs
-Each part has its own spec in `docs/`:
+Each part has its own spec in `docs/` (running it for a team on one GPU server: [10-team-server.md](10-team-server.md)):
 
 1. [01-foundation.md](01-foundation.md): auth, roles, admin portal, gateway, quotas, deployment
 2. [03-projects.md](03-projects.md): projects and Chat phase B

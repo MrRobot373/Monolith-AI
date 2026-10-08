@@ -46,6 +46,13 @@ export interface Config {
   redisUrl?: string | null;
   /** Documents processed at once (per worker, or in the API without Redis). */
   jobConcurrency?: number;
+  /**
+   * Registered at first setup, for the bundled GPU model servers: the main model (SETUP_MODEL_*,
+   * the default) and an optional small one for quick jobs (SETUP_SMALL_MODEL_*, Chat only by default).
+   */
+  setupModels?: SetupModel[];
+  /** At first setup: tasks working at once across the organization (SETUP_MAX_RUNNING). */
+  setupMaxRunning?: number | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -76,6 +83,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     mailFrom: env.MAIL_FROM || null,
     redisUrl: env.REDIS_URL || null,
     jobConcurrency: Math.max(1, Math.min(16, Number(env.JOB_CONCURRENCY ?? 2) || 2)),
+    setupModels: [loadSetupModel(env, "SETUP_MODEL", ["chat", "work", "code"]), loadSetupModel(env, "SETUP_SMALL_MODEL", ["chat"])].filter((m): m is SetupModel => !!m),
+    setupMaxRunning: env.SETUP_MAX_RUNNING ? Math.max(1, Math.min(500, Math.round(Number(env.SETUP_MAX_RUNNING)) || 8)) : null,
+  };
+}
+
+export interface SetupModel {
+  url: string;
+  key: string;
+  displayName: string;
+  contextLength: number | null;
+  apiKey: string | null;
+  vision: boolean;
+  sections: ("chat" | "work" | "code")[];
+}
+
+/** <PREFIX>_URL, <PREFIX> (the model's name there), _DISPLAY_NAME, _CONTEXT, _API_KEY, _VISION, _SECTIONS. */
+export function loadSetupModel(env: NodeJS.ProcessEnv, prefix = "SETUP_MODEL", sections: SetupModel["sections"] = ["chat", "work", "code"]): SetupModel | null {
+  const url = env[`${prefix}_URL`];
+  if (!url) return null;
+  if (!/^https?:\/\//.test(url)) throw new Error(`${prefix}_URL must start with http:// or https://`);
+  const key = env[prefix];
+  if (!key) throw new Error(`${prefix}_URL needs ${prefix}, the model's name on that server`);
+  const context = Number(env[`${prefix}_CONTEXT`]);
+  const listed = (env[`${prefix}_SECTIONS`] ?? "").split(/[\s,]+/).filter(Boolean);
+  if (listed.some((s) => !["chat", "work", "code"].includes(s))) throw new Error(`${prefix}_SECTIONS: use chat, work and/or code`);
+  return {
+    url: url.replace(/\/+$/, ""),
+    key,
+    displayName: env[`${prefix}_DISPLAY_NAME`] || key,
+    contextLength: Number.isFinite(context) && context > 0 ? Math.round(context) : null,
+    apiKey: env[`${prefix}_API_KEY`] || null,
+    vision: env[`${prefix}_VISION`] === "true",
+    sections: listed.length ? (listed as SetupModel["sections"]) : sections,
   };
 }
 

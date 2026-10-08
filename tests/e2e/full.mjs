@@ -452,6 +452,19 @@ await step("Users", "Inviting an existing user is refused", owner, async () => {
   await toast(owner, "already exists");
   await owner.keyboard.press("Escape");
 });
+await step("Users", "Invite several people at once; each gets a link, an existing account is reported", owner, async () => {
+  await owner.click("text=Invite people");
+  await owner.getByTestId("invite-several").click();
+  await owner.getByTestId("invite-emails").fill("kim@acme.test, lee@acme.test\nasha@acme.test");
+  await owner.locator('[role="dialog"] input[type="checkbox"]').first().check();
+  await owner.getByTestId("invite-many").click();
+  const results = owner.getByTestId("invite-results");
+  await results.waitFor();
+  expect((await results.locator("code").count()) === 2, "two links");
+  await results.getByText("already exists").waitFor();
+  await owner.getByText("2 invitations created").waitFor();
+  await owner.click('[role="dialog"] >> text=Done');
+});
 
 /* ═════════════ H. Member ═════════════ */
 const { page: dev, ctx: devCtx } = await newUser("dev");

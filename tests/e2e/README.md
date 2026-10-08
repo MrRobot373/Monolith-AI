@@ -71,6 +71,15 @@ pnpm --filter @aatmiq/desktop build
 E2E_SCRIPT=$PWD/tests/e2e/desktop.mjs LOG_DIR=$PWD/tests/e2e/results-desktop tests/e2e/run-work.sh
 ```
 
+## Team server: backups and HTTPS
+
+`run-backup.sh` checks `deploy/docker-compose.backup.yml` on the Compose stack: the nightly service
+and its time zone, what a backup holds, retention, restore refusing without `--yes` or while Aatmiq
+runs, and a restore bringing back a deleted project with its file (11 checks). `run-https.sh`
+checks `deploy/docker-compose.https.yml`: Caddy's certificate, the redirect from http, plain HTTP
+not published, HSTS, Secure cookies and a chat answer streaming through the proxy (7 checks). Both
+need the images `aatmiq-api:dev` and `aatmiq-web:dev` (and `caddy:2.11.3`).
+
 ## Work AI container mode
 
 `run-containers.sh` starts the Compose stack with `deploy/docker-compose.containers.yml` (images

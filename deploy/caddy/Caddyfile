@@ -1,0 +1,15 @@
+# Aatmiq behind HTTPS (deploy/docker-compose.https.yml). DOMAIN is Aatmiq's address; IDE_DOMAIN,
+# when set, is Aatmiq Code's own address (IDE_URL). CADDY_TLS picks the certificate:
+#   internal                              Caddy's own certificate authority (an office network;
+#                                         install its root certificate on the team's computers)
+#   you@company.com                       Let's Encrypt (public DNS, ports 80 and 443 reachable)
+#   /certs/fullchain.pem /certs/key.pem   your company's certificate, in deploy/caddy/certs
+{$DOMAIN} {$IDE_DOMAIN} {
+	tls {$CADDY_TLS}
+	encode zstd gzip
+	reverse_proxy web:3000 {
+		# Live answers and task timelines are streamed.
+		flush_interval -1
+	}
+	header Strict-Transport-Security "max-age=31536000"
+}

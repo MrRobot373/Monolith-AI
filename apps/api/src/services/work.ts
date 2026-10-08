@@ -5,6 +5,10 @@
  *  - One runtime (DeepSeek Harness process) per active task, in the task's own folder.
  *  - Each person can run a few tasks at once (Admin → Work AI); the rest wait in a queue.
  *  - A finished task keeps its runtime warm for follow-ups, then stops after `idleMinutes`.
+ *  - At most `maxRunning` tasks work at once across the organization (each person at most
+ *    `maxConcurrentPerUser`); others wait as "queued", follow-ups to warm tasks included. Tasks
+ *    waiting for someone's approval don't count. Idle warm runtimes beyond twice that are stopped,
+ *    oldest first (a follow-up restarts them from history).
  *    A later follow-up starts a new runtime seeded with the task's history.
  *  - The runtime reaches back to /api/internal/work with a per-task token for models,
  *    approvals and web search; nothing else from this server is visible to it.
@@ -70,6 +74,12 @@ interface Live {
   internet?: boolean;
   /** The connectors its project allows (null: all). */
   connectorIds?: string[] | null;
+  /** Waiting for a person's approval: not working, so not counted against `maxRunning`. */
+  waiting?: boolean;
+  /** A follow-up that arrived while the organization was at `maxRunning`; sent when a slot frees. */
+  pending?: string;
+  /** When the last turn ended (oldest idle runtimes are stopped first). */
+  idleSince?: number;
   idleTimer?: NodeJS.Timeout;
 }
 
@@ -260,6 +270,13 @@ export class WorkRunner {
 
   private async setStatus(taskId: string, status: TaskStatus, raw: Partial<typeof workTask.$inferInsert> = {}) {
     const extra = storable(raw) as Partial<typeof workTask.$inferInsert>;
+    const l = this.live.get(taskId);
+    if (l) {
+      const wasWaiting = !!l.waiting;
+      l.waiting = status === "needs_approval";
+      // Someone else may start while this task waits for a person.
+      if (l.waiting && !wasWaiting) void this.pump().catch((e) => this.opts.log?.("work: starting a task failed", e));
+    }
     const done = status === "completed" || status === "failed" || status === "cancelled";
     await this.ctx.db
       .update(workTask)
@@ -276,15 +293,18 @@ export class WorkRunner {
     const l = this.live.get(taskId);
     if (l?.runtime?.alive && !l.cancelled) {
       clearTimeout(l.idleTimer);
-      l.busy = true;
-      l.lastError = null;
-      l.plan = null;
-      await this.setStatus(taskId, "running", { error: null });
-      try {
-        await l.runtime.send(prompt);
-      } catch (e) {
-        await this.fail(taskId, e instanceof Error ? e.message : "The agent didn't accept the message.");
+      // Mid-turn: the agent reads it as it works. Already waiting for a slot: it goes with the rest.
+      if (l.busy || l.pending !== undefined) {
+        if (l.pending !== undefined) l.pending = `${l.pending}\n\n${prompt}`;
+        else await this.sendTo(l, prompt);
+        return;
       }
+      if (!this.hasSlot(l.userId, await getWorkSettings(this.ctx.db))) {
+        l.pending = prompt;
+        await this.setStatus(taskId, "queued", { error: null });
+        return;
+      }
+      await this.resume(l, prompt);
       return;
     }
     await this.setStatus(taskId, "queued", { error: null });
@@ -320,15 +340,59 @@ export class WorkRunner {
           .orderBy(asc(workTask.updatedAt));
         for (const t of queued) {
           if (this.stopped) return;
-          if (this.live.has(t.id)) continue;
-          const busy = [...this.live.values()].filter((l) => l.userId === t.userId && l.busy).length;
-          if (busy >= settings.maxConcurrentPerUser) continue;
-          await this.start(t.id, settings);
+          // Oldest first across the organization: when it's full, everyone waits their turn.
+          if (this.working() >= settings.maxRunning) break;
+          const l = this.live.get(t.id);
+          if (l && l.pending === undefined) continue;
+          if (!this.hasSlot(t.userId, settings)) continue;
+          if (l) await this.resume(l, l.pending!);
+          else await this.start(t.id, settings);
         }
+        await this.trimWarm(settings);
       } while (this.pumpAgain && !this.stopped);
     } finally {
       this.pumping = false;
     }
+  }
+
+  /** Tasks working right now (a turn in progress, not waiting for a person). */
+  working(): number {
+    let n = 0;
+    for (const l of this.live.values()) if (l.busy && !l.waiting) n++;
+    return n;
+  }
+
+  private hasSlot(userId: string, s: WorkSettingsValue): boolean {
+    if (this.working() >= s.maxRunning) return false;
+    let mine = 0;
+    for (const l of this.live.values()) if (l.userId === userId && l.busy) mine++;
+    return mine < s.maxConcurrentPerUser;
+  }
+
+  /** Start a new turn on a warm runtime. */
+  private async resume(l: Live, prompt: string) {
+    clearTimeout(l.idleTimer);
+    l.pending = undefined;
+    l.busy = true;
+    l.lastError = null;
+    l.plan = null;
+    await this.setStatus(l.taskId, "running", { error: null });
+    await this.sendTo(l, prompt);
+  }
+
+  private async sendTo(l: Live, prompt: string) {
+    try {
+      await l.runtime!.send(prompt);
+    } catch (e) {
+      await this.fail(l.taskId, e instanceof Error ? e.message : "The agent didn't accept the message.");
+    }
+  }
+
+  /** Keep at most twice `maxRunning` idle runtimes in memory; stop the ones idle longest. */
+  private async trimWarm(s: WorkSettingsValue) {
+    const idle = [...this.live.values()].filter((l) => !l.busy && l.pending === undefined && l.runtime).sort((a, b) => (a.idleSince ?? 0) - (b.idleSince ?? 0));
+    const extra = idle.length - Math.max(4, s.maxRunning * 2);
+    for (const l of idle.slice(0, Math.max(0, extra))) await this.release(l.taskId);
   }
 
   private async start(taskId: string, settings: WorkSettingsValue) {
@@ -475,6 +539,7 @@ export class WorkRunner {
       case "turn_end": {
         if (l.cancelled) return;
         l.busy = false;
+        l.idleSince = Date.now();
         // completed, blocked (a person said no) and max-tokens all end with an answer to show.
         const ok = e.reason === "completed" || e.reason === "blocked" || e.reason === "max-tokens";
         const error = l.lastError ?? (ok ? null : (e.error ?? `The agent stopped (${e.reason}).`));
@@ -494,6 +559,8 @@ export class WorkRunner {
         this.live.delete(taskId);
         this.byToken.delete(l.token);
         clearTimeout(l.idleTimer);
+        // A follow-up waiting for a slot starts again from history.
+        if (l.pending !== undefined && !l.cancelled && !this.stopped) void this.pump().catch((err) => this.opts.log?.("work: starting a task failed", err));
         if (l.cancelled || !l.busy || this.stopped) return;
         await this.fail(taskId, l.lastError ?? `The agent stopped unexpectedly.${e.error ? ` ${e.error.split("\n").at(-1)}` : ""}`);
         return;

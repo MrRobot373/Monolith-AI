@@ -5,6 +5,8 @@ export const DEFAULT_WORK_SETTINGS = {
   searxngUrl: null as string | null,
   allowNetwork: false,
   maxConcurrentPerUser: 2,
+  /** Tasks working at once across the organization (the model server's capacity); more wait in line. */
+  maxRunning: 8,
   idleMinutes: 15,
   /** Built-in library skills turned off for the organization (by name). */
   disabledLibrarySkills: [] as string[],
@@ -25,6 +27,7 @@ export const workSettingsSchema = z.object({
   searxngUrl: z.url().nullable().optional().or(z.literal("").transform(() => null)),
   allowNetwork: z.boolean().optional(),
   maxConcurrentPerUser: z.number().int().min(1).max(20).optional(),
+  maxRunning: z.number().int().min(1).max(500).optional(),
   idleMinutes: z.number().int().min(1).max(240).optional(),
   disabledLibrarySkills: z.array(z.string().max(80)).max(500).optional(),
   browser: z.boolean().optional(),

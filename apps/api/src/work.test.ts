@@ -597,6 +597,33 @@ d("Work AI", () => {
     expect(budget.status).toBe(200);
   }, 120_000);
 
+  it("limits tasks working at once across the organization; follow-ups and approvals included", async () => {
+    expect((await call("PUT", "/api/admin/work", { maxRunning: 1, maxConcurrentPerUser: 5 })).json.maxRunning).toBe(1);
+    const status = async (id: string) => (await getTask(id)).task.status;
+    // A finished task stays warm for follow-ups.
+    const warm = (await call("POST", "/api/work/tasks", { workspaceId, prompt: "hello warm" })).json.id;
+    await waitStatus(warm, "completed");
+    // One slot: the second task waits until the first is done.
+    const a = (await call("POST", "/api/work/tasks", { workspaceId, prompt: "run: sleep 3; echo first" })).json.id;
+    await waitStatus(a, "running");
+    const b = (await call("POST", "/api/work/tasks", { workspaceId, prompt: "run: echo second" })).json.id;
+    // A follow-up to the warm task waits too, instead of jumping the queue.
+    await call("POST", `/api/work/tasks/${warm}/messages`, { prompt: "and again" });
+    expect(await status(b)).toBe("queued");
+    expect(await status(warm)).toBe("queued");
+    await waitStatus(a, "completed");
+    await waitStatus(b, "completed");
+    const w = await waitStatus(warm, "completed");
+    expect(w.task.result).toContain("You said: and again");
+    // A task waiting for someone's approval doesn't hold the slot.
+    const gated = (await call("POST", "/api/work/tasks", { workspaceId, prompt: "run: rm -f nothing.txt" })).json.id;
+    await waitStatus(gated, "needs_approval");
+    const next = (await call("POST", "/api/work/tasks", { workspaceId, prompt: "still moving?" })).json.id;
+    expect((await waitStatus(next, "completed", "failed")).task.status).toBe("completed");
+    await call("POST", `/api/work/tasks/${gated}/cancel`);
+    await call("PUT", "/api/admin/work", { maxRunning: 8, maxConcurrentPerUser: 2 });
+  }, 90_000);
+
   it.runIf(process.getuid?.() === 0)("isolates tasks: own Unix user, no access to other tasks or documents", async () => {
     const other = join(workDir, taskId, "files");
     const t = await call("POST", "/api/work/tasks", { workspaceId, prompt: `run: id -u; ls ${other}; ls ${storageDir}` });

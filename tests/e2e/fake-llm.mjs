@@ -2,7 +2,28 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 const MODELS = ["qwen3:8b", "deepseek-v4:32b", "gemma3:12b"];
+// A GPU's pace for load tests: FAKE_LLM_FIRST_MS before the first word, FAKE_LLM_WORD_MS per word.
+const FIRST_MS = Number(process.env.FAKE_LLM_FIRST_MS ?? 0);
+const WORD_MS = process.env.FAKE_LLM_WORD_MS ? Number(process.env.FAKE_LLM_WORD_MS) : null;
+const stats = { requests: 0, inflight: 0, maxInflight: 0 };
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 createServer(async (req, res) => {
+  // How busy the "model" is (load tests read and reset it).
+  if (req.url === "/stats") {
+    res.setHeader("content-type", "application/json");
+    return res.end(JSON.stringify(stats));
+  }
+  if (req.url === "/stats/reset") {
+    Object.assign(stats, { requests: 0, maxInflight: stats.inflight });
+    return res.end("{}");
+  }
+  if (req.url === "/v1/chat/completions") {
+    stats.requests++;
+    stats.inflight++;
+    stats.maxInflight = Math.max(stats.maxInflight, stats.inflight);
+    res.on("close", () => stats.inflight--);
+    if (FIRST_MS) await pause(FIRST_MS);
+  }
   if (req.url === "/api/tags") return res.end(JSON.stringify({ models: MODELS.map((name) => ({ name })) }));
   if (req.url === "/v1/models") return res.end(JSON.stringify({ data: MODELS.map((id) => ({ id })) }));
   if (req.url === "/v1/embeddings") {
@@ -51,7 +72,7 @@ createServer(async (req, res) => {
     for (const w of text.match(/\S+\s*/g)) {
       if (res.destroyed) return;
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: w } }] })}\n\n`);
-      await new Promise((r) => setTimeout(r, slow ? 60 : 8));
+      await pause(WORD_MS ?? (slow ? 60 : 8));
     }
     res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
     res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 40, completion_tokens: 25 } })}\n\n`);
@@ -88,7 +109,7 @@ async function agentReply(j, res) {
   const say = async (text) => {
     for (const w of text.match(/\S+\s*/g) ?? [text]) {
       send({ choices: [{ index: 0, delta: { content: w } }] });
-      await new Promise((r) => setTimeout(r, 5));
+      await pause(WORD_MS ?? 5);
     }
     finish("stop");
   };

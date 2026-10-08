@@ -1,0 +1,3 @@
+backups/
+caddy/certs/*
+!caddy/certs/README

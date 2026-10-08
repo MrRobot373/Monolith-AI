@@ -8,7 +8,7 @@ import { Section, Table, Td } from "@/components/admin/table";
 import { PageHeader } from "@/components/app/page-header";
 import { useSession } from "@/components/app/session";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Avatar, Badge, Card, EmptyState } from "@/components/ui/misc";
 import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
 import { Skeleton } from "@/components/ui/spinner";
@@ -246,6 +246,11 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   const [selected, setSelected] = useState<Record<string, "member" | "admin" | undefined>>({});
   const [link, setLink] = useState<string | null>(null);
   const [emailed, setEmailed] = useState(false);
+  // Several people at once: one invitation per address, same role and workspaces.
+  const [bulk, setBulk] = useState(false);
+  const [emails, setEmails] = useState("");
+  const [results, setResults] = useState<{ email: string; link?: string; emailed?: boolean; error?: string }[] | null>(null);
+  const list = useMemo(() => [...new Set(emails.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))], [emails]);
 
   const reset = () => {
     setEmail("");
@@ -253,17 +258,20 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
     setSelected({});
     setLink(null);
     setEmailed(false);
+    setBulk(false);
+    setEmails("");
+    setResults(null);
   };
 
+  const body = (to: string) => ({
+    email: to,
+    orgRole,
+    workspaces: Object.entries(selected)
+      .filter(([, r]) => r)
+      .map(([workspaceId, role]) => ({ workspaceId, role })),
+  });
   const m = useMutation({
-    mutationFn: () =>
-      post<{ link: string; emailed: boolean }>("/api/admin/invites", {
-        email,
-        orgRole,
-        workspaces: Object.entries(selected)
-          .filter(([, r]) => r)
-          .map(([workspaceId, role]) => ({ workspaceId, role })),
-      }),
+    mutationFn: () => post<{ link: string; emailed: boolean }>("/api/admin/invites", body(email)),
     onSuccess: (r) => {
       setLink(r.link);
       setEmailed(r.emailed);
@@ -271,6 +279,24 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  const many = useMutation({
+    mutationFn: async () => {
+      const out: NonNullable<typeof results> = [];
+      for (const to of list) {
+        try {
+          out.push({ email: to, ...(await post<{ link: string; emailed: boolean }>("/api/admin/invites", body(to))) });
+        } catch (e) {
+          out.push({ email: to, error: (e as Error).message });
+        }
+      }
+      return out;
+    },
+    onSuccess: (r) => {
+      setResults(r);
+      qc.invalidateQueries({ queryKey: ["admin-invites"] });
+    },
+  });
+  const made = results?.filter((r) => r.link) ?? [];
 
   return (
     <Dialog
@@ -279,16 +305,40 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
         onOpenChange(o);
         if (!o) setTimeout(reset, 200);
       }}
-      title={link ? "Invitation created" : "Invite someone"}
+      title={results ? `${made.length} invitation${made.length === 1 ? "" : "s"} created` : link ? "Invitation created" : bulk ? "Invite several people" : "Invite someone"}
       description={
-        link
+        results
+          ? `${made.filter((r) => r.emailed).length ? `${made.filter((r) => r.emailed).length} were emailed. ` : ""}Each link works once and expires in 7 days.`
+          : link
           ? emailed
             ? `We emailed the invitation to ${email}. You can also share this link. It works once and expires in 7 days.`
             : "Share this link with them. It works once and expires in 7 days."
           : "They'll set their own password when they accept."
       }
       footer={
-        link ? (
+        results ? (
+          <>
+            {made.length > 0 && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  void navigator.clipboard.writeText(made.map((r) => `${r.email}\t${r.link}`).join("\n"));
+                  toast.success("Copied every address and its link");
+                }}
+              >
+                <Copy className="size-4" /> Copy all links
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => onOpenChange(false)}>Done</Button>
+          </>
+        ) : bulk ? (
+          <>
+            <Button variant="ghost" onClick={() => setBulk(false)}>One person</Button>
+            <Button variant="primary" loading={many.isPending} disabled={!list.length || list.length > 100} onClick={() => many.mutate()} data-testid="invite-many">
+              Create {list.length || ""} invitation{list.length === 1 ? "" : "s"}
+            </Button>
+          </>
+        ) : link ? (
           <>
             <Button variant="ghost" onClick={reset}>Invite another</Button>
             <Button variant="primary" onClick={() => onOpenChange(false)}>Done</Button>
@@ -301,13 +351,31 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
         )
       }
     >
-      {link ? (
+      {results ? (
+        <div className="max-h-80 space-y-1.5 overflow-y-auto" data-testid="invite-results">
+          {results.map((r) => (
+            <div key={r.email} className="flex items-center gap-2 text-[12.5px]">
+              <span className="w-44 shrink-0 truncate text-fg">{r.email}</span>
+              {r.link ? <div className="min-w-0 flex-1"><CopyLink link={r.link} /></div> : <span className="min-w-0 flex-1 text-danger">{r.error}</span>}
+            </div>
+          ))}
+        </div>
+      ) : link ? (
         <CopyLink link={link} />
       ) : (
         <div className="space-y-4">
-          <Field label="Email">
-            <Input type="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
-          </Field>
+          {bulk ? (
+            <Field label="Emails" hint={`One per line, or separated by commas (up to 100). ${list.length ? `${list.length} address${list.length === 1 ? "" : "es"}.` : ""}`}>
+              <Textarea autoFocus rows={6} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder={"maya@company.com\nravi@company.com"} className="font-mono text-[12.5px]" data-testid="invite-emails" />
+            </Field>
+          ) : (
+            <Field label="Email">
+              <Input type="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@company.com" />
+              <button type="button" onClick={() => setBulk(true)} className="mt-1.5 text-[12px] text-fg-subtle hover:text-fg" data-testid="invite-several">
+                Invite several people at once
+              </button>
+            </Field>
+          )}
           <Field label="Organization role">
             <Select value={orgRole} onChange={(e) => setOrgRole(e.target.value as "member" | "admin")}>
               <option value="member">Member: uses the workspaces they're added to</option>

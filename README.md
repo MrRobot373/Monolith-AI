@@ -95,6 +95,10 @@ LICENSE_TEST_DATABASE_URL=postgres://…/aatmiq_license_test pnpm --filter @aatm
 
 ## Deploy on a server
 
+**A team on one GPU server** (for example 25 people on one 48 GB RTX A6000): models, HTTPS and
+nightly backups in one command, `deploy/team.sh up -d --build`. Step by step, with measured
+capacity: [docs/10-team-server.md](docs/10-team-server.md).
+
 ```bash
 cp deploy/.env.example deploy/.env   # set APP_URL, APP_SECRET, POSTGRES_PASSWORD
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build

@@ -48,6 +48,10 @@ Chat (section `work` in usage reports).
   4096 MB) and **Internet**: *public internet, through Aatmiq* (default) or *none*. Changes apply
   to tasks started afterwards.
 - **Let commands use the network**: off by default, which makes network commands ask first.
+- **Tasks working at once (organization)** (default 8): what the model server can handle; more
+  wait in line, oldest first, follow-ups to finished tasks included. Tasks waiting for someone's
+  approval don't count. Idle warm tasks beyond twice this number are stopped, oldest first (a
+  follow-up restarts them from history).
 - **Tasks per person at once** (others queue) and **how long a finished task stays warm** for instant follow-ups.
 - **Connectors**: apps and MCP servers (streamable HTTP) the agent can use as tools. **Add
   connector** opens a catalog of official remote servers (Gmail, Google Calendar/Drive/Docs/Sheets/
@@ -310,6 +314,8 @@ Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/appro
   follow-ups, approvals, SSE, restart from history, skills, MCP connector with approval, schedules,
   project tasks (instructions, files, sharing, saving results, connector choice, project schedules),
   isolation, cancel.
+- `tests/load/run-team.sh`: 25 people at once for 5 minutes (chat, agent tasks, pages, 5 open
+  editors): latency, task waits, errors and memory ([10-team-server.md](10-team-server.md#capacity)).
 - `tests/e2e/run-containers.sh`: container mode on the Compose stack: the task's user, limits and
   folder from inside its container, a read-only system, the network (an allowed internal host through
   the proxy, the database refused, nothing direct, *none* refused even by hand), new limits for the

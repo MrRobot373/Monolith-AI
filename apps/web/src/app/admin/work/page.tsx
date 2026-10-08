@@ -19,6 +19,7 @@ interface WorkSettings {
   searxngUrl: string | null;
   allowNetwork: boolean;
   maxConcurrentPerUser: number;
+  maxRunning: number;
   idleMinutes: number;
   browser: boolean;
   browserAllowedHosts: string[];
@@ -192,7 +193,10 @@ export default function AdminWorkPage() {
             </div>
             <Switch checked={form.allowNetwork} onCheckedChange={(v) => setForm({ ...form, allowNetwork: v })} label="Allow network" />
           </div>
-          <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <div className="grid gap-4 p-5 sm:grid-cols-3">
+            <Field label="Tasks working at once (organization)" hint="What your model server can handle; more wait in line, oldest first.">
+              <Input type="number" min={1} max={500} value={form.maxRunning} onChange={(e) => setForm({ ...form, maxRunning: Math.max(1, Math.min(500, Number(e.target.value) || 1)) })} data-testid="max-running" />
+            </Field>
             <Field label="Tasks per person at once" hint="More wait in a queue.">
               <Input type="number" min={1} max={20} value={form.maxConcurrentPerUser} onChange={(e) => setForm({ ...form, maxConcurrentPerUser: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })} />
             </Field>

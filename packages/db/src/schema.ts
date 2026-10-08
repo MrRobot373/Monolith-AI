@@ -666,6 +666,8 @@ export interface WorkSettings {
   allowNetwork: boolean;
   /** Tasks one person can run at the same time. */
   maxConcurrentPerUser: number;
+  /** Tasks working at once across the organization. */
+  maxRunning: number;
   /** Minutes a finished task keeps its runtime warm for follow-ups. */
   idleMinutes: number;
   /** Built-in library skills turned off for the organization. */

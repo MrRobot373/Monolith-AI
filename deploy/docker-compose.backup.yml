@@ -1,0 +1,28 @@
+# Nightly backups (docs/10-team-server.md#backups): the database and the files volume, into
+# BACKUP_DIR (use another disk or a network share, not the server's own disk), keeping BACKUP_KEEP.
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.backup.yml --env-file deploy/.env up -d
+#   … exec backup /scripts/backup.sh                       a backup now
+#   … run --rm backup /scripts/restore.sh <name> --yes     restore (stop api, web and worker first)
+#
+# Keep a copy of deploy/.env too: APP_SECRET is needed to read the stored keys and tokens.
+services:
+  backup:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    entrypoint: ["/scripts/run.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: aatmiq
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGDATABASE: aatmiq
+      TZ: ${TZ:-UTC}
+      BACKUP_TIME: ${BACKUP_TIME:-02:30}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_EXCLUDE: ${BACKUP_EXCLUDE:-}
+    volumes:
+      - ./backup:/scripts:ro
+      - files:/data
+      - ${BACKUP_DIR:-./backups}:/backups

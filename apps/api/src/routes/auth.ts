@@ -169,6 +169,22 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       sections: ["chat", "work", "code"],
     });
 
+    // The bundled model servers (deploy/docker-compose.gpu.yml): ready from the first sign-in, the
+    // main model as the default.
+    for (const [i, sm] of (cfg.setupModels ?? []).entries()) {
+      const [p] = await db
+        .insert(modelProvider)
+        .values({ name: sm.displayName, type: "openai_compatible", baseUrl: sm.url, apiKeyEnc: sm.apiKey ? ctx.box.encrypt(sm.apiKey) : null })
+        .returning();
+      const [m] = await db
+        .insert(model)
+        .values({ providerId: p!.id, modelKey: sm.key, displayName: sm.displayName, contextLength: sm.contextLength, vision: sm.vision, sections: sm.sections })
+        .returning();
+      await db.insert(workspaceModel).values({ workspaceId: ws!.id, modelId: m!.id });
+      if (i === 0) await db.update(workspace).set({ defaultModelId: m!.id }).where(eq(workspace.id, ws!.id));
+    }
+    if (cfg.setupMaxRunning) await db.update(organization).set({ workSettings: { maxRunning: cfg.setupMaxRunning } }).where(eq(organization.id, org!.id));
+
     if (cfg.allowMockProvider) {
       const [p] = await db
         .insert(modelProvider)
@@ -223,7 +239,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
 
   app.post<{ Params: { token: string } }>(
     "/api/invites/:token/accept",
-    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    // Per address: a whole office joining at once shares one; invite tokens can't be guessed anyway.
+    { config: { rateLimit: { max: 40, timeWindow: "1 minute" } } },
     async (req, reply) => {
       const body = parse(acceptInviteSchema, req.body);
       const inv = await findInvite(req.params.token);
