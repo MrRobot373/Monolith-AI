@@ -1,8 +1,12 @@
 {
   "name": "aatmiq-agent-runtime",
   "private": true,
-  "description": "The Work AI agent runtime (DeepSeek Harness) installed into the API image at /opt/dsh. Keep the version in step with packages/harness.",
+  "description": "The Work AI agent runtime (DeepSeek Harness) installed into the API image at /opt/dsh. Keep the version in step with packages/harness. overrides: security fixes the runtime's own pins lag behind (pnpm.overrides in the root package.json does the same for development).",
   "dependencies": {
     "@deepseek-ai/dsh": "0.2.0-rc.2"
+  },
+  "overrides": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "fflate": "0.8.3"
   }
 }
