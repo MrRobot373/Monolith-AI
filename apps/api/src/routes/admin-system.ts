@@ -22,6 +22,7 @@ import {
   BUDGET_PERIODS,
   brandingSchema,
   DEFAULT_ACCENT,
+  embeddingPrefixes,
   isOrgAdmin,
   modelSchema,
   modelUpdateSchema,
@@ -160,6 +161,8 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         vision: model.vision,
         sections: model.sections,
         enabled: model.enabled,
+        queryPrefix: model.queryPrefix,
+        documentPrefix: model.documentPrefix,
         costInPerM: model.costInPerM,
         costOutPerM: model.costOutPerM,
       })
@@ -175,9 +178,17 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
     const p = await loadProvider(body.providerId);
     // Fill in what the provider knows (Ollama reports image support and context length).
     const info = body.vision === undefined || body.contextLength === undefined ? await modelInfo(providerCfg(p), body.modelKey) : {};
+    // Embedding models trained with task prefixes (EmbeddingGemma) get them unless the admin chose.
+    const prefixes = body.kind === "embedding" ? embeddingPrefixes(body.modelKey) : null;
     const [m] = await db
       .insert(model)
-      .values({ ...body, vision: body.vision ?? info.vision ?? false, contextLength: body.contextLength ?? info.contextLength })
+      .values({
+        ...body,
+        vision: body.vision ?? info.vision ?? false,
+        contextLength: body.contextLength ?? info.contextLength,
+        queryPrefix: body.queryPrefix !== undefined ? body.queryPrefix : (prefixes?.queryPrefix ?? null),
+        documentPrefix: body.documentPrefix !== undefined ? body.documentPrefix : (prefixes?.documentPrefix ?? null),
+      })
       .onConflictDoNothing()
       .returning();
     if (!m) throw badRequest("This model is already added for that provider.");

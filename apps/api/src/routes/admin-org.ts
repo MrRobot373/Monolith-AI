@@ -18,6 +18,9 @@ import {
   model,
   usageEvent,
   tokenRequest,
+  document,
+  ne,
+  or,
 } from "@aatmiq/db";
 import {
   budgetSchema,
@@ -403,6 +406,7 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         embeddingModelId = e.id;
       }
     }
+    const [before] = await db.select({ e: workspace.embeddingModelId }).from(workspace).where(eq(workspace.id, req.params.id));
     await db.transaction(async (tx) => {
       await tx.delete(workspaceModel).where(eq(workspaceModel.workspaceId, req.params.id));
       if (ids.length) await tx.insert(workspaceModel).values(ids.map((modelId) => ({ workspaceId: req.params.id, modelId })));
@@ -413,7 +417,11 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
         .where(eq(workspace.id, req.params.id));
     });
     await audit(ctx, { actor: u, action: "workspace.models_changed", workspaceId: req.params.id, targetType: "workspace", targetId: req.params.id, meta: { modelIds: ids, embeddingModelId } });
-    return { ok: true };
+    // A new embedding model: index the workspace's documents again in the background. Until each
+    // is done it is still found by keywords (and by the old vectors' model, which is no longer asked).
+    let reindexing = 0;
+    if (embeddingModelId && embeddingModelId !== before?.e) reindexing = await reindexWorkspace(ctx, req.params.id, embeddingModelId);
+    return { ok: true, reindexing };
   });
 
   app.put<{ Params: { id: string } }>("/api/admin/workspaces/:id/budget", async (req) => {
@@ -425,4 +433,14 @@ export async function adminOrgRoutes(app: FastifyInstance, ctx: AppContext) {
     await audit(ctx, { actor: u, action: "budget.changed", workspaceId: ws.id, targetType: "workspace", targetId: ws.id, meta: body });
     return { ok: true };
   });
+}
+
+/** Queue every ready document in the workspace not yet embedded with `modelId`. */
+export async function reindexWorkspace(ctx: AppContext, workspaceId: string, modelId: string): Promise<number> {
+  const docs = await ctx.db
+    .select({ id: document.id })
+    .from(document)
+    .where(and(eq(document.workspaceId, workspaceId), eq(document.status, "ready"), or(isNull(document.embeddingModelId), ne(document.embeddingModelId, modelId))));
+  for (const d of docs) await ctx.jobs.document(d.id);
+  return docs.length;
 }

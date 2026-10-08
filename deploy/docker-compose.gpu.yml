@@ -7,15 +7,16 @@
 # the models (about 34 GB) into the `models` volume; `docker compose logs -f vllm vllm-small` shows
 # progress. All models here are Apache-2.0.
 #
+#  - Embeddings (document search): EmbeddingGemma 2 on Ollama, about 1 GB (see `embeddings` below).
 #  - Main model (Chat, Work AI, Code; the default): Qwen3.6-35B-A3B in 4 bits, 25 GB. A mixture of
 #    experts (about 3B of its 35B parameters work per token, so it's fast) with mostly linear
-#    attention: a token of conversation costs about 20 KB of GPU memory, so its 70% of the GPU
+#    attention: a token of conversation costs about 20 KB of GPU memory, so its 68% of the GPU
 #    holds several hundred thousand tokens shared by everyone working at that moment. It also reads
 #    images. "Thinking" is off by default (faster answers for many people); VLLM_THINKING=true turns
 #    it on for every request.
-#  - Small model (Chat, for quick jobs): Gemma 4 E2B, Google's 4-bit build, 8 GB, 20% of the GPU.
+#  - Small model (Chat, for quick jobs): Gemma 4 E2B, Google's 4-bit build, 8 GB, 19% of the GPU.
 #    It runs with `--profile small` (deploy/team.sh adds it). Leave it out: VLLM_SMALL_URL= (empty)
-#    in .env, and give the main model VLLM_GPU_MEMORY=0.90.
+#    in .env, and give the main model VLLM_GPU_MEMORY=0.87.
 #
 # Other models: VLLM_MODEL / VLLM_SMALL_MODEL (a Hugging Face repo vLLM supports), their names,
 # memory shares and, for their tool-call format, VLLM_TOOL_PARSER (see vLLM's tool calling docs).
@@ -37,7 +38,7 @@ services:
       - --served-model-name=${VLLM_MODEL_NAME:-qwen3.6-35b-a3b}
       # The longest single conversation. Longer agent tasks are summarized as they go.
       - --max-model-len=${VLLM_MAX_MODEL_LEN:-65536}
-      - --gpu-memory-utilization=${VLLM_GPU_MEMORY:-0.70}
+      - --gpu-memory-utilization=${VLLM_GPU_MEMORY:-0.68}
       # Requests answered at once; more wait in vLLM's queue.
       - --max-num-seqs=${VLLM_MAX_SEQS:-32}
       - --enable-auto-tool-choice
@@ -78,7 +79,7 @@ services:
       - ${VLLM_SMALL_MODEL:-google/gemma-4-E2B-it-qat-w4a16-ct}
       - --served-model-name=${VLLM_SMALL_MODEL_NAME:-gemma-4-e2b}
       - --max-model-len=${VLLM_SMALL_MAX_MODEL_LEN:-32768}
-      - --gpu-memory-utilization=${VLLM_SMALL_GPU_MEMORY:-0.20}
+      - --gpu-memory-utilization=${VLLM_SMALL_GPU_MEMORY:-0.19}
       - --max-num-seqs=${VLLM_MAX_SEQS:-32}
       - --enable-auto-tool-choice
       - --tool-call-parser=${VLLM_SMALL_TOOL_PARSER:-gemma4}
@@ -96,6 +97,44 @@ services:
       retries: 5
       start_period: 30m
 
+  # Embeddings for document search: EmbeddingGemma 2 (text part, 270M, 378 MB) on Ollama. Ollama
+  # runs it with its MLX engine on the GPU (NVIDIA driver with CUDA 13, 580 or newer); it takes
+  # about 1 GB next to the two vLLM servers. On an older driver use EMBEDDING_MODEL=embeddinggemma
+  # (EmbeddingGemma 1, 300M), which Ollama also runs on the CPU.
+  embeddings:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.2}
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      # Keep the model loaded, serve several searches at once, nothing else on this server.
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "8"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - embeddings:/root/.ollama
+    # Start the server, fetch the model the first time (378 MB), then keep serving.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        ollama serve & pid=$$!;
+        until ollama list >/dev/null 2>&1; do sleep 1; done;
+        ollama pull ${EMBEDDING_MODEL:-embeddinggemma-2:270m} || echo "embeddings: the model couldn't be downloaded";
+        wait $$pid
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${VLLM_GPU:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "show", "${EMBEDDING_MODEL:-embeddinggemma-2:270m}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15m
+
   api:
     environment:
       # First setup registers the main model for Chat, Work AI and Code as the default…
@@ -109,8 +148,14 @@ services:
       SETUP_SMALL_MODEL: ${VLLM_SMALL_MODEL_NAME:-gemma-4-e2b}
       SETUP_SMALL_MODEL_DISPLAY_NAME: ${VLLM_SMALL_MODEL_DISPLAY_NAME:-Gemma 4 E2B (fast)}
       SETUP_SMALL_MODEL_CONTEXT: ${VLLM_SMALL_MAX_MODEL_LEN:-32768}
+      # …and EmbeddingGemma 2 for document search (with its task prefixes).
+      SETUP_EMBEDDING_URL: ${EMBEDDING_URL-http://embeddings:11434}
+      SETUP_EMBEDDING_PROVIDER: ollama
+      SETUP_EMBEDDING_MODEL: ${EMBEDDING_MODEL:-embeddinggemma-2:270m}
+      SETUP_EMBEDDING_DISPLAY_NAME: ${EMBEDDING_MODEL_DISPLAY_NAME:-EmbeddingGemma 2}
       # Agent tasks working at once across the organization (Admin → Work AI changes it later).
       SETUP_MAX_RUNNING: ${WORK_MAX_RUNNING:-8}
 
 volumes:
   models:
+  embeddings:

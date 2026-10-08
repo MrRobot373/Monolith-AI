@@ -63,6 +63,9 @@ export const modelSchema = z.object({
   enabled: z.boolean().default(true),
   costInPerM: z.number().nonnegative().optional(),
   costOutPerM: z.number().nonnegative().optional(),
+  /** Embedding models: text put before search queries and before document passages ({title}). */
+  queryPrefix: z.string().max(200).nullable().optional(),
+  documentPrefix: z.string().max(200).nullable().optional(),
 });
 
 /** Updates must not carry defaults, or a partial update would silently reset other fields. */
@@ -75,6 +78,8 @@ export const modelUpdateSchema = z.object({
   enabled: z.boolean().optional(),
   costInPerM: z.number().nonnegative().optional(),
   costOutPerM: z.number().nonnegative().optional(),
+  queryPrefix: z.string().max(200).nullable().optional(),
+  documentPrefix: z.string().max(200).nullable().optional(),
 });
 
 export const workspaceModelsSchema = z.object({
@@ -156,3 +161,12 @@ export const profileSchema = z.object({
   jobTitle: z.string().max(80).optional(),
   customInstructions: z.string().max(4000).optional(),
 });
+
+/**
+ * Task prefixes for embedding models trained with them, by model name. EmbeddingGemma (1 and 2):
+ * "task: search result | query: …" for searches, "title: {title} | text: …" for documents.
+ */
+export function embeddingPrefixes(modelKey: string): { queryPrefix: string; documentPrefix: string } | null {
+  if (/embedding-?gemma/i.test(modelKey)) return { queryPrefix: "task: search result | query: ", documentPrefix: "title: {title} | text: " };
+  return null;
+}

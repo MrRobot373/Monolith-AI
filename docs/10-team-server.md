@@ -22,8 +22,9 @@ ready come to about 13 GB. Check yours with `free -h` and `nproc`.
 ## What runs
 
 ```
- people ──https──▶ caddy ──▶ web ──▶ api ──▶ vllm         main model, 70% of the GPU
-                                      │  └─▶ vllm-small   small model, 20% of the GPU
+ people ──https──▶ caddy ──▶ web ──▶ api ──▶ vllm         main model, 68% of the GPU
+                                      │  ├─▶ vllm-small   small model, 19% of the GPU
+                                      │  └─▶ embeddings   EmbeddingGemma 2 on Ollama, about 1 GB
                                       └─▶ postgres ◀── backup (every night, to BACKUP_DIR)
 ```
 
@@ -38,7 +39,7 @@ All of it starts with `deploy/team.sh up -d --build`, which combines `docker-com
 | Model | Qwen3.6-35B-A3B, 4-bit (`QuantTrio/Qwen3.6-35B-A3B-AWQ`) | Gemma 4 E2B, Google's 4-bit build (`google/gemma-4-E2B-it-qat-w4a16-ct`) |
 | License | Apache-2.0 | Apache-2.0 |
 | Download | 25 GB | 8 GB |
-| GPU share | 70% (`VLLM_GPU_MEMORY`) | 20% (`VLLM_SMALL_GPU_MEMORY`) |
+| GPU share | 68% (`VLLM_GPU_MEMORY`) | 19% (`VLLM_SMALL_GPU_MEMORY`) |
 | Used for | Chat, Work AI, Code (the default) | Chat, for quick jobs (people pick "Gemma 4 E2B (fast)") |
 | Longest conversation | 65,536 tokens | 32,768 tokens |
 | Reads images | yes | not set up |
@@ -49,7 +50,7 @@ Why these fit one GPU:
   so it writes about as fast as a 3B model while answering like a much bigger one.
 - Only 10 of its 40 layers keep a growing memory of the conversation (the rest use linear
   attention with a fixed-size state). A token of conversation costs about 20 KB of GPU memory,
-  against 96 KB for Qwen3-30B-A3B, so the 70% share leaves room for several hundred thousand tokens
+  against 96 KB for Qwen3-30B-A3B, so the 68% share leaves room for several hundred thousand tokens
   shared by everyone working at that moment.
 - Gemma 4 E2B shares most of its attention memory between layers, so it needs little beyond its
   8 GB of weights.
@@ -66,11 +67,31 @@ for Work AI or Code: models this size are unreliable with tools. Options:
 
 - **Gemma 4 E4B instead** (better answers, 11.5 GB): `VLLM_SMALL_MODEL=google/gemma-4-E4B-it-qat-w4a16-ct`,
   `VLLM_SMALL_MODEL_NAME=gemma-4-e4b`, `VLLM_SMALL_MODEL_DISPLAY_NAME="Gemma 4 E4B (fast)"`,
-  `VLLM_SMALL_GPU_MEMORY=0.26`, `VLLM_GPU_MEMORY=0.64`.
+  `VLLM_SMALL_GPU_MEMORY=0.25`, `VLLM_GPU_MEMORY=0.62`.
 - **No small model** (more room for the main one): `VLLM_SMALL_URL=` (empty) and
-  `VLLM_GPU_MEMORY=0.90`.
+  `VLLM_GPU_MEMORY=0.87`.
 - **Another main model**: `VLLM_MODEL`, `VLLM_MODEL_NAME`, `VLLM_MODEL_DISPLAY_NAME` and, if it
   writes tool calls differently, `VLLM_TOOL_PARSER` and `VLLM_REASONING_PARSER` (see vLLM's docs).
+
+### Documents and embeddings
+
+Search in documents (chat attachments, project sources) uses keywords and, with an embedding
+model, meaning: a question finds the passage that answers it even in other words. The embedding
+model here is **EmbeddingGemma 2** (Google, Apache-2.0), its text part (`embeddinggemma-2:270m`,
+378 MB) on Ollama:
+
+- It's trained with short task instructions, which Aatmiq adds: `task: search result | query: …`
+  before questions and `title: <document name> | text: …` before passages (Admin → Models → *Task
+  prefixes*, filled in automatically for EmbeddingGemma).
+- Ollama runs EmbeddingGemma 2 with its MLX engine on the GPU. That needs an NVIDIA driver with
+  **CUDA 13** (driver 580 or newer; `nvidia-smi` shows *CUDA Version: 13.x*). It takes about 1 GB
+  of GPU memory, which is why the two chat models leave some room.
+- On an older driver, or to keep it off the GPU, use EmbeddingGemma 1 instead, which Ollama runs
+  on the CPU too: `EMBEDDING_MODEL=embeddinggemma`, `EMBEDDING_MODEL_DISPLAY_NAME="EmbeddingGemma"`.
+- Changing the workspace's embedding model (Admin → Models, per workspace) indexes its documents
+  again in the background; until then they're still found by keywords.
+- Check it works: `deploy/team.sh exec api curl -s http://embeddings:11434/api/embed -d
+  '{"model":"embeddinggemma-2:270m","input":"hello"}' | head -c 120` prints numbers.
 
 Models are registered in Aatmiq at first setup. After that, change them in **Admin → Models**.
 
@@ -102,7 +123,7 @@ Models are registered in Aatmiq at first setup. After that, change them in **Adm
 3. **Start.**
    ```bash
    deploy/team.sh up -d --build
-   deploy/team.sh logs -f vllm vllm-small      # the first start downloads about 34 GB
+   deploy/team.sh logs -f vllm vllm-small embeddings   # the first start downloads about 34 GB
    ```
    Aatmiq itself is up in a minute or two. The models are ready when their logs say the server
    started, and `deploy/team.sh ps` shows both as *healthy* (the small one starts after the main).

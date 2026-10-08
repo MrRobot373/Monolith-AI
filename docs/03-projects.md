@@ -31,7 +31,7 @@ A project keeps the chats, files and instructions for one piece of work together
 
 ## Resource use
 
-Retrieval is the same as for Documents: full-text search first, plus vectors when the workspace has an embedding model. Small source sets (≤14k characters) are passed whole. Project memory only uses full-text search.
+Retrieval is the same as for Documents: full-text search first, plus vectors when the workspace has an embedding model (with task prefixes for models trained with them, such as EmbeddingGemma 2; changing the model re-indexes the workspace). Small source sets (≤14k characters) are passed whole. Project memory only uses full-text search.
 
 ## Phase B (done)
 

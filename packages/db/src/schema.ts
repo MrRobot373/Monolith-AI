@@ -252,6 +252,12 @@ export const model = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     costInPerM: real("cost_in_per_m"),
     costOutPerM: real("cost_out_per_m"),
+    /**
+     * Embedding models trained with task prefixes (EmbeddingGemma): put before search queries, and
+     * before document passages ({title} is the document's name, or "none").
+     */
+    queryPrefix: text("query_prefix"),
+    documentPrefix: text("document_prefix"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

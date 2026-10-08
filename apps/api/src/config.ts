@@ -53,6 +53,11 @@ export interface Config {
   setupModels?: SetupModel[];
   /** At first setup: tasks working at once across the organization (SETUP_MAX_RUNNING). */
   setupMaxRunning?: number | null;
+  /**
+   * Registered at first setup as the workspace's embedding model for document search
+   * (SETUP_EMBEDDING_*): EmbeddingGemma 2 on the bundled Ollama, for example.
+   */
+  setupEmbedding?: { url: string; key: string; displayName: string; type: "ollama" | "openai_compatible"; apiKey: string | null } | null;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -84,7 +89,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     redisUrl: env.REDIS_URL || null,
     jobConcurrency: Math.max(1, Math.min(16, Number(env.JOB_CONCURRENCY ?? 2) || 2)),
     setupModels: [loadSetupModel(env, "SETUP_MODEL", ["chat", "work", "code"]), loadSetupModel(env, "SETUP_SMALL_MODEL", ["chat"])].filter((m): m is SetupModel => !!m),
+    setupEmbedding: loadSetupEmbedding(env),
     setupMaxRunning: env.SETUP_MAX_RUNNING ? Math.max(1, Math.min(500, Math.round(Number(env.SETUP_MAX_RUNNING)) || 8)) : null,
+  };
+}
+
+/** SETUP_EMBEDDING_URL, SETUP_EMBEDDING_MODEL, _DISPLAY_NAME, _PROVIDER (ollama | openai_compatible), _API_KEY. */
+export function loadSetupEmbedding(env: NodeJS.ProcessEnv): Config["setupEmbedding"] {
+  const url = env.SETUP_EMBEDDING_URL;
+  if (!url) return null;
+  if (!/^https?:\/\//.test(url)) throw new Error("SETUP_EMBEDDING_URL must start with http:// or https://");
+  if (!env.SETUP_EMBEDDING_MODEL) throw new Error("SETUP_EMBEDDING_URL needs SETUP_EMBEDDING_MODEL, the model's name on that server");
+  const type = env.SETUP_EMBEDDING_PROVIDER || "openai_compatible";
+  if (type !== "ollama" && type !== "openai_compatible") throw new Error("SETUP_EMBEDDING_PROVIDER: use ollama or openai_compatible");
+  return {
+    url: url.replace(/\/+$/, ""),
+    key: env.SETUP_EMBEDDING_MODEL,
+    displayName: env.SETUP_EMBEDDING_DISPLAY_NAME || env.SETUP_EMBEDDING_MODEL,
+    type,
+    apiKey: env.SETUP_EMBEDDING_API_KEY || null,
   };
 }
 

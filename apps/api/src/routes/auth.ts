@@ -13,7 +13,7 @@ import {
   workspaceMember,
   workspaceModel,
 } from "@aatmiq/db";
-import { acceptInviteSchema, DEFAULT_ACCENT, PRODUCT_NAME, setupSchema } from "@aatmiq/shared";
+import { acceptInviteSchema, DEFAULT_ACCENT, embeddingPrefixes, PRODUCT_NAME, setupSchema } from "@aatmiq/shared";
 import { fromNodeHeaders } from "better-auth/node";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { VERIFY_CALLBACK } from "../auth";
@@ -182,6 +182,19 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
         .returning();
       await db.insert(workspaceModel).values({ workspaceId: ws!.id, modelId: m!.id });
       if (i === 0) await db.update(workspace).set({ defaultModelId: m!.id }).where(eq(workspace.id, ws!.id));
+    }
+    // Document search with embeddings (EmbeddingGemma 2 on the bundled Ollama, for example).
+    if (cfg.setupEmbedding) {
+      const se = cfg.setupEmbedding;
+      const [p] = await db
+        .insert(modelProvider)
+        .values({ name: se.displayName, type: se.type, baseUrl: se.url, apiKeyEnc: se.apiKey ? ctx.box.encrypt(se.apiKey) : null })
+        .returning();
+      const [e] = await db
+        .insert(model)
+        .values({ providerId: p!.id, modelKey: se.key, displayName: se.displayName, kind: "embedding", sections: [], ...(embeddingPrefixes(se.key) ?? {}) })
+        .returning();
+      await db.update(workspace).set({ embeddingModelId: e!.id }).where(eq(workspace.id, ws!.id));
     }
     if (cfg.setupMaxRunning) await db.update(organization).set({ workSettings: { maxRunning: cfg.setupMaxRunning } }).where(eq(organization.id, org!.id));
 

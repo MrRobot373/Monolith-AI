@@ -37,6 +37,8 @@ interface ModelRow {
   vision: boolean;
   sections: string[];
   enabled: boolean;
+  queryPrefix: string | null;
+  documentPrefix: string | null;
 }
 
 const TYPE_LABEL: Record<Provider["type"], string> = { ollama: "Ollama", openai_compatible: "OpenAI-compatible", mock: "Demo" };
@@ -48,6 +50,7 @@ export default function ModelsPage() {
   const models = useQuery({ queryKey: ["admin-models"], queryFn: () => get<ModelRow[]>("/api/admin/models") });
   const [addProvider, setAddProvider] = useState(false);
   const [addModelFor, setAddModelFor] = useState<Provider | null>(null);
+  const [prefixesFor, setPrefixesFor] = useState<ModelRow | null>(null);
   const [keysFor, setKeysFor] = useState<Provider | null>(null);
 
   const invalidate = () => {
@@ -64,7 +67,8 @@ export default function ModelsPage() {
   });
   const removeProvider = useMutation({ mutationFn: (id: string) => del(`/api/admin/providers/${id}`), onSuccess: invalidate });
   const updateModel = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; enabled?: boolean; sections?: string[]; vision?: boolean }) => patch(`/api/admin/models/${id}`, body),
+    mutationFn: ({ id, ...body }: { id: string; enabled?: boolean; sections?: string[]; vision?: boolean; queryPrefix?: string | null; documentPrefix?: string | null }) =>
+      patch(`/api/admin/models/${id}`, body),
     onSuccess: invalidate,
     onError: (e: Error) => toast.error(e.message),
   });
@@ -163,7 +167,21 @@ export default function ModelsPage() {
                 <Td className="text-fg-muted">{m.providerName}</Td>
                 <Td>
                   {m.kind === "embedding" ? (
-                    <span className="text-[12px] text-fg-subtle">Document search</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] text-fg-subtle">Document search</span>
+                      <Tooltip content="Text put before searches and documents, for models trained with task prefixes (EmbeddingGemma)">
+                        <button
+                          onClick={() => setPrefixesFor(m)}
+                          className={cn(
+                            "rounded-md border px-1.5 py-0.5 text-[11.5px] transition-colors",
+                            m.queryPrefix || m.documentPrefix ? "border-border-strong bg-surface-3 text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
+                          )}
+                          data-testid="model-prefixes"
+                        >
+                          Task prefixes{m.queryPrefix || m.documentPrefix ? " on" : ""}
+                        </button>
+                      </Tooltip>
+                    </div>
                   ) : (
                   <div className="flex gap-1">
                     {(["chat", "work", "code"] as const).map((s) => {
@@ -216,6 +234,7 @@ export default function ModelsPage() {
 
       <AddProviderDialog open={addProvider} onOpenChange={setAddProvider} onDone={invalidate} />
       {keysFor && <ProviderKeysDialog provider={keysFor} onClose={() => setKeysFor(null)} onDone={invalidate} />}
+      <PrefixesDialog model={prefixesFor} onClose={() => setPrefixesFor(null)} onSave={(body) => prefixesFor && updateModel.mutate({ id: prefixesFor.id, ...body }, { onSuccess: () => setPrefixesFor(null) })} saving={updateModel.isPending} />
       {addModelFor && <AddModelsDialog provider={addModelFor} onClose={() => setAddModelFor(null)} onDone={invalidate} />}
     </div>
   );
@@ -416,4 +435,44 @@ function prettyName(key: string): string {
 /** Guess whether a model name is an embedding model (nomic-embed-text, bge-m3, e5, all-minilm…). */
 function kindFor(key: string): "chat" | "embedding" {
   return /embed|bge|(^|[^a-z])e5([^a-z]|$)|minilm|gte-|arctic-embed|mxbai/i.test(key) ? "embedding" : "chat";
+}
+
+/** Task prefixes for an embedding model (EmbeddingGemma: "task: search result | query: " and "title: {title} | text: "). */
+function PrefixesDialog({ model, onClose, onSave, saving }: { model: ModelRow | null; onClose: () => void; onSave: (b: { queryPrefix: string | null; documentPrefix: string | null }) => void; saving: boolean }) {
+  const [query, setQuery] = useState("");
+  const [doc, setDoc] = useState("");
+  const [shown, setShown] = useState<string | null>(null);
+  if (model && shown !== model.id) {
+    setShown(model.id);
+    setQuery(model.queryPrefix ?? "");
+    setDoc(model.documentPrefix ?? "");
+  }
+  return (
+    <Dialog
+      open={!!model}
+      onOpenChange={(o) => {
+        if (!o) {
+          setShown(null);
+          onClose();
+        }
+      }}
+      title={`Task prefixes: ${model?.displayName ?? ""}`}
+      description="Some embedding models are trained to see a short instruction before the text. Changing these applies to documents indexed from now on; re-index by picking the model again for the workspace."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={saving} onClick={() => onSave({ queryPrefix: query || null, documentPrefix: doc || null })} data-testid="save-prefixes">Save</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Before searches" hint='EmbeddingGemma: "task: search result | query: "'>
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} className="font-mono text-[12.5px]" data-testid="query-prefix" />
+        </Field>
+        <Field label="Before documents" hint='{title} becomes the document name. EmbeddingGemma: "title: {title} | text: "'>
+          <Input value={doc} onChange={(e) => setDoc(e.target.value)} className="font-mono text-[12.5px]" data-testid="document-prefix" />
+        </Field>
+      </div>
+    </Dialog>
+  );
 }

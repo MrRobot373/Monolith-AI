@@ -47,7 +47,14 @@ export async function embeddingModelFor(db: DB, box: SecretBox, workspaceId: str
     baseUrl: row.provider.baseUrl,
     apiKey: row.provider.apiKeyEnc ? box.decrypt(row.provider.apiKeyEnc) : null,
   };
-  return { id: row.model.id, key: row.model.modelKey, cfg };
+  return { id: row.model.id, key: row.model.modelKey, cfg, queryPrefix: row.model.queryPrefix ?? "", documentPrefix: row.model.documentPrefix ?? "" };
+}
+
+/** A document passage as the embedding model expects it (its title is the file name, without the extension). */
+export function forEmbedding(prefix: string, name: string, text: string): string {
+  if (!prefix) return text;
+  const title = name.replace(/\.[a-z0-9]{1,6}$/i, "").replace(/[|\n]+/g, " ").trim() || "none";
+  return prefix.replaceAll("{title}", title) + text;
 }
 
 /** Raised for files that will never work (no text, unsupported type): retrying can't help. */
@@ -80,7 +87,7 @@ export async function processDocument(
       let tokens = 0;
       vectors = [];
       for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
-        const r = await embed(emb.cfg, emb.key, chunks.slice(i, i + EMBED_BATCH).map((c) => c.content));
+        const r = await embed(emb.cfg, emb.key, chunks.slice(i, i + EMBED_BATCH).map((c) => forEmbedding(emb.documentPrefix, doc.name, c.content)));
         vectors.push(...r.vectors);
         tokens += r.inputTokens;
       }
@@ -276,7 +283,7 @@ export async function retrieve(
   const emb = await embeddingModelFor(db, box, opts.workspaceId);
   if (emb) {
     try {
-      const r = await embed(emb.cfg, emb.key, [opts.query]);
+      const r = await embed(emb.cfg, emb.key, [emb.queryPrefix + opts.query]);
       embedTokens = r.inputTokens;
       const vec = `[${r.vectors[0]!.join(",")}]`;
       add(
