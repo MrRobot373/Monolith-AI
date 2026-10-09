@@ -22,30 +22,56 @@ ready come to about 13 GB. Check yours with `free -h` and `nproc`.
 ## What runs
 
 ```
- people ──https──▶ caddy ──▶ web ──▶ api ──▶ vllm         main model, 68% of the GPU
-                                      │  ├─▶ vllm-small   small model, 19% of the GPU
-                                      │  └─▶ embeddings   EmbeddingGemma 2 on Ollama, about 1 GB
+ people ──https──▶ caddy ──▶ web ──▶ api ──▶ vllm          standard model (Qwen3.6), 68% of the GPU
+                                      │  ├─▶ ollama-chat   fast model (Nemotron 3 Nano 4B), about 6 GB
+                                      │  └─▶ embeddings    EmbeddingGemma 2 on Ollama, about 1 GB
                                       └─▶ postgres ◀── backup (every night, to BACKUP_DIR)
 ```
 
 All of it starts with `deploy/team.sh up -d --build`, which combines `docker-compose.yml` with
-`docker-compose.gpu.yml` (the models), `docker-compose.https.yml` (Caddy),
+`docker-compose.gpu.yml` (the models, chosen by `LINEUP`), `docker-compose.https.yml` (Caddy),
 `docker-compose.backup.yml` (backups) and `docker-compose.containers.yml` (each Work AI task in its
 own container; see [Security](#security)).
 
 ## The models
 
-| | Main model | Small model |
-|---|---|---|
-| Model | Qwen3.6-35B-A3B, 4-bit (`QuantTrio/Qwen3.6-35B-A3B-AWQ`) | Gemma 4 E2B, Google's 4-bit build (`google/gemma-4-E2B-it-qat-w4a16-ct`) |
-| License | Apache-2.0 | Apache-2.0 |
-| Download | 25 GB | 8 GB |
-| GPU share | 68% (`VLLM_GPU_MEMORY`) | 19% (`VLLM_SMALL_GPU_MEMORY`) |
-| Used for | Chat, Work AI, Code (the default) | Chat, for quick jobs (people pick "Gemma 4 E2B (fast)") |
-| Longest conversation | 65,536 tokens | 32,768 tokens |
-| Reads images | yes | not set up |
+Models sit in three tiers, and **Auto** (on by default) picks one for each message by how hard it
+is: a greeting or a quick translation goes to the fast model, everyday work to the standard one,
+code with an error, a proof or a multi-part analysis to the advanced one, or to the standard one
+with *thinking* on when there's no advanced model. People can still pick a model by hand. How it
+decides: [02-models.md](02-models.md#auto).
 
-Why these fit one GPU:
+`LINEUP` in `deploy/.env` chooses the models:
+
+| `LINEUP` | Fast | Standard | Advanced | GPUs |
+|---|---|---|---|---|
+| `qwen-nemotron` (default) | Nemotron 3 Nano 4B (Ollama, 3 GB) | Qwen3.6-35B-A3B (vLLM, 25 GB, reads images) | the standard one, thinking | one 48 GB |
+| `nemotron` | Nemotron 3 Nano 4B | Nemotron 3 Nano 30B A3B (Ollama, 24 GB) | the standard one, thinking | one 48 GB |
+| `nemotron-super` | Nemotron 3 Nano 4B | Nemotron 3 Nano 30B A3B | Nemotron 3 Super 120B A12B (Ollama, 87 GB) | one 48 GB, and two more (48 GB or larger) for Super |
+| `gemma-qwen` | Gemma 4 E2B (vLLM, 8 GB) | Qwen3.6-35B-A3B | the standard one, thinking | one 48 GB |
+
+Nemotron 3 **Ultra** (about 550B parameters) needs a server with eight data-center GPUs; it isn't
+offered here.
+
+**Which to choose.** The default keeps Qwen3.6 as the model most people get: it reads images
+(screenshots, photos of documents), it handles Hindi and other Indian languages, it runs on vLLM,
+which serves many people at once best, and our agent tests run on it. The Nemotron 3 models are
+made for English (Auto sends requests written in another script to the standard model). Nemotron 3 Nano 4B is the fast tier: quick answers and the judge that sorts
+unclear requests. `nemotron` is all-NVIDIA, text only, on Ollama, and suits a team that prefers
+one vendor's models; Ollama serves fewer people at once than vLLM, so watch the load hour (phase 2
+of [11-rollout.md](11-rollout.md)). `nemotron-super` is for later, with more GPUs.
+
+| | Qwen3.6-35B-A3B | Nemotron 3 Nano 30B A3B | Nemotron 3 Nano 4B | Nemotron 3 Super 120B A12B |
+|---|---|---|---|---|
+| Kind | mixture of experts, 3B active | Mamba-2 and attention hybrid, MoE, 3.5B active | Mamba-2 hybrid with 4 attention layers, 4B | LatentMoE (Mamba-2, MoE and attention), 12B active |
+| Download (4-bit) | 25 GB | 24 GB | 2.8 GB | 87 GB |
+| License | Apache-2.0 | NVIDIA Nemotron Open Model License | NVIDIA Nemotron Open Model License | NVIDIA Nemotron Open Model License |
+| Languages | 100+, Hindi included | English, German, Spanish, French, Italian, Japanese | English | English and others |
+| Reads images | yes | no | no | no |
+| Thinking | switched per request | switched per request | switched per request | switched per request |
+| Longest conversation here | 65,536 tokens | 65,536 | 32,768 (65,536 with `nemotron`) | 32,768 |
+
+Why the default fits one GPU:
 
 - Qwen3.6-35B-A3B is a *mixture of experts*: about 3B of its 35B parameters work for each token,
   so it writes about as fast as a 3B model while answering like a much bigger one.
@@ -53,26 +79,29 @@ Why these fit one GPU:
   attention with a fixed-size state). A token of conversation costs about 20 KB of GPU memory,
   against 96 KB for Qwen3-30B-A3B, so the 68% share leaves room for several hundred thousand tokens
   shared by everyone working at that moment.
-- Gemma 4 E2B shares most of its attention memory between layers, so it needs little beyond its
-  8 GB of weights.
+- The Nemotron 3 models are mostly Mamba layers (a fixed-size state, not a growing memory), so
+  they need little beyond their weights; Ollama keeps them loaded and answers 8 requests per model
+  at once (`OLLAMA_CHAT_PARALLEL`).
 
-**Thinking** is off by default: answers start sooner and the GPU serves more people. To turn it on
-for every request, set `VLLM_THINKING=true` (slower; better on hard multi-step problems) together
-with Qwen's sampling for thinking: `VLLM_TEMPERATURE=1.0`, `VLLM_TOP_P=0.95`,
-`VLLM_PRESENCE_PENALTY=0`. Without thinking the defaults are Qwen's recommended 0.7, 0.8 and 1.5.
+**Thinking** is off for everyday answers (they start sooner and the GPU serves more people) and
+on for the requests Auto judges hard (Admin → Models → Auto → *Think on hard requests*). To turn
+it on for every request to the vLLM model instead, set `VLLM_THINKING=true` together with Qwen's
+sampling for thinking: `VLLM_TEMPERATURE=1.0`, `VLLM_TOP_P=0.95`, `VLLM_PRESENCE_PENALTY=0`.
 
-**Small models and the GPU.** On this GPU the main model is already fast, because so little of it
-works per token. What the small model brings is a second, separate queue for quick questions
-(rewording, translating, short answers) that never waits behind long agent tasks. It isn't meant
-for Work AI or Code: models this size are unreliable with tools. Options:
+**The fast model** is a separate queue for quick questions (rewording, translating, short
+answers) that never waits behind long agent tasks. It is offered in Chat only: models this size
+are unreliable with tools, so Work AI and Code start at the standard tier.
 
-- **Gemma 4 E4B instead** (better answers, 11.5 GB): `VLLM_SMALL_MODEL=google/gemma-4-E4B-it-qat-w4a16-ct`,
-  `VLLM_SMALL_MODEL_NAME=gemma-4-e4b`, `VLLM_SMALL_MODEL_DISPLAY_NAME="Gemma 4 E4B (fast)"`,
-  `VLLM_SMALL_GPU_MEMORY=0.25`, `VLLM_GPU_MEMORY=0.62`.
-- **No small model** (more room for the main one): `VLLM_SMALL_URL=` (empty) and
-  `VLLM_GPU_MEMORY=0.87`.
-- **Another main model**: `VLLM_MODEL`, `VLLM_MODEL_NAME`, `VLLM_MODEL_DISPLAY_NAME` and, if it
-  writes tool calls differently, `VLLM_TOOL_PARSER` and `VLLM_REASONING_PARSER` (see vLLM's docs).
+Other options:
+
+- **Other Ollama models** in the chat server: `OLLAMA_CHAT_MODELS="nemotron-3-nano:4b qwen3:8b"`,
+  then add them in Admin → Models (provider `http://ollama-chat:11434`, type Ollama) with a tier.
+- **Another vLLM main model**: `VLLM_MODEL`, `VLLM_MODEL_NAME`, `VLLM_MODEL_DISPLAY_NAME` and, if
+  it writes tool calls differently, `VLLM_TOOL_PARSER` and `VLLM_REASONING_PARSER` (see vLLM's docs).
+- **Gemma 4 E4B as the fast model** (with `gemma-qwen`, 11.5 GB): `VLLM_SMALL_MODEL=google/gemma-4-E4B-it-qat-w4a16-ct`,
+  `VLLM_SMALL_MODEL_NAME=gemma-4-e4b`, `VLLM_SMALL_GPU_MEMORY=0.25`, `VLLM_GPU_MEMORY=0.62`.
+- Models already registered (an existing server) aren't changed by a new `LINEUP`: add the new
+  ones in Admin → Models and set their tiers there.
 
 ### Documents and embeddings
 
@@ -124,7 +153,7 @@ Models are registered in Aatmiq at first setup. After that, change them in **Adm
 3. **Start.**
    ```bash
    deploy/team.sh up -d --build
-   deploy/team.sh logs -f vllm vllm-small embeddings   # the first start downloads about 34 GB
+   deploy/team.sh logs -f vllm ollama-chat embeddings   # the first start downloads about 30 GB
    ```
    Aatmiq itself is up in a minute or two. The models are ready when their logs say the server
    started, and `deploy/team.sh ps` shows both as *healthy* (the small one starts after the main).
@@ -270,7 +299,7 @@ deploy/team.sh exec vllm vllm bench serve --backend openai --model qwen3.6-35b-a
 
 Look at *Median TTFT* (time to the first word; under 2–3 s feels fine) and *Median TPOT* (time per
 word after that; under 50 ms reads faster than people do). If they're worse, lower
-`VLLM_MAX_SEQS` and *Tasks working at once*, or leave the small model out.
+`VLLM_MAX_SEQS` and *Tasks working at once*.
 
 ## Limits
 

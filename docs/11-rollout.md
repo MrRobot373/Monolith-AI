@@ -23,8 +23,10 @@ On the A6000 server (48 GB GPU, 500 GB disk), following [10-team-server.md](10-t
    `POSTGRES_PASSWORD`, `CADDY_TLS` (your company certificate, or `internal`), `BACKUP_DIR` on
    **another disk or a network share**, and `SMTP_URL`/`MAIL_FROM` (alerts and password resets).
    Keep a copy of `.env` somewhere safe: `APP_SECRET` is needed to read stored keys after a restore.
-3. `deploy/team.sh up -d --build`. The first start downloads about 35 GB of models;
-   `deploy/team.sh logs -f vllm vllm-small embeddings` shows progress.
+3. Choose the models: `LINEUP=qwen-nemotron` (the default: Nemotron 3 Nano 4B for quick answers,
+   Qwen3.6 for everything else) or `LINEUP=nemotron` (all Nemotron 3, English only); see
+   [10-team-server.md](10-team-server.md#the-models). Then `deploy/team.sh up -d --build`. The
+   first start downloads about 30 GB of models; `deploy/team.sh logs -f` shows progress.
 4. Create the owner account, then **Admin → Health**: every area should be green except *Backups*
    (none yet). Make one: `deploy/team.sh exec backup /scripts/backup.sh`, and check Health again.
 5. Restore drill, once, on a copy: the steps in [10-team-server.md#backups](10-team-server.md#backups).
@@ -110,7 +112,7 @@ What we have, and what's left before a customer pays for it.
 
 | Area | What |
 |---|---|
-| Chat | Streaming answers, model choice, versions, temporary chats, export, documents with numbered sources |
+| Chat | Streaming answers, model choice or Auto (picks the model per message by difficulty), versions, temporary chats, export, documents with numbered sources |
 | Documents | PDF, Word, Excel, images (OCR), text; keyword + meaning search (EmbeddingGemma 2); Confirmed/Assumption/TBD labels |
 | Projects | Instructions, sources, memory over chats and Work AI tasks, sharing with roles |
 | Work AI | 29 tools (files, shell, web, browser, documents, skills, helpers, background jobs, connected apps), approvals, plans, schedules, 59 built-in skills, 45 app connectors |
@@ -131,7 +133,7 @@ What we have, and what's left before a customer pays for it.
 | 4 | Versioned releases: tag `v1.0.0`, images pushed to a registry, a changelog, and an upgrade test from each released version | Customers update in place |
 | 5 | An offline install bundle: the images and the models in one download | Many on-premises customers have no internet on the server |
 | 6 | Personal data: export everything about one person, and erase a person with their data | Privacy law (India's DPDP Act, GDPR) and customer contracts |
-| 7 | Legal: the license agreement (EULA), privacy notice, a data-processing addendum template, and the list of open-source licenses and model licenses we ship | Required to sell |
+| 7 | Legal: the license agreement (EULA), privacy notice, a data-processing addendum template, and the list of open-source licenses and model licenses we ship (Apache-2.0, NVIDIA Nemotron Open Model License: [02-models.md](02-models.md#model-licenses)) | Required to sell |
 | 8 | Customer documentation: a short user guide, an admin guide (from these docs), a hardware sizing table | So customers install without us |
 | 9 | Support: where customers report issues, response times per plan, which versions we support | Part of what they buy |
 | 10 | Pricing and plans set up in the license server ([pricing-and-business.md](pricing-and-business.md)) | So orders turn into license keys |
@@ -146,7 +148,7 @@ single sign-on.
 
 | Risk | Sign | What we do |
 |---|---|---|
-| The GPU is slower than calculated | Answers take long in the load hour | Lower *Tasks working at once*; use the small model for quick chats; a second GPU later |
+| The GPU is slower than calculated | Answers take long in the load hour | Lower *Tasks working at once*; check Auto sends quick chats to the fast model (Admin → Models → try a message); a second GPU later |
 | Disk fills (task folders, editors, documents) | Health warns at 15% free | Ask people to delete old tasks; move backups off the server; a bigger disk |
 | A model update breaks tool calling | Work AI tasks fail after an update | Pin model versions (we do); update on a test machine first |
 | People paste sensitive data before the security assessment | — | Say so in phase 3 training: no customer personal data or passwords yet |

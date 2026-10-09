@@ -13,7 +13,7 @@ beyond that package.
 
 | Where | What |
 |---|---|
-| **Work AI** (sidebar) | Describe a task, optionally add files and pick a model. Starter prompts help with common jobs. |
+| **Work AI** (sidebar) | Describe a task, optionally add files and pick a model, or leave it on **Auto**: it picks the standard model, or the advanced one with thinking on for hard tasks, and the task keeps it ([how](02-models.md#auto)). Starter prompts help with common jobs. |
 | Task page | The live timeline: your messages, the agent's text as it writes, each step (command, file, search, browser action, connector call) with its input and output, approvals, errors. |
 | Progress panel | The agent's plan with items checked off, status, steps, tokens and timing. |
 | Files panel | The task folder: preview text and images, download anything, add files for the agent. |
@@ -114,7 +114,9 @@ package installs and deletions, and the Aatmiq panel writing and testing code.
 - **Models go through Aatmiq.** The runtime's only model provider is
   `/api/internal/work/llm/v1` (OpenAI-compatible). There we check the license and quota, swap in the
   real model and provider key, stream the response through, meter usage (section `work`) and forward
-  the text to the browser as it's written. The runtime never sees provider keys.
+  the text to the browser as it's written. The runtime never sees provider keys. For models that
+  can switch thinking, every call carries the switch: on when Auto judged the task hard, off
+  otherwise.
   Busy servers ("temporarily overloaded", 5xx) get up to three calm retries before the runtime sees
   an error; a call that hasn't started answering in 150 s, or goes quiet that long mid-answer, is
   cut and retried. A failure the runtime then retries past doesn't fail the task.
@@ -318,7 +320,7 @@ People (cookie session):
 | Method | Path | |
 |---|---|---|
 | GET | `/api/work/info?workspaceId=` | What's on (web search, approval mode, limits) |
-| GET/POST | `/api/work/tasks` | List (`workspaceId`, `q`) / start `{workspaceId, prompt, modelId?, projectId?, start?}`. `start: false` creates the task so files can be added first |
+| GET/POST | `/api/work/tasks` | List (`workspaceId`, `q`) / start `{workspaceId, prompt, modelId?, projectId?, start?}` (`modelId: "auto"`: Auto picks; the task gets `routing`). `start: false` creates the task so files can be added first |
 | GET/PATCH/DELETE | `/api/work/tasks/:id` | Task + timeline / rename, pin / delete (folder too) |
 | GET | `/api/work/tasks/:id/stream?after=` | SSE: `event` (stored), `delta` (live text), `files`, `ready` |
 | POST | `/api/work/tasks/:id/messages` | Follow-up `{prompt}` |

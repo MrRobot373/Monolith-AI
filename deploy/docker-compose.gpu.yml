@@ -1,28 +1,40 @@
-# A team on one GPU server (docs/10-team-server.md): vLLM serves two open models on one NVIDIA GPU
-# with 48 GB (RTX A6000, RTX 6000 Ada, L40S), and Aatmiq registers both at first setup.
+# A team on one GPU server (docs/10-team-server.md): open models on one NVIDIA GPU with 48 GB
+# (RTX A6000, RTX 6000 Ada, L40S), registered at first setup with their tiers for Auto, which picks
+# the model for each message by how hard it is (docs/02-models.md#auto).
 #
-#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml --env-file deploy/.env up -d
+#   deploy/team.sh up -d --build      (chooses the services below from LINEUP in deploy/.env)
 #
-# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host. The first start downloads
-# the models (about 34 GB) into the `models` volume; `docker compose logs -f vllm vllm-small` shows
-# progress. All models here are Apache-2.0.
+# Needs the NVIDIA driver (580 or newer) and the NVIDIA Container Toolkit on the host. The first
+# start downloads the models into volumes; `deploy/team.sh logs -f` shows progress.
 #
-#  - Embeddings (document search): EmbeddingGemma 2 on Ollama, about 1 GB (see `embeddings` below).
-#  - Main model (Chat, Work AI, Code; the default): Qwen3.6-35B-A3B in 4 bits, 25 GB. A mixture of
-#    experts (about 3B of its 35B parameters work per token, so it's fast) with mostly linear
-#    attention: a token of conversation costs about 20 KB of GPU memory, so its 68% of the GPU
-#    holds several hundred thousand tokens shared by everyone working at that moment. It also reads
-#    images. "Thinking" is off by default (faster answers for many people); VLLM_THINKING=true turns
-#    it on for every request.
-#  - Small model (Chat, for quick jobs): Gemma 4 E2B, Google's 4-bit build, 8 GB, 19% of the GPU.
-#    It runs with `--profile small` (deploy/team.sh adds it). Leave it out: VLLM_SMALL_URL= (empty)
-#    in .env, and give the main model VLLM_GPU_MEMORY=0.87.
+# LINEUP (deploy/.env):
+#  - qwen-nemotron (default, 48 GB): fast = Nemotron 3 Nano 4B on Ollama (3 GB), standard = Qwen3.6
+#    35B A3B on vLLM (25 GB, reads images). Hard requests: Qwen with thinking on.
+#  - nemotron (48 GB): fast = Nemotron 3 Nano 4B, standard = Nemotron 3 Nano 30B A3B (24 GB), both
+#    on Ollama. Hard requests: Nano 30B with thinking on. Text only (no images).
+#  - nemotron-super: as nemotron, plus advanced = Nemotron 3 Super 120B A12B (87 GB) on two more
+#    GPUs (LARGE_GPU_1, LARGE_GPU_2; 48 GB each or larger). It doesn't fit next to the others on one
+#    48 GB GPU.
+#  - gemma-qwen: fast = Gemma 4 E2B on vLLM (8 GB), standard = Qwen3.6 35B A3B (the earlier setup).
 #
-# Other models: VLLM_MODEL / VLLM_SMALL_MODEL (a Hugging Face repo vLLM supports), their names,
-# memory shares and, for their tool-call format, VLLM_TOOL_PARSER (see vLLM's tool calling docs).
+# Services: `vllm` (profile vllm), `vllm-small` (profile small), `ollama-chat` (profile
+# ollama-chat: the Nemotron models), `ollama-large` (profile large), and `embeddings` (always).
+# Licenses: Qwen3.6 is Apache-2.0, Gemma 4 and EmbeddingGemma are Apache-2.0; the Nemotron 3
+# models are under the NVIDIA Nemotron Open Model License (commercial use allowed; see
+# docs/02-models.md).
+#
+# vLLM details:
+#  - Main model: Qwen3.6-35B-A3B in 4 bits. A mixture of experts (about 3B of its 35B parameters
+#    work per token, so it's fast) with mostly linear attention: a token of conversation costs
+#    about 20 KB of GPU memory, so its 68% of the GPU holds several hundred thousand tokens shared
+#    by everyone working at that moment. "Thinking" is off by default; Aatmiq turns it on per
+#    request for hard ones (VLLM_THINKING=true turns it on for every request instead).
+#  - Other models: VLLM_MODEL / VLLM_SMALL_MODEL (a Hugging Face repo vLLM supports), their names,
+#    memory shares and, for their tool-call format, VLLM_TOOL_PARSER (see vLLM's tool calling docs).
 services:
   vllm:
     image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.30.0}
+    profiles: ["vllm"]
     restart: unless-stopped
     # vLLM's worker processes share memory; Docker's 64 MB default isn't enough.
     ipc: host
@@ -97,6 +109,85 @@ services:
       retries: 5
       start_period: 30m
 
+  # The Nemotron 3 models (and any other Ollama models, OLLAMA_CHAT_MODELS) for chat and agents.
+  # Thinking is switched per request. Several requests run at once per model; models stay loaded.
+  ollama-chat:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.2}
+    profiles: ["ollama-chat"]
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_CHAT_PARALLEL:-8}
+      OLLAMA_MAX_LOADED_MODELS: "3"
+      # The longest conversation per request (the models take more; memory is the limit).
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CHAT_CONTEXT:-32768}
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0
+    volumes:
+      - ollama-chat:/root/.ollama
+    # Start the server, fetch the models the first time, load them, then keep serving.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        ollama serve & pid=$$!;
+        until ollama list >/dev/null 2>&1; do sleep 1; done;
+        for m in ${OLLAMA_CHAT_MODELS:-nemotron-3-nano:4b}; do
+          ollama pull $$m && ollama run $$m "" >/dev/null 2>&1 || echo "ollama-chat: $$m couldn't be downloaded";
+        done;
+        wait $$pid
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${VLLM_GPU:-0}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30m
+
+  # Nemotron 3 Super 120B A12B (87 GB in 4 bits) for the hardest requests, on two GPUs of its own.
+  ollama-large:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.2}
+    profiles: ["large"]
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_LARGE_PARALLEL:-4}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_LARGE_CONTEXT:-32768}
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0
+    volumes:
+      - ollama-large:/root/.ollama
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        ollama serve & pid=$$!;
+        until ollama list >/dev/null 2>&1; do sleep 1; done;
+        ollama pull ${LARGE_OLLAMA_MODEL:-nemotron-3-super:120b} && ollama run ${LARGE_OLLAMA_MODEL:-nemotron-3-super:120b} "" >/dev/null 2>&1
+        || echo "ollama-large: the model couldn't be downloaded or doesn't fit";
+        wait $$pid
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LARGE_GPU_1:-1}", "${LARGE_GPU_2:-2}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60m
+
   # Embeddings for document search: EmbeddingGemma 2 (text part, 270M, 378 MB) on Ollama. Ollama
   # runs it with its MLX engine on the GPU (NVIDIA driver with CUDA 13, 580 or newer); it takes
   # about 1 GB next to the two vLLM servers. On an older driver use EMBEDDING_MODEL=embeddinggemma
@@ -137,17 +228,33 @@ services:
 
   api:
     environment:
-      # First setup registers the main model for Chat, Work AI and Code as the default…
-      SETUP_MODEL_URL: http://vllm:8000/v1
-      SETUP_MODEL: ${VLLM_MODEL_NAME:-qwen3.6-35b-a3b}
-      SETUP_MODEL_DISPLAY_NAME: ${VLLM_MODEL_DISPLAY_NAME:-Qwen3.6 35B A3B}
-      SETUP_MODEL_CONTEXT: ${VLLM_MAX_MODEL_LEN:-65536}
-      SETUP_MODEL_VISION: ${VLLM_MODEL_VISION:-true}
-      # …and the small one for Chat (Admin → Models changes either later).
-      SETUP_SMALL_MODEL_URL: ${VLLM_SMALL_URL-http://vllm-small:8000/v1}
-      SETUP_SMALL_MODEL: ${VLLM_SMALL_MODEL_NAME:-gemma-4-e2b}
-      SETUP_SMALL_MODEL_DISPLAY_NAME: ${VLLM_SMALL_MODEL_DISPLAY_NAME:-Gemma 4 E2B (fast)}
-      SETUP_SMALL_MODEL_CONTEXT: ${VLLM_SMALL_MAX_MODEL_LEN:-32768}
+      # First setup registers the models with their tiers for Auto (Admin → Models changes them
+      # later). deploy/team.sh sets MAIN_*, FAST_* and LARGE_* from LINEUP.
+      # The main model: Chat, Work AI and Code; the default when Auto is off.
+      SETUP_MODEL_URL: ${MAIN_URL:-http://vllm:8000/v1}
+      SETUP_MODEL_PROVIDER: ${MAIN_PROVIDER:-openai_compatible}
+      SETUP_MODEL: ${MAIN_MODEL:-${VLLM_MODEL_NAME:-qwen3.6-35b-a3b}}
+      SETUP_MODEL_DISPLAY_NAME: ${MAIN_MODEL_DISPLAY_NAME:-${VLLM_MODEL_DISPLAY_NAME:-Qwen3.6 35B A3B}}
+      SETUP_MODEL_CONTEXT: ${MAIN_CONTEXT:-${VLLM_MAX_MODEL_LEN:-65536}}
+      SETUP_MODEL_VISION: ${MAIN_VISION:-${VLLM_MODEL_VISION:-true}}
+      SETUP_MODEL_TIER: standard
+      SETUP_MODEL_THINKING: ${MAIN_THINKING:-switch}
+      # The fast one, for quick answers in Chat (and the judge for unclear requests).
+      SETUP_SMALL_MODEL_URL: ${FAST_URL-http://ollama-chat:11434}
+      SETUP_SMALL_MODEL_PROVIDER: ${FAST_PROVIDER:-ollama}
+      SETUP_SMALL_MODEL: ${FAST_MODEL:-nemotron-3-nano:4b}
+      SETUP_SMALL_MODEL_DISPLAY_NAME: ${FAST_MODEL_DISPLAY_NAME:-Nemotron 3 Nano 4B}
+      SETUP_SMALL_MODEL_CONTEXT: ${FAST_CONTEXT:-${OLLAMA_CHAT_CONTEXT:-32768}}
+      SETUP_SMALL_MODEL_TIER: fast
+      SETUP_SMALL_MODEL_THINKING: ${FAST_THINKING:-switch}
+      # The large one, for the hardest requests (LINEUP=nemotron-super).
+      SETUP_LARGE_MODEL_URL: ${LARGE_URL-}
+      SETUP_LARGE_MODEL_PROVIDER: ollama
+      SETUP_LARGE_MODEL: ${LARGE_OLLAMA_MODEL:-nemotron-3-super:120b}
+      SETUP_LARGE_MODEL_DISPLAY_NAME: ${LARGE_MODEL_DISPLAY_NAME:-Nemotron 3 Super 120B}
+      SETUP_LARGE_MODEL_CONTEXT: ${OLLAMA_LARGE_CONTEXT:-32768}
+      SETUP_LARGE_MODEL_TIER: advanced
+      SETUP_LARGE_MODEL_THINKING: switch
       # …and EmbeddingGemma 2 for document search (with its task prefixes).
       SETUP_EMBEDDING_URL: ${EMBEDDING_URL-http://embeddings:11434}
       SETUP_EMBEDDING_PROVIDER: ollama
@@ -159,3 +266,5 @@ services:
 volumes:
   models:
   embeddings:
+  ollama-chat:
+  ollama-large:

@@ -4,7 +4,7 @@
 
 *Aatmiq (Sanskrit ātmik, "of the self, one's own"), pronounced AAT-mik.*
 
-- [Rollout plan and product readiness](docs/11-rollout.md) · [Team server](docs/10-team-server.md) · [Master plan](docs/00-master-plan.md) · [Foundation spec](docs/01-foundation.md) · [Connectors setup](docs/09-connectors.md) · [Skill library](docs/08-skills.md) · [Pricing & business](docs/pricing-and-business.md) · [Decision log](docs/decisions.md)
+- [Rollout plan and product readiness](docs/11-rollout.md) · [Team server](docs/10-team-server.md) · [Models and Auto](docs/02-models.md) · [Master plan](docs/00-master-plan.md) · [Foundation spec](docs/01-foundation.md) · [Connectors setup](docs/09-connectors.md) · [Skill library](docs/08-skills.md) · [Pricing & business](docs/pricing-and-business.md) · [Decision log](docs/decisions.md)
 
 ## What works today
 
@@ -18,6 +18,7 @@
 | Admins can require two-step sign-in for everyone who uses a password, right away or after a grace period with reminders (Admin → Authentication) | ✅ |
 | Roles: org owner/admin, workspace admin, member | ✅ enforced in the API |
 | Workspaces (teams) with their own members, models and budget | ✅ |
+| Auto: the model for each message picked by how hard it is (rules, then the fast model as judge), fast/standard/advanced tiers, thinking only for hard requests; Nemotron 3 (Nano 4B, Nano 30B, Super 120B) and Qwen3.6 lineups for the GPU server ([details](docs/02-models.md)) | ✅ |
 | Groups: models and a token budget for a set of people across all their workspaces; the group pays for models only it gives ([details](docs/01-foundation.md#61a-groups-built-2026-10-07)) | ✅ |
 | Model providers: Ollama, any OpenAI-compatible server (vLLM, LM Studio…), demo model | ✅ health checks, model discovery, keys encrypted at rest |
 | Model gateway with streaming and token metering | ✅ |
