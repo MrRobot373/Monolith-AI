@@ -276,7 +276,9 @@ word after that; under 50 ms reads faster than people do). If they're worse, low
 
 - One server: Aatmiq isn't set up to spread over several machines. That matters at a few hundred
   people, not at 25.
-- Not security-audited yet: keep very sensitive data (customer personal data, finances,
+- Reviewed internally (dependencies, an authorization sweep of every route, isolation and the
+  network fence; see [11-rollout.md](11-rollout.md#phase-4-ready-to-sell-weeks-912)), but not yet
+  by an outside security firm: keep very sensitive data (customer personal data, finances,
   passwords) out until it is.
 - The model server is untested on a real A6000 by us: the settings come from vLLM 0.30.0's
   options and the models' published configurations. Watch the first start's logs.

@@ -4,7 +4,7 @@
 
 *Aatmiq (Sanskrit ātmik, "of the self, one's own"), pronounced AAT-mik.*
 
-- [Master plan](docs/00-master-plan.md) · [Foundation spec](docs/01-foundation.md) · [Connectors setup](docs/09-connectors.md) · [Skill library](docs/08-skills.md) · [Pricing & business](docs/pricing-and-business.md) · [Decision log](docs/decisions.md)
+- [Rollout plan and product readiness](docs/11-rollout.md) · [Team server](docs/10-team-server.md) · [Master plan](docs/00-master-plan.md) · [Foundation spec](docs/01-foundation.md) · [Connectors setup](docs/09-connectors.md) · [Skill library](docs/08-skills.md) · [Pricing & business](docs/pricing-and-business.md) · [Decision log](docs/decisions.md)
 
 ## What works today
 
@@ -13,9 +13,9 @@
 | Landing page (company profile) | ✅ `/` |
 | First-run setup wizard, email/password sign-in, invitations | ✅ |
 | Email (SMTP, from Admin → Settings → Email or `SMTP_URL`): emailed invitations, forgot-password links, security notices; admins can send a reset link from Users | ✅ |
-| Two-step sign-in with an authenticator app and backup codes; Settings → Security (change password, sign out other devices); admins can turn it off for someone who lost their phone | ✅ |
+| Two-step sign-in with an authenticator app and backup codes; Settings → Security (change password, the devices you're signed in on with sign-out for each); admins can turn it off for someone who lost their phone | ✅ |
 | Email confirmation links (banner and Settings → Security); admins see unconfirmed addresses | ✅ |
-| Admins can require two-step sign-in for everyone who uses a password (Admin → Authentication) | ✅ |
+| Admins can require two-step sign-in for everyone who uses a password, right away or after a grace period with reminders (Admin → Authentication) | ✅ |
 | Roles: org owner/admin, workspace admin, member | ✅ enforced in the API |
 | Workspaces (teams) with their own members, models and budget | ✅ |
 | Groups: models and a token budget for a set of people across all their workspaces; the group pays for models only it gives ([details](docs/01-foundation.md#61a-groups-built-2026-10-07)) | ✅ |
@@ -29,6 +29,7 @@
 | Projects with Work AI (Phase C): tasks and schedules in a project get its instructions, a copy of its sources and only the connectors it allows; results saved back as sources; tasks shared to the project read-only | ✅ |
 | Chat Phase B: edit & branch (versions), temporary chats, source labels (Confirmed/Assumption/TBD) and versions, Excel and OCR (images, scanned PDFs), export to Word/PDF/Markdown | ✅ |
 | Admin console: overview, users, workspaces, models, requests, usage (+CSV), audit log, settings/branding | ✅ |
+| Health: the database, disk, model servers, Work AI's queue, jobs, backups, isolation, license and email checked every 5 minutes; admins are told (in the app and by email) when something breaks and when it's fixed | ✅ |
 | Compliance recording notice, branding (name, accent color, logo on sign-in, app, emails and tab icon), dark/light themes | ✅ |
 | Docker images + Compose stack | ✅ |
 | Background jobs (document processing, housekeeping): inside the API on one server, or a Redis/Valkey queue with separate worker processes (retries, restart recovery, Admin status) | ✅ |
