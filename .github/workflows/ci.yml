@@ -84,7 +84,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: sudo python3 -m pip install -q --break-system-packages python-docx openpyxl
       - run: pnpm install --frozen-lockfile
-      - run: npm ci --prefix tests/e2e --no-audit --no-fund
+      - run: npm install --prefix tests/e2e --no-audit --no-fund
       - run: pnpm --filter @aatmiq/web build
       - name: Product suite (chat, documents, projects, admin, health…)
         run: sudo -E env "PATH=$PATH" tests/e2e/run-work.sh
