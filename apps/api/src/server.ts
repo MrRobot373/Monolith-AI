@@ -31,6 +31,11 @@ for (let attempt = 1; ; attempt++) {
 }
 const app = await buildApp(db, cfg, { logger: true, storage });
 app.log.info(`Files are stored in ${storage.describe()}`);
+// Tasks and IDEs run as their own Unix users here (as root); the image's entrypoint walls off private
+// networks for them (deploy/api/firewall.sh). Say so when that didn't happen.
+const firewall = process.env.AATMIQ_USER_FIREWALL;
+if (firewall && firewall !== "on" && process.getuid?.() === 0 && cfg.workIsolation !== "off")
+  app.log.warn("The user firewall is off: Work AI tasks and IDE terminals on this server can reach private networks (the database, model servers, your office network). See docs/10-team-server.md#security.");
 
 const shutdown = async () => {
   await app.close();

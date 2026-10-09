@@ -171,14 +171,16 @@ What protects what, and the limits:
 | **Per-task token** | Internal endpoints (models, approvals, search) only answer a running task | Random 256-bit token, valid while the runtime lives. |
 | **Approvals** | A person decides on risky steps | Fails closed: no answer, an error or a stopped task count as *no*. DSH's own approval policy is pinned to *ask* (D28). Requests expire after 24 hours. |
 | **Quotas and license** | Spending stays within allowances | Checked on every model call, so a long task stops when the allowance runs out. |
-| **Container per task** (container mode) | Network, CPU, memory and processes; the rest of the API container | See *Container mode* below. The per-task user and token still apply; the container replaces the command sandbox. |
+| **Container per task** (container mode; the team setup's default) | Network, CPU, memory and processes; the rest of the API container | See *Container mode* below. The per-task user and token still apply; the container replaces the command sandbox. |
+| **User firewall** (API image) | Private networks: the database, Valkey, model servers, the office network, cloud metadata | The image's entrypoint refuses private addresses to Unix users from id 100000 (tasks in process mode, IDEs); this machine and the public internet stay open. Needs `NET_ADMIN`; `USER_ALLOWED_NETWORKS` makes exceptions ([10-team-server.md](10-team-server.md#security)). |
 
 Limits, to know when deploying:
 
-- **Network**: in the default (process) mode, commands can reach the network the API container can
-  reach (the database still needs its password, internal endpoints need a task token). "Ask before
-  network use" is an approval rule, not a firewall. Container mode cuts tasks off from everything
-  but Aatmiq and, if allowed, the public internet through Aatmiq's proxy.
+- **Network**: in process mode, commands can reach the public internet directly; the API image's
+  user firewall refuses private addresses (without it, for example outside Docker, they reach
+  whatever the API can). "Ask before network use" is an approval rule, not a firewall. Container
+  mode cuts tasks off from everything but Aatmiq and, if allowed, the public internet through
+  Aatmiq's proxy.
 - **Reads**: a task can read world-readable system files (the OS, the app's code). Secrets are not
   world-readable.
 - **Resources**: per-task CPU, memory and process limits only in container mode; otherwise only the

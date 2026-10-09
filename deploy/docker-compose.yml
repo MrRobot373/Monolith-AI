@@ -40,6 +40,9 @@ x-app-env: &app-env
   IDE_URL: ${IDE_URL:-}
   # Job queue (Redis/Valkey). With it, background jobs run in the worker service (--profile worker).
   REDIS_URL: ${REDIS_URL:-}
+  # Internal networks Work AI tasks and IDEs may reach anyway (they're refused private addresses
+  # otherwise), e.g. an internal GitLab: 10.20.0.15/32, 192.168.40.0/24.
+  USER_ALLOWED_NETWORKS: ${USER_ALLOWED_NETWORKS:-}
   JOB_CONCURRENCY: ${JOB_CONCURRENCY:-2}
 
 services:
@@ -66,6 +69,9 @@ services:
       minio: { condition: service_started, required: false }
       valkey: { condition: service_healthy, required: false }
     environment: *app-env
+    # Lets the API wall off private networks for task and IDE users (deploy/api/firewall.sh); it only
+    # changes the API container's own network rules.
+    cap_add: [NET_ADMIN]
     volumes:
       - files:/data
     healthcheck:
@@ -107,7 +113,10 @@ services:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }
       minio: { condition: service_started, required: false }
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # The worker runs no one's commands or IDE.
+      USER_FIREWALL: "off"
     volumes:
       - files:/data
 
@@ -116,7 +125,15 @@ services:
     image: valkey/valkey:8-alpine
     profiles: ["worker"]
     restart: unless-stopped
-    command: ["valkey-server", "--appendonly", "yes"]
+    # A password, so nothing else on the network can read or change the job queue. REDIS_URL
+    # then carries it: redis://:<VALKEY_PASSWORD>@valkey:6379
+    command:
+      - sh
+      - -c
+      - '[ -n "$$VALKEY_PASSWORD" ] || { echo "valkey: set VALKEY_PASSWORD in .env (openssl rand -hex 24)"; exit 1; }; exec valkey-server --appendonly yes --requirepass "$$VALKEY_PASSWORD"'
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+      REDISCLI_AUTH: ${VALKEY_PASSWORD:-}
     volumes:
       - valkey:/data
     healthcheck:

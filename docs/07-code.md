@@ -70,7 +70,12 @@ added from the terminal (`~/.ssh`), since each person's home persists.
 
 - Isolation: each person's IDE, terminals and agent run as their own Unix user; homes are `0700`,
   the code root `0711`, documents and Work AI task folders are out of reach (needs the API to run as
-  root, as in the Docker image).
+  root, as in the Docker image). The IDE server listens on a socket in the person's home, so no one
+  else can connect to it.
+- Network: terminals reach the public internet (`npm install`, `git clone`) and this machine, but
+  the API image's user firewall refuses private addresses (the database, model servers, the office
+  network). An internal Git server is reachable once listed in `USER_ALLOWED_NETWORKS`
+  ([10-team-server.md](10-team-server.md#security)).
 - **Its own host (`IDE_URL`, recommended):** the IDE is served from another hostname, for example
   `https://ide.acme.com`, pointed at the same server as `APP_URL`. Opening a workspace returns a
   one-time link (2 minutes) on the IDE host; the IDE host trades it for its own cookie

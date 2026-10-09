@@ -29,8 +29,9 @@ ready come to about 13 GB. Check yours with `free -h` and `nproc`.
 ```
 
 All of it starts with `deploy/team.sh up -d --build`, which combines `docker-compose.yml` with
-`docker-compose.gpu.yml` (the models), `docker-compose.https.yml` (Caddy) and
-`docker-compose.backup.yml` (backups).
+`docker-compose.gpu.yml` (the models), `docker-compose.https.yml` (Caddy),
+`docker-compose.backup.yml` (backups) and `docker-compose.containers.yml` (each Work AI task in its
+own container; see [Security](#security)).
 
 ## The models
 
@@ -164,6 +165,31 @@ Models are registered in Aatmiq at first setup. After that, change them in **Adm
 
 If answers get slow when everyone is busy, lower *Tasks working at once* (6) before anything else;
 if the GPU is often idle while tasks wait, raise it (10–12).
+
+## Security
+
+What keeps people's work apart, and away from the server's own services:
+
+- **Work AI tasks run in containers** (`team.sh` adds `docker-compose.containers.yml`): each task
+  gets only its own folder, a read-only system, CPU and memory limits (Admin → Work AI →
+  Containers) and a network with nothing on it but Aatmiq. The internet, when allowed, goes through
+  Aatmiq's filtering proxy, which refuses private and internal addresses. The API needs the Docker
+  socket for this, which is root on the server: keep the server itself locked down.
+  `WORK_CONTAINERS=off` in `.env` runs tasks as plain processes instead (each as its own Unix user,
+  files confined), with the firewall below as their only network fence.
+- **A firewall for task and IDE users.** Each person's IDE (and, without containers, each task)
+  runs in the API container as its own Unix user. The API image's entrypoint walls off private
+  networks for those users (`deploy/api/firewall.sh`): they reach Aatmiq and the public internet
+  (`npm install`, `git clone` from GitHub) but not the database, the model servers, Valkey, your
+  office network or cloud metadata. It needs the `NET_ADMIN` capability, which
+  `docker-compose.yml` gives the API; if it's missing, the API logs a warning at start. To let
+  them reach an internal host anyway (an internal GitLab, say):
+  `USER_ALLOWED_NETWORKS=10.20.0.15/32, 192.168.40.0/24`.
+- **Secrets**: `APP_SECRET` encrypts provider keys, connector tokens and email passwords in the
+  database; keep it (and the backups, which hold the database) safe. Valkey, when you use the
+  worker profile, needs `VALKEY_PASSWORD`.
+- Tests: `tests/e2e/run-containers.sh` (task containers) and `tests/e2e/run-firewall.sh` (the
+  firewall).
 
 ## Backups
 

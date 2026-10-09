@@ -108,7 +108,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile oll
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile search up -d --build
 # uploads in a bundled MinIO instead of the files volume (set the S3_* values in .env first):
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile minio up -d --build
-# background jobs in a separate worker with Valkey (set REDIS_URL=redis://valkey:6379 in .env first):
+# background jobs in a separate worker with Valkey (set VALKEY_PASSWORD and REDIS_URL=redis://:<VALKEY_PASSWORD>@valkey:6379 in .env first):
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile worker up -d --build
 # each Work AI task in its own container (gives the API the Docker socket; see docs/06-work-ai.md):
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.containers.yml --env-file deploy/.env up -d --build

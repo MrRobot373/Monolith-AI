@@ -11,9 +11,14 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 # The small model runs unless VLLM_SMALL_URL is set to nothing in .env.
 small=(--profile small)
 grep -qE '^VLLM_SMALL_URL=\s*$' "$DIR/.env" && small=()
+# Each Work AI task in its own container (no network but Aatmiq's, limits, a read-only system),
+# unless WORK_CONTAINERS=off in .env.
+containers=(-f "$DIR/docker-compose.containers.yml")
+grep -qE '^WORK_CONTAINERS=\s*off\s*$' "$DIR/.env" && containers=()
 exec docker compose "${small[@]}" \
   -f "$DIR/docker-compose.yml" \
   -f "$DIR/docker-compose.gpu.yml" \
   -f "$DIR/docker-compose.https.yml" \
   -f "$DIR/docker-compose.backup.yml" \
+  "${containers[@]}" \
   --env-file "$DIR/.env" "$@"

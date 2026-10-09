@@ -44,7 +44,7 @@ FROM node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git jq less procps unzip zip file python3 python3-pip python3-venv openssh-client \
-      libnss-wrapper \
+      libnss-wrapper iptables \
       chromium fonts-liberation fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m pip install --no-cache-dir --break-system-packages \
@@ -65,6 +65,10 @@ ENV AATMIQ_DSH_CLI=/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
 # its own unprivileged Unix user (no access to documents or anyone else's folders).
 # See docs/06-work-ai.md and docs/07-code.md.
 RUN mkdir -p /data/files /data/work /data/code && chmod 700 /data/files && chmod 755 /data/work && chmod 711 /data/code
+# Those users reach this machine and the public internet, never private networks (the database,
+# Valkey, model servers, the office network, cloud metadata): deploy/api/firewall.sh, run at start.
+COPY deploy/api/firewall.sh deploy/api/entrypoint.sh /app/deploy/
 VOLUME /data
 EXPOSE 4000
+ENTRYPOINT ["/app/deploy/entrypoint.sh"]
 CMD ["node", "dist/server.js"]
