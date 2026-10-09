@@ -42,6 +42,7 @@ Retrieval is the same as for Documents: full-text search first, plus vectors whe
 | **Edit and branch** | Editing a message starts a new branch and keeps the old one. Regenerating adds another version of the answer. **‹ 1/2 ›** switches between versions, and the chat remembers the branch being shown (`chat.leaf_message_id`, `message.parent_id`). |
 | **Temporary chat** | Toggled on a new chat. It stays out of Recents, search and project memory, and is deleted 24 hours after its last message. **Keep chat** saves it. |
 | **Excel** | `.xlsx` and `.xlsm` files: every sheet is read, formula results included. Each sheet counts as one "page" in citations. |
+| **Text files** | Text, Markdown, CSV and code in UTF-8 or UTF-16 (what Windows Notepad and Excel save as "Unicode"), told apart by the byte-order mark or, without one, by the bytes themselves. Control characters are dropped. |
 | **OCR** | Images (PNG, JPEG, WebP, TIFF, BMP) and scanned PDF pages are read locally with Tesseract. The English model is bundled, so nothing is downloaded at runtime. `OCR_ENABLED=false` turns it off. |
 | **Export** | A whole chat (the branch being shown) or one answer can be downloaded as **Word** (.docx, built on the server) or **Markdown**. **PDF** uses a print view and the browser's "Save as PDF". |
 
