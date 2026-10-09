@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { completeChat, embed, listModels, mockEmbed, openAiBase, streamChat, testProvider, thinkingParams } from "./index";
+import { completeChat, embed, listModels, mockEmbed, modelInfo, openAiBase, streamChat, testProvider, thinkingParams } from "./index";
 
 let server: Server;
 let base = "";
@@ -10,6 +10,17 @@ const bodies: Record<string, unknown>[] = [];
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    // Ollama: a model trained for 262k tokens, loaded with 8k per request.
+    if (req.url === "/api/show") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ capabilities: ["completion", "tools", "thinking"], model_info: { "nemotron_h.context_length": 262144 } }));
+      return;
+    }
+    if (req.url === "/api/ps") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ models: [{ name: "nemotron-3-nano:4b", model: "nemotron-3-nano:4b", context_length: 8192 }] }));
+      return;
+    }
     if (req.url === "/v1/models") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ data: [{ id: "qwen-test" }] }));
@@ -85,6 +96,13 @@ describe("openai-compatible provider", () => {
     expect(bodies.at(-1)).not.toHaveProperty("chat_template_kwargs");
     expect(thinkingParams(ollama, true)).toEqual({ reasoning_effort: "high" });
     expect(thinkingParams({ type: "mock" }, true)).toEqual({});
+  });
+
+  it("reads an Ollama model's abilities, and the context its server gives each request", async () => {
+    const ollama = { type: "ollama" as const, baseUrl: base.replace(/\/v1$/, "") };
+    expect(await modelInfo(ollama, "nemotron-3-nano:4b")).toEqual({ vision: false, thinking: true, contextLength: 8192 });
+    // Not loaded: what it was trained for.
+    expect(await modelInfo(ollama, "qwen3:8b")).toEqual({ vision: false, thinking: true, contextLength: 262144 });
   });
 
   it("lists models and passes the health test", async () => {

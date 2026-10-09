@@ -58,6 +58,8 @@ createServer(async (req, res) => {
     const j = JSON.parse(body);
     if (Array.isArray(j.tools) && j.tools.length) return agentReply(j, res);
     const last = j.messages.at(-1).content;
+    // Auto's judge: one word.
+    if (j.messages[0]?.content?.startsWith("You rate how hard")) return sendText(res, j, /analy[sz]e|strategy/i.test(last) ? "hard" : "medium");
     const slow = last.includes("slow");
     const sys = j.messages.find((m) => m.role === "system")?.content ?? "";
     const src = /<sources>\n\[1\] ([^\n]+)\n([^\n]+)/.exec(sys);
@@ -230,4 +232,13 @@ async function fakeOAuthMcp(req, res) {
     return reply({});
   }
   res.writeHead(404); res.end();
+}
+
+/** A whole answer at once, as a stream. */
+function sendText(res, j, text) {
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  res.write(`data: ${JSON.stringify({ model: j.model, choices: [{ delta: { content: text } }] })}\n\n`);
+  res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
+  res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 120, completion_tokens: 1 } })}\n\n`);
+  res.end("data: [DONE]\n\n");
 }

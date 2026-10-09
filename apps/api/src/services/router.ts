@@ -43,8 +43,21 @@ export interface RuleInput {
 const SOCIAL =
   /^(hi+|hello+|hey+|namaste|namaskar|good (morning|afternoon|evening|night)|thanks?( you)?|thank you|thx|ty|ok(ay)?|k|cool|great|nice|bye|see you|yes|no|yep|nope|sure|got it|perfect|awesome|done|👍|🙏|😊)( (there|all|everyone|team|guys|sir|madam|ma'am|bro|buddy|so much|very much|a lot))?[\s!.,?🙂😊👍🙏]*$/i;
 const QUICK_ASK =
-  /^(please\s+|can you\s+|could you\s+|kindly\s+)?(translate|rephrase|reword|paraphrase|correct|proofread|fix (the |my |this )?(grammar|spelling|typos?)|spell-?check|shorten|make (it|this) (shorter|formal|more formal|polite|friendly|casual)|convert|define|what does .{1,40} mean|what is the (capital|meaning|full form|abbreviation|plural|opposite)|who (is|was)|when (is|was|did)|where is|how do (you|i) (say|spell|pronounce)|give me (a )?synonyms?)\b/i;
-const SUMMARY_ASK = /^(please\s+|can you\s+)?(summari[sz]e|tl;?dr|sum up)\b/i;
+  /^(please\s+|can you\s+|could you\s+|kindly\s+)?(translate|rephrase|reword|rewrite|paraphrase|correct|proofread|fix (the |my |this )?(grammar|spelling|typos?)|spell-?check|shorten|make (it|this|the|my)( \w+){0,3}? (sound )?(more |less )?(shorter|longer|formal|polite|friendly|casual|clearer|simpler|professional|positive)|convert|define|what does .{1,40} mean|what is the (capital|meaning|full form|abbreviation|plural|opposite|synonym)|who (is|was)|when (is|was|did)|where is|how do (you|i) (say|spell|pronounce)|give me (a |some )?synonyms?)\b/i;
+/** "Summarize: <the text>". Without the text it's a question in disguise ("summarize what makes a good…"). */
+const SUMMARY_ASK = /^(please\s+|can you\s+)?(summari[sz]e|tl;?dr|sum up)\b[^\n:]{0,40}[:\n]/i;
+const SHORT_WRITE = /\b(one[- ](line|sentence)|two[- ]lines?|(a |an )?(short|quick|brief) (note|message|reply|text|line|caption|thank[- ]you|wish)|thank[- ]you (note|message))\b/i;
+const SIMPLE_LIST = /^(please\s+)?(list|name|give me|suggest|tell me)\s+(\d+|a few|some|few|two|three|four|five|six|seven|eight|nine|ten)\b/i;
+const WRITE_DOC =
+  /\b(write|draft|prepare|compose|create|make)\b.{0,40}\b(e-?mail|mail|letter|application|memo|note|notice|announcement|description|post|agenda|minutes|report|proposal|summary|speech|invitation|message|faq|policy|sop|checklist|presentation|outline|cover letter|resume|cv)\b/i;
+const EXPLAIN = /^(please\s+|can you\s+)?(explain|describe|what (is|are) the differences?|how (does|do|can|should)|what should (i|we)|any tips|give me (some )?(tips|advice|ideas))\b/i;
+/** One of these is enough: the request needs careful, multi-step work. */
+const HARD_STRONG: [RegExp, string][] = [
+  [/\bdesign (a|an|the|our|my)\b.{0,60}\b(system|schema|database|architecture|network|pipeline|api|data model|workflow)\b/i, "a system to design"],
+  [/\b(plan|roadmap|strategy)\b.{0,80}\b(migrat\w*|rollout|roll out|launch|expansion|implementation|transition|restructur\w*)\b|\bmigrat(e|ion)\b.{0,60}\b(to|from|with)\b.{0,40}\b(downtime|staff|users|laptops|servers|cloud)\b/i, "a plan with many moving parts"],
+  [/\b(analy[sz]e|investigate|figure out|work out|find out)\b.{0,20}\b(why|how come|causes?|what caused)\b|\broot cause\b|\blikely causes\b/i, "finding the causes of a problem"],
+  [/\b(law|laws|legal(ly)?|statut\w+|liabilit\w+|penalt(y|ies)|indemn\w+|compliance|jurisdiction|notice period)\b/i, "a question with legal consequences"],
+];
 const HARD_WORDS = [
   /\bstep[- ]by[- ]step\b/i,
   /\bin[- ]depth\b|\bthorough(ly)?\b|\bcomprehensive\b/i,
@@ -57,7 +70,7 @@ const HARD_WORDS = [
   /\bprove\b|\bproof\b|\bderive\b|\btheorem\b/i,
   /\bevaluate\b|\bassess(ment)?\b|\bcritique\b|\breview (this|my|the|our)\b/i,
   /\bresearch\b|\bliterature\b/i,
-  /\blegal\b|\bcontract\b|\bclauses?\b|\bliability\b|\bcompliance\b|\bregulat(ion|ory)\b/i,
+  /\bcontract\b|\bclauses?\b|\bregulat(ion|ory)\b/i,
   /\bfinancial model\b|\bforecast(ing)?\b|\bvaluation\b|\bcash ?flow\b|\bbudget plan\b/i,
 ];
 const HARD_MATH = /\\(frac|int|sum|sqrt|lim)\b|[∫∑√∂]|\b(integral|derivative|differentiate|integrate|eigen\w*|matri(x|ces)|probability|statistically|regression|differential equation)\b/i;
@@ -65,6 +78,9 @@ const ARITHMETIC = /\d\s*[-+*/×÷^%]\s*\d|\b(calculate|compute|how much is|perc
 const CODE_BLOCK = /```|^\s*(def |class |function |import |from \S+ import|const |let |var |public |private |#include|SELECT |INSERT |UPDATE |CREATE TABLE|<\?php|package |fn |func )/im;
 const STACK_TRACE = /Traceback \(most recent call last\)|^\s+at [\w.$<>]+ ?\(.*:\d+(:\d+)?\)|\b\w+(Error|Exception): /m;
 const CODE_HARD = /\b(debug(ging)?|fix(es|ed)?|bugs?|errors?|crash(es|ed|ing)?|fails?|failed|failing|broken|optimi[sz](e|ing|ation)|refactor(ing)?|performance|slow|memory leak|race condition|architecture|review)\b/i;
+/** Asking for code (no code given). */
+const CODE_ASK = /\b(write|implement|build|code|create|generate)\b.{0,40}\b(function|program|script|class|algorithm|query|module|service|regex|api|macro|formula)\b/i;
+const CODE_DEPTH = /\b(algorithm|complexity|how fast|efficient(ly)?|optimal|shortest path|graph|tree|dynamic programming|recursi\w+|concurren\w+|thread\w*|distributed|scal(e|able|ing)|secure|security)\b/i;
 
 const RANK: Record<Difficulty, number> = { easy: 0, medium: 1, hard: 2 };
 const atLeast = (a: Difficulty, b: Difficulty): Difficulty => (RANK[a] >= RANK[b] ? a : b);
@@ -77,6 +93,7 @@ export function judgeByRules(input: RuleInput): { difficulty: Difficulty | null;
 
   let found: { difficulty: Difficulty | null; reason: string };
   const code = CODE_BLOCK.test(t) || STACK_TRACE.test(t);
+  const strong = HARD_STRONG.find(([r]) => r.test(t));
   const hardHits = HARD_WORDS.filter((r) => r.test(t)).length;
   const questions = (t.match(/\?/g) ?? []).length;
   const listItems = (t.match(/^\s*(\d+[.)]|[-*•])\s+\S/gm) ?? []).length;
@@ -91,14 +108,24 @@ export function judgeByRules(input: RuleInput): { difficulty: Difficulty | null;
         : { difficulty: "medium", reason: "a question about code" };
   } else if (HARD_MATH.test(t)) {
     found = { difficulty: "hard", reason: "math that needs careful working" };
+  } else if (strong && words >= 6) {
+    found = { difficulty: "hard", reason: strong[1] };
+  } else if (CODE_ASK.test(t)) {
+    found = CODE_DEPTH.test(t) || hardHits > 0 ? { difficulty: "hard", reason: "code that needs careful design" } : { difficulty: "medium", reason: "code to write" };
   } else if (hardHits + (questions >= 3 ? 1 : 0) + (listItems >= 4 ? 1 : 0) >= 2) {
     found = { difficulty: "hard", reason: "analysis or planning with several parts" };
   } else if (SUMMARY_ASK.test(t)) {
     found = t.length > 3000 ? { difficulty: "medium", reason: "a summary of a long text" } : { difficulty: "easy", reason: "a short summary" };
   } else if (QUICK_ASK.test(t) && t.length <= 800 && hardHits === 0) {
     found = { difficulty: "easy", reason: "a quick rewrite, translation or fact" };
-  } else if (hardHits === 1 && words >= 8) {
-    found = { difficulty: null, reason: "" };
+  } else if (SHORT_WRITE.test(t) && words <= 30 && hardHits === 0) {
+    found = { difficulty: "easy", reason: "a short message to write" };
+  } else if (SIMPLE_LIST.test(t) && words <= 20 && hardHits === 0) {
+    found = { difficulty: "easy", reason: "a simple list" };
+  } else if (WRITE_DOC.test(t) && hardHits === 0) {
+    found = { difficulty: "medium", reason: "everyday writing" };
+  } else if (EXPLAIN.test(t) && hardHits === 0) {
+    found = { difficulty: "medium", reason: "an explanation or advice" };
   } else if (ARITHMETIC.test(t)) {
     found = { difficulty: "medium", reason: "a calculation" };
   } else if (words <= 8 && hardHits === 0) {
@@ -124,18 +151,36 @@ export function judgeByRules(input: RuleInput): { difficulty: Difficulty | null;
 
 /* ───────────── The judge ───────────── */
 
+/**
+ * Measured on Nemotron 3 Nano 4B with office requests: definitions plus examples in the request's
+ * own format, the request in quotes. Without the quotes small models carry the request out
+ * ("Thank you, Priya…") instead of rating it; without examples they call nearly everything medium.
+ */
+const JUDGE_SHOTS: [string, Difficulty][] = [
+  ["Say thanks to Ravi for the files", "easy"],
+  ["Write an email asking the team to submit timesheets by Friday", "medium"],
+  ["Work out why customer complaints doubled this month and what to do about it", "hard"],
+  ["What is the capital of Japan?", "easy"],
+  ["Explain what a balance sheet shows", "medium"],
+  ["Choose between two suppliers for our packaging, weighing price, quality and delivery risk", "hard"],
+];
+const quoteRequest = (t: string) => `Request: "${t.replace(/\s+/g, " ")}"`;
 const JUDGE_PROMPT = [
-  "You sort requests sent to an AI assistant by how hard they are to answer well.",
-  "Reply with exactly one word: easy, medium or hard.",
-  "easy: greetings, short factual questions, simple rewrites, translations, spelling fixes, short summaries, simple lists.",
-  "medium: explanations, everyday emails and documents, summaries of long text, questions about documents, simple code, everyday reasoning.",
-  "hard: multi-step reasoning or math, complex or long code, debugging, system design, detailed analysis, plans and strategies, legal or financial analysis.",
+  "You rate how hard a request to an AI assistant is. You never answer or carry out the request.",
+  "Reply with one word: easy, medium or hard.",
+  "easy = a short reply anyone could write: greetings, one-line messages, simple facts, translations, short lists.",
+  "medium = normal office work: emails, letters, explanations, summaries, simple code.",
+  "hard = needs expert, careful, multi-step thinking: finding causes, plans with many parts, comparing options to recommend one, system design, legal or financial judgement, complex code or math.",
+  "",
+  "Examples:",
+  ...JUDGE_SHOTS.map(([q, a]) => `${quoteRequest(q)}\nDifficulty: ${a}\n`),
 ].join("\n");
 
-export const JUDGE_TIMEOUT_MS = 4000;
+/** How long the judge may take (AUTO_JUDGE_TIMEOUT_MS): well under a second on a GPU; raise it on CPU-only servers. */
+export const JUDGE_TIMEOUT_MS = Number(process.env.AUTO_JUDGE_TIMEOUT_MS) || 4000;
 
 /** Asks the judge model; null if it doesn't answer clearly in time. */
-export async function askJudge(provider: ProviderConfig, judge: { modelKey: string; thinkingSwitch: boolean }, text: string) {
+export async function askJudge(provider: ProviderConfig, judge: { modelKey: string; thinkingSwitch: boolean }, text: string, timeoutMs = JUDGE_TIMEOUT_MS) {
   const clipped = text.length > 2000 ? `${text.slice(0, 1500)}\n…\n${text.slice(-500)}` : text;
   try {
     const { text: answer, usage } = await completeChat(
@@ -143,11 +188,14 @@ export async function askJudge(provider: ProviderConfig, judge: { modelKey: stri
       judge.modelKey,
       [
         { role: "system", content: JUDGE_PROMPT },
-        { role: "user", content: `Request:\n<<<\n${clipped}\n>>>\nOne word (easy, medium or hard):` },
+        { role: "user", content: `${quoteRequest(clipped)}\nDifficulty:` },
       ],
-      { temperature: 0, maxTokens: 8, signal: AbortSignal.timeout(JUDGE_TIMEOUT_MS), ...(judge.thinkingSwitch && { thinking: false }) },
+      { temperature: 0, maxTokens: 8, signal: AbortSignal.timeout(timeoutMs), ...(judge.thinkingSwitch && { thinking: false }) },
     );
-    const word = /\b(easy|medium|hard)\b/i.exec(answer)?.[1]?.toLowerCase() as Difficulty | undefined;
+    // Only the first word counts: a model that answers the request instead ("Thank you…", "Hard work
+    // pays…") must not be read as a rating.
+    const first = answer.trim().replace(/^difficulty\s*:\s*/i, "").match(/^[a-z]+/i)?.[0]?.toLowerCase();
+    const word = first === "easy" || first === "medium" || first === "hard" ? (first as Difficulty) : undefined;
     return { difficulty: word ?? null, usage };
   } catch {
     return { difficulty: null, usage: null };

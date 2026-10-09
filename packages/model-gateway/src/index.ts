@@ -419,7 +419,14 @@ export async function modelInfo(cfg: ProviderConfig, key: string, signal?: Abort
     });
     if (!res.ok) return {};
     const json = (await res.json()) as { capabilities?: string[]; model_info?: Record<string, unknown> };
-    const ctx = Object.entries(json.model_info ?? {}).find(([k]) => k.endsWith(".context_length"))?.[1];
+    const trained = Object.entries(json.model_info ?? {}).find(([k]) => k.endsWith(".context_length"))?.[1];
+    // What the server actually gives a request (OLLAMA_CONTEXT_LENGTH), when the model is loaded;
+    // the model may have been trained for much more.
+    const ps = await fetchWithKeys(cfg, `${trimSlash(cfg.baseUrl).replace(/\/v1$/, "")}/api/ps`, { headers: headers(cfg), signal: signal ?? AbortSignal.timeout(8000) })
+      .then((r) => (r.ok ? (r.json() as Promise<{ models?: { name?: string; model?: string; context_length?: number }[] }>) : null))
+      .catch(() => null);
+    const served = ps?.models?.find((m) => m.name === key || m.model === key)?.context_length;
+    const ctx = typeof served === "number" && served > 0 ? (typeof trained === "number" && trained > 0 ? Math.min(served, trained) : served) : trained;
     return {
       ...(Array.isArray(json.capabilities) ? { vision: json.capabilities.includes("vision"), thinking: json.capabilities.includes("thinking") } : {}),
       ...(typeof ctx === "number" && ctx > 0 ? { contextLength: ctx } : {}),

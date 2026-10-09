@@ -27,6 +27,23 @@ describe("rules", () => {
       expect(level(t), t).toBe("easy");
   });
 
+  it("everyday writing and explanations are medium; one strong sign is enough for hard", () => {
+    expect(level("Write an email to the team about the new expense process starting next month")).toBe("medium");
+    expect(level("Draft a leave application for three days for my sister's wedding")).toBe("medium");
+    expect(level("Explain the difference between GST and income tax in simple terms")).toBe("medium");
+    expect(level("Write a one-line thank you note to Priya for the birthday cake")).toBe("easy");
+    expect(level("Make this sentence sound more polite: send me the file now")).toBe("easy");
+    expect(level("List five fruits that are rich in vitamin C")).toBe("easy");
+    expect(level("Can you analyze why our sales dropped in the north region last quarter?")).toBe("hard");
+    expect(level("Design a database schema for a hospital appointment system with doctors, patients, rooms and billing")).toBe("hard");
+    expect(level("Plan the migration of 200 Windows laptops to a new domain with minimal downtime for staff")).toBe("hard");
+    expect(level("Draft a letter ending our contract with a vendor, considering notice periods and penalties under Indian law")).toBe("hard");
+    expect(level("Write a Python function that finds the shortest path in a weighted graph and explain how fast it is")).toBe("hard");
+    expect(level("Write a Python script that renames the files in a folder by date")).toBe("medium");
+    // Summarizing what you paste is quick; "summarize the key points of…" asks for knowledge.
+    expect(level("Summarize the key points of a good customer service call")).not.toBe("easy");
+  });
+
   it("hard: code to debug, math, and analysis with several parts", () => {
     const trace = "Why does this fail?\n```python\ndef total(xs):\n    return sum(x.price for x in xs)\n```\nTraceback (most recent call last):\n  File \"app.py\", line 3\nAttributeError: 'dict' object has no attribute 'price'";
     expect(level(trace)).toBe("hard");
@@ -45,8 +62,8 @@ describe("rules", () => {
   });
 
   it("unclear requests are left to the judge; short follow-ups keep the conversation's level", () => {
-    expect(level("Write an email to the team about the new expense process starting next month")).toBeNull();
-    expect(level("Can you analyze why our sales dropped in the north region last quarter?")).toBeNull();
+    expect(level("What do you think about the board's view on our numbers this quarter")).toBeNull();
+    expect(level("Help me with the weekly update for the operations team")).toBeNull();
     expect(level("And in Python?", { follows: "hard" })).toBe("hard");
     expect(judgeByRules({ text: "and for Pune?", follows: "medium" }).reason).toBe("a follow-up in this conversation");
     expect(level("thanks!", { follows: "hard" })).toBe("easy");
@@ -114,7 +131,7 @@ describe("rules", () => {
         if (req.url === "/v1/models") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [] }));
         const body = JSON.parse(raw || "{}");
         const system = body.messages?.[0]?.content ?? "";
-        const judge = system.startsWith("You sort requests");
+        const judge = system.startsWith("You rate how hard");
         seen.push({ model: body.model, body, judge });
         const last = body.messages?.at(-1)?.content ?? "";
         let answer = `${body.model} answers`;
@@ -213,7 +230,7 @@ describe("rules", () => {
 
   it("asks the judge when the rules can't tell; a slow or vague judge means medium", async () => {
     const chatId = await newChat("auto");
-    const hard = await ask(chatId, "JUDGE-HARD Please write the quarterly note for the board about our numbers");
+    const hard = await ask(chatId, "JUDGE-HARD What do you think about the board's view on our numbers this quarter");
     expect(hard.judged).toBe(true);
     expect(hard.sent.model).toBe("super-120b");
     expect(hard.start.routing).toMatchObject({ difficulty: "hard", by: "judge", reason: "judged hard by nano-4b" });
@@ -222,13 +239,13 @@ describe("rules", () => {
     expect(judgeCall.model).toBe("nano-4b");
     expect(judgeCall.body).toMatchObject({ temperature: 0, max_tokens: 8, chat_template_kwargs: { enable_thinking: false } });
 
-    const easy = await ask(await newChat("auto"), "JUDGE-EASY Please write a two line note to the team about the lunch order today");
+    const easy = await ask(await newChat("auto"), "JUDGE-EASY Help me with the lunch order for the team today please");
     expect(easy.start.routing).toMatchObject({ difficulty: "easy", by: "judge" });
-    const vague = await ask(await newChat("auto"), "JUDGE-VAGUE Please write the weekly update for the operations team about the warehouse");
+    const vague = await ask(await newChat("auto"), "JUDGE-VAGUE Help me with the weekly update for the operations team");
     expect(vague.start.routing).toMatchObject({ difficulty: "medium", by: "rules", reason: "an everyday request" });
     expect(vague.sent.model).toBe("nano-30b");
     const started = Date.now();
-    const slow = await ask(await newChat("auto"), "JUDGE-SLOW Please write the weekly update for the finance team about the audit");
+    const slow = await ask(await newChat("auto"), "JUDGE-SLOW Help me with the weekly update for the finance team");
     expect(Date.now() - started).toBeLessThan(5500);
     expect(slow.start.routing).toMatchObject({ difficulty: "medium" });
     // The judge's tokens are counted, as every model call is.
@@ -238,7 +255,7 @@ describe("rules", () => {
 
   it("rules only: no judge call; with the judge off, unclear means medium", async () => {
     await call("PUT", "/api/admin/routing", { judge: "rules" });
-    const r = await ask(await newChat("auto"), "JUDGE-HARD Please write the quarterly note for the board about our numbers");
+    const r = await ask(await newChat("auto"), "JUDGE-HARD What do you think about the board's view on our numbers this quarter");
     expect(r.judged).toBe(false);
     expect(r.start.routing).toMatchObject({ difficulty: "medium", by: "rules" });
     await call("PUT", "/api/admin/routing", { judge: "model" });
@@ -301,4 +318,102 @@ describe("rules", () => {
     expect((await call("PUT", "/api/admin/routing", { judgeModelId: "nope" })).status).toBe(400);
     await call("PUT", "/api/admin/routing", { enabled: true, default: true });
   });
+});
+
+/**
+ * With a real model on Ollama (opt-in): OLLAMA_TEST_URL=http://localhost:11434
+ * OLLAMA_TEST_MODEL=nemotron-3-nano:4b. Checks what Ollama reports for it, thinking off for quick
+ * answers and on for hard ones, and a real judgement. On a CPU-only machine also set
+ * AUTO_JUDGE_TIMEOUT_MS=60000.
+ */
+const ollamaUrl = process.env.OLLAMA_TEST_URL;
+(url && ollamaUrl ? describe : describe.skip)("Auto with a real model on Ollama", () => {
+  const key = process.env.OLLAMA_TEST_MODEL ?? "nemotron-3-nano:4b";
+  let app: FastifyInstance;
+  let db: DB;
+  let close: () => Promise<void>;
+  let workspaceId = "";
+  const owner = { cookie: "" };
+  const ids: Record<string, string> = {};
+  async function call(method: "GET" | "POST" | "PUT", path: string, body?: unknown) {
+    const res = await app.inject({
+      method,
+      url: path,
+      headers: { origin: APP_URL, ...(owner.cookie ? { cookie: owner.cookie } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+      payload: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const set = res.headers["set-cookie"];
+    if (set) owner.cookie = (Array.isArray(set) ? set : [set]).map((c) => c.split(";")[0]).join("; ");
+    let json: any = null;
+    try {
+      json = res.json();
+    } catch {}
+    return { status: res.statusCode, json, body: res.body };
+  }
+  const startOf = (body: string) => JSON.parse(body.split("event: start\ndata: ")[1]!.split("\n")[0]!);
+  const answerOf = (body: string) =>
+    body
+      .split("event: delta\ndata: ")
+      .slice(1)
+      .map((p) => JSON.parse(p.split("\n")[0]!).text as string)
+      .join("");
+
+  beforeAll(async () => {
+    ({ db, close } = createDb(url!));
+    await db.execute(sql`
+      do $$ declare r record; begin
+        for r in (select tablename from pg_tables where schemaname = 'public' and tablename not like '__drizzle%') loop
+          execute 'truncate table "' || r.tablename || '" cascade';
+        end loop;
+      end $$;`);
+    app = await buildApp(db, {
+      appUrl: APP_URL,
+      databaseUrl: url!,
+      secret: "test-secret-test-secret-test-secret-1234",
+      allowMockProvider: false,
+      port: 0,
+      storageDir: await mkdtemp(join(tmpdir(), "aatmiq-ollama-files-")),
+      workDir: await mkdtemp(join(tmpdir(), "aatmiq-ollama-work-")),
+    });
+    await call("POST", "/api/setup", { orgName: "Acme", name: "Asha Owner", email: "owner@acme.test", password: "correct-horse-battery" });
+    workspaceId = (await call("GET", "/api/me")).json.workspaces[0].id;
+    // The same model twice, as the fast and the standard tier (two providers, same server).
+    for (const [name, tier] of [["Fast", "fast"], ["Standard", "standard"]] as const) {
+      const p = await call("POST", "/api/admin/providers", { name: `Ollama ${name}`, type: "ollama", baseUrl: ollamaUrl });
+      ids[tier] = (await call("POST", "/api/admin/models", { providerId: p.json.id, modelKey: key, displayName: `${key} (${tier})`, tier })).json.id;
+    }
+    await call("PUT", `/api/admin/workspaces/${workspaceId}/models`, { modelIds: Object.values(ids), defaultModelId: ids.standard });
+  }, 120_000);
+  afterAll(async () => {
+    await app?.close();
+    await close?.();
+  });
+
+  it("detects the model's thinking switch and the context Ollama serves", async () => {
+    const m = ((await call("GET", "/api/admin/models")).json as { id: string; thinkingSwitch: boolean; contextLength: number }[]).find((x) => x.id === ids.fast)!;
+    expect(m.thinkingSwitch).toBe(true);
+    expect(m.contextLength).toBeGreaterThan(0);
+  });
+
+  it("answers a greeting with the fast model and no thinking; a hard request thinks first", async () => {
+    const chat = (await call("POST", "/api/chats", { workspaceId, modelId: "auto" })).json.id;
+    const quick = await call("POST", `/api/chats/${chat}/messages`, { content: "hi there" });
+    expect(startOf(quick.body)).toMatchObject({ model: { id: ids.fast }, routing: { tier: "fast", thinking: false } });
+    expect(quick.body).not.toContain("event: thinking");
+    expect(answerOf(quick.body).trim().length).toBeGreaterThan(0);
+
+    const hard = await call("POST", `/api/chats/${await (await call("POST", "/api/chats", { workspaceId, modelId: "auto" })).json.id}/messages`, {
+      content: "Prove that there are infinitely many prime numbers.",
+    });
+    expect(startOf(hard.body)).toMatchObject({ model: { id: ids.standard }, routing: { difficulty: "hard", thinking: true } });
+    expect(hard.body).toContain("event: thinking");
+    expect(answerOf(hard.body).trim().length).toBeGreaterThan(0);
+  }, 600_000);
+
+  it("the real judge rates a request the rules leave open", async () => {
+    const r = await call("POST", "/api/admin/routing/try", { workspaceId, text: "Our website gets 5,000 visitors a day but only 20 enquiries; what is wrong and what should we fix first" });
+    expect(r.json.routing.by).toBe("judge");
+    expect(["easy", "medium", "hard"]).toContain(r.json.routing.difficulty);
+    console.log(`judge: ${r.json.routing.difficulty} in ${r.json.ms} ms`);
+  }, 120_000);
 });

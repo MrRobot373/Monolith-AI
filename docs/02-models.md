@@ -54,6 +54,30 @@ Two more rules keep it steady:
 - Work AI and Code start at the standard tier: agents need reliable tool use, which small models
   don't have. A task keeps the model (and thinking) Auto chose when it started.
 
+### How well it works
+
+Measured with Nemotron 3 Nano 4B on Ollama as the judge, on 24 office requests written after the
+rules were tuned (8 easy, 8 medium, 8 hard):
+
+| | Result |
+|---|---|
+| Right overall | 21 of 24 |
+| Hard requests sent to the strong model | 8 of 8 (5 of them recognized by the judge) |
+| Judge right when asked | 11 of 13 |
+| Misses | 2 easy requests judged medium (answered by the standard model: slower, not worse), 1 rules mistake since fixed |
+| Judge time | about 6 s on 4 CPU cores; on a GPU a few tens of milliseconds |
+
+What made the judge work: examples in the prompt (without them a 4B model calls nearly everything
+medium) and the request in quotes with "you never answer the request" (without that it sometimes
+writes the answer instead of the rating). Only the first word of its reply counts.
+
+`router.test.ts` repeats the end-to-end part against any Ollama server:
+`OLLAMA_TEST_URL=http://localhost:11434 OLLAMA_TEST_MODEL=nemotron-3-nano:4b pnpm --filter @aatmiq/api test router`
+(with `TEST_DATABASE_URL`). Run it once on the GPU server after setup.
+
+On a server **without a GPU** the judge needs several seconds: choose *Rules only*, or allow it
+more time with `AUTO_JUDGE_TIMEOUT_MS` (default 4000).
+
 ### Why not a separate classifier model?
 
 A small classifier (Qwen3 0.6B, for example) was the other option. Most requests never need a model:

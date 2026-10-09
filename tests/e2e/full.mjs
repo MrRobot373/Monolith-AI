@@ -327,6 +327,53 @@ await step("Chat", "Stop button halts a long reply and keeps partial text", owne
   expect(text.includes("word1") && !text.includes("word199"), `not partial: ${text.slice(-40)}`);
 });
 
+/* ═════════════ D1b. Auto: the model picked per message ═════════════ */
+await step("Auto", "Admin puts models in tiers; Auto shows them and tries a message", owner, async () => {
+  await owner.goto(`${BASE}/admin/models`);
+  const tier = async (name, value) => {
+    await owner.locator("tbody tr", { hasText: name }).getByTestId("model-tier").selectOption(value);
+    await wait(500);
+  };
+  await tier("Qwen3 8B", "fast");
+  await tier("Deepseek V4 32B", "advanced");
+  await owner.getByTestId("tier-fast").filter({ hasText: "Qwen3 8B" }).waitFor();
+  await owner.getByTestId("tier-advanced").filter({ hasText: "Deepseek V4 32B" }).waitFor();
+  await owner.getByTestId("auto-try-input").fill("Design a database schema for a hospital appointment system with doctors and billing");
+  await owner.getByRole("button", { name: "Try" }).click();
+  await owner.getByTestId("auto-try-result").filter({ hasText: "Deepseek V4 32B (advanced): a system to design" }).waitFor();
+  await owner.getByTestId("auto-try-input").fill("thanks!");
+  await owner.getByRole("button", { name: "Try" }).click();
+  await owner.getByTestId("auto-try-result").filter({ hasText: "Qwen3 8B (fast): a greeting or a thank-you" }).waitFor();
+  await owner.screenshot({ path: `${OUT}auto-admin.png` });
+});
+await step("Auto", "Chat starts on Auto: a greeting gets the fast model, a design question the advanced one", owner, async () => {
+  await owner.goto(`${BASE}/app/chat`);
+  await owner.locator("form button", { hasText: "Auto" }).waitFor();
+  await send(owner, "hi there");
+  await owner.locator(".prose-chat", { hasText: "qwen3:8b" }).waitFor();
+  await owner.locator('[data-testid="routed"][data-tier="fast"]').waitFor();
+  await send(owner, "Design a database schema for a hospital appointment system with doctors and billing");
+  await owner.locator(".prose-chat", { hasText: "deepseek-v4:32b" }).waitFor();
+  await owner.locator('[data-testid="routed"][data-tier="advanced"]').waitFor();
+  await owner.locator('[data-testid="routed"][data-tier="advanced"]').hover();
+  await owner.getByText(/Auto picked Deepseek V4 32B: a system to design/).first().waitFor();
+  await owner.screenshot({ path: `${OUT}auto-chat.png` });
+  // Reopened, the chat is still on Auto and remembers each answer's pick.
+  await owner.reload();
+  await owner.locator("form button", { hasText: "Auto" }).waitFor();
+  expect((await owner.getByTestId("routed").count()) === 2, `routed chips: ${await owner.getByTestId("routed").count()}`);
+});
+await step("Auto", "Turned off, chats start with the workspace default again", owner, async () => {
+  await owner.goto(`${BASE}/admin/models`);
+  await owner.getByRole("switch", { name: "Offer Auto" }).click();
+  await wait(600);
+  await owner.goto(`${BASE}/app/chat`);
+  await owner.locator("form button", { hasText: "Qwen3 8B" }).waitFor();
+  await owner.locator("form button", { hasText: "Qwen3 8B" }).click();
+  expect((await owner.getByRole("menuitem", { name: /^Auto/ }).count()) === 0, "Auto still offered");
+  await owner.keyboard.press("Escape");
+});
+
 /* ═════════════ D2. Documents ═════════════ */
 const fixture = (n) => new URL(`../../apps/api/test/fixtures/${n}`, import.meta.url).pathname;
 const docRow = (page, name) => page.locator("div.group", { hasText: name }).first();

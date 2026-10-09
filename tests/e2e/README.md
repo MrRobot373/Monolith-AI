@@ -1,6 +1,6 @@
 # Browser end-to-end suite
 
-115 checks that drive the real app in Chromium: setup, chat, projects, message versions,
+118 checks that drive the real app in Chromium: setup, chat, Auto model choice, projects, message versions,
 temporary chats, documents (Excel, OCR), export, models, workspaces, invites, roles, quotas
 and token requests, workspace admins, user management, groups, settings (with the logo), audit, health,
 usage, sign-in flows and mobile layout.
