@@ -536,6 +536,26 @@ d("Projects", () => {
     expect((await call(other, "PATCH", `/api/chats/${firstChat}`, { title: "mine now" })).status).toBe(404);
   });
 
+  it("remembers the project's Work AI tasks too: your own and shared ones", async () => {
+    const miraId = (await call(member, "GET", "/api/me")).json.user.id;
+    const task = async (userId: string, title: string, result: string, shared: boolean) =>
+      ((await db.execute(sql`insert into work_task (workspace_id, user_id, project_id, title, status, result, shared_to_project) values (${workspaceId}, ${userId}, ${projectId}, ${title}, 'completed', ${result}, ${shared}) returning id`)) as unknown as { id: string }[])[0]!.id;
+    const own = await task(miraId, "Find the venue deposit", "The venue deposit is 4500 euros, due on 1 March.", false);
+    await task(otherId, "Quokka notes", "Private: the quokka budget is 777 coins.", false);
+    const shared = await task(otherId, "Quokka permit", "Shared: the quokka permit costs 120 coins.", true);
+
+    const c = await call(member, "POST", "/api/chats", { workspaceId, projectId });
+    const r = await call(member, "POST", `/api/chats/${c.json.id}/messages`, { content: "How much is the venue deposit?" });
+    const cite = startOf(r.body).citations.find((x: { kind: string }) => x.kind === "task");
+    expect(cite).toMatchObject({ taskId: own, name: "Find the venue deposit" });
+    expect(cite.snippet).toContain("4500 euros");
+
+    // A colleague's task only once it's shared to the project.
+    const q = await call(member, "POST", `/api/chats/${c.json.id}/messages`, { content: "What does the quokka permit cost?" });
+    expect(startOf(q.body).citations.filter((x: { kind: string }) => x.kind === "task").map((x: { taskId: string }) => x.taskId)).toEqual([shared]);
+    expect(q.body).not.toContain("777");
+  });
+
   it("gives linked library documents to project members", async () => {
     const { body, contentType } = multipart({ workspaceId, scope: "private" }, { name: "floorplan.txt", content: "Desks are on floor 12." });
     const up = await app.inject({ method: "POST", url: "/api/documents", headers: { origin: APP_URL, cookie: member.cookie, "content-type": contentType }, payload: body });

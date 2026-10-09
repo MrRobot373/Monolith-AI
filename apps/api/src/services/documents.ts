@@ -20,6 +20,7 @@ import {
   sql,
   usageEvent,
   workspace,
+  workTask,
   type Citation,
   type DB,
 } from "@aatmiq/db";
@@ -153,14 +154,17 @@ export function accessibleDocs(workspaceId: string, userId: string) {
 }
 
 export interface Recollection {
-  chatId: string;
+  kind: "chat" | "task";
+  /** The chat's id, or the Work AI task's. */
+  id: string;
   title: string;
   content: string;
 }
 
 /**
- * Project-only memory: relevant messages from the user's other chats in the same project
- * (plus chats teammates shared to it). Never looks outside the project.
+ * Project-only memory: relevant messages from the user's other chats in the same project, and the
+ * results of their Work AI tasks there (plus chats and tasks teammates shared to it). Never looks
+ * outside the project.
  */
 export async function recallProjectChats(
   db: DB,
@@ -187,10 +191,27 @@ export async function recallProjectChats(
     .orderBy(sql`ts_rank_cd(to_tsvector('simple', ${message.content}), ${tsq}) desc`)
     .limit((opts.k ?? 3) * 2);
   const seen = new Set<string>();
-  return rows
+  const chats = rows
     .filter((r) => (seen.has(r.chatId) ? false : (seen.add(r.chatId), true)))
     .slice(0, opts.k ?? 3)
-    .map((r) => ({ ...r, content: r.content.slice(0, 900) }));
+    .map((r): Recollection => ({ kind: "chat", id: r.chatId, title: r.title, content: r.content.slice(0, 900) }));
+  // Finished Work AI tasks: what was asked (the title) and what came of it.
+  const text = sql`coalesce(${workTask.title}, '') || ' ' || coalesce(${workTask.result}, '')`;
+  const tasks = await db
+    .select({ id: workTask.id, title: workTask.title, result: workTask.result })
+    .from(workTask)
+    .where(
+      and(
+        eq(workTask.projectId, opts.projectId),
+        eq(workTask.status, "completed"),
+        sql`${workTask.result} is not null`,
+        or(eq(workTask.userId, opts.userId), eq(workTask.sharedToProject, true)),
+        sql`to_tsvector('simple', ${text}) @@ ${tsq}`,
+      ),
+    )
+    .orderBy(sql`ts_rank_cd(to_tsvector('simple', ${text}), ${tsq}) desc`)
+    .limit(2);
+  return [...chats, ...tasks.map((t): Recollection => ({ kind: "task", id: t.id, title: t.title, content: (t.result ?? "").slice(0, 900) }))];
 }
 
 const STOPWORDS = new Set(
@@ -328,7 +349,7 @@ function dedupeOverlap(chunks: RetrievedChunk[]): RetrievedChunk[] {
   });
 }
 
-/** Number sources for the model and for the UI: document excerpts first, then earlier project chats. */
+/** Number sources for the model and for the UI: document excerpts first, then earlier project chats and tasks. */
 export function buildContext(chunks: RetrievedChunk[], recollections: Recollection[] = []): { system: string; citations: Citation[] } {
   if (chunks.length === 0 && recollections.length === 0) return { system: "", citations: [] };
   const citations: Citation[] = [
@@ -343,9 +364,9 @@ export function buildContext(chunks: RetrievedChunk[], recollections: Recollecti
     })),
     ...recollections.map((r, i) => ({
       n: chunks.length + i + 1,
-      kind: "chat" as const,
+      kind: r.kind,
       documentId: null,
-      chatId: r.chatId,
+      ...(r.kind === "chat" ? { chatId: r.id } : { taskId: r.id }),
       name: r.title,
       page: null,
       snippet: r.content.slice(0, 700),
@@ -353,10 +374,10 @@ export function buildContext(chunks: RetrievedChunk[], recollections: Recollecti
   ];
   const blocks = [
     ...chunks.map((c, i) => `[${i + 1}] ${c.name}${c.page ? `, page ${c.page}` : ""}${c.label ? ` (${LABEL_TEXT[c.label]})` : ""}\n${c.content}`),
-    ...recollections.map((r, i) => `[${chunks.length + i + 1}] Earlier chat in this project: "${r.title}"\n${r.content}`),
+    ...recollections.map((r, i) => `[${chunks.length + i + 1}] ${r.kind === "chat" ? "Earlier chat" : "Earlier Work AI task"} in this project: "${r.title}"\n${r.content}`),
   ].join("\n\n---\n\n");
   const system = [
-    "Relevant sources are below, numbered: excerpts from documents and, where marked, from earlier chats in this project.",
+    "Relevant sources are below, numbered: excerpts from documents and, where marked, from earlier chats and Work AI tasks in this project.",
     "Answer using these excerpts. Cite sources inline with their number in square brackets, like [1] or [2][3], right after the claim they support.",
     "If the excerpts don't contain the answer, say so plainly instead of guessing.",
     ...(chunks.some((c) => c.label === "assumption" || c.label === "tbd")

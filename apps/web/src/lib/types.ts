@@ -224,9 +224,10 @@ export interface DocumentRow {
 
 export interface Citation {
   n: number;
-  kind?: "document" | "chat";
+  kind?: "document" | "chat" | "task";
   documentId: string | null;
   chatId?: string;
+  taskId?: string;
   name: string;
   page: number | null;
   snippet: string;

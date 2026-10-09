@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileText, MessageSquare } from "lucide-react";
+import { Download, FileText, MessageSquare, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { FileIcon } from "@/components/documents/use-documents";
@@ -68,7 +68,13 @@ export function SourcesRow({ citations, onOpen }: { citations: Citation[]; onOpe
             className="inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-[12.5px] text-fg-muted transition-colors hover:border-border-strong hover:text-fg"
           >
             <span className="text-[11px] text-fg-subtle">{c.n}</span>
-            {c.kind === "chat" ? <MessageSquare className="size-3.5 shrink-0 text-fg-subtle" /> : <FileIcon name={c.name} className="size-3.5" />}
+            {c.kind === "chat" ? (
+              <MessageSquare className="size-3.5 shrink-0 text-fg-subtle" />
+            ) : c.kind === "task" ? (
+              <Workflow className="size-3.5 shrink-0 text-fg-subtle" />
+            ) : (
+              <FileIcon name={c.name} className="size-3.5" />
+            )}
             <span className="truncate">{c.name}</span>
             {c.page && <span className="shrink-0 text-fg-subtle">p.{c.page}</span>}
             <LabelBadge label={c.label} />
@@ -88,19 +94,37 @@ export function useSourceDialog() {
       className="max-w-xl"
       title={
         <span className="flex items-center gap-2">
-          {open?.kind === "chat" ? <MessageSquare className="size-4 text-fg-subtle" /> : <FileText className="size-4 text-fg-subtle" />}
+          {open?.kind === "chat" ? (
+            <MessageSquare className="size-4 text-fg-subtle" />
+          ) : open?.kind === "task" ? (
+            <Workflow className="size-4 text-fg-subtle" />
+          ) : (
+            <FileText className="size-4 text-fg-subtle" />
+          )}
           {open?.name}
           <LabelBadge label={open?.label} />
         </span>
       }
       description={
-        open ? (open.kind === "chat" ? `Source ${open.n} · earlier chat in this project` : `Source ${open.n}${open.page ? ` · page ${open.page}` : ""}`) : undefined
+        open
+          ? open.kind === "chat"
+            ? `Source ${open.n} · earlier chat in this project`
+            : open.kind === "task"
+              ? `Source ${open.n} · Work AI task in this project`
+              : `Source ${open.n}${open.page ? ` · page ${open.page}` : ""}`
+          : undefined
       }
       footer={
         open?.kind === "chat" ? (
           <Button variant="outline" asChild>
             <Link href={`/app/chat/${open.chatId}`} onClick={() => setOpen(null)}>
               <MessageSquare className="size-3.5" /> Open chat
+            </Link>
+          </Button>
+        ) : open?.kind === "task" ? (
+          <Button variant="outline" asChild>
+            <Link href={`/app/work/${open.taskId}`} onClick={() => setOpen(null)}>
+              <Workflow className="size-3.5" /> Open task
             </Link>
           </Button>
         ) : (

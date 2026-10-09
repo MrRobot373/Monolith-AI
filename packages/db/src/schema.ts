@@ -518,10 +518,11 @@ export const auditLog = pgTable(
 
 export interface Citation {
   n: number;
-  /** "document" sources come from files/notes; "chat" sources are earlier chats in the same project. */
-  kind?: "document" | "chat";
+  /** "document" sources come from files/notes; "chat" and "task" ones are earlier chats and Work AI tasks in the same project. */
+  kind?: "document" | "chat" | "task";
   documentId: string | null;
   chatId?: string;
+  taskId?: string;
   name: string;
   page: number | null;
   snippet: string;
