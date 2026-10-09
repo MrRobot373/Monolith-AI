@@ -34,6 +34,8 @@ export interface Config {
    * a reverse proxy (Caddy) before it. Anything further left in the header is the client's own claim.
    */
   trustProxyHops?: number;
+  /** Minutes between health checks that alert admins (Admin → Health); 0 or unset: none. */
+  healthIntervalMinutes?: number;
   /** Aatmiq Code homes (one per person). */
   codeDir?: string;
   /**
@@ -87,6 +89,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workContainer: loadWorkContainer(env),
     egressPort: Number(env.EGRESS_PORT ?? (env.WORK_ISOLATION === "container" ? 3128 : 0)),
     trustProxyHops: Math.max(0, Math.min(5, Number(env.TRUST_PROXY_HOPS ?? 1) || 0)),
+    healthIntervalMinutes: Math.max(0, Number(env.HEALTH_CHECK_MINUTES ?? 5) || 0),
     codeDir: env.CODE_DIR ?? ".data/code",
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
     ideUrl: loadIdeUrl(env.IDE_URL, env.APP_URL ?? "http://localhost:3000"),

@@ -34,6 +34,7 @@ import type { Connectors } from "./services/connectors";
 import type { Mailer } from "./services/mail";
 import type { Jobs } from "./services/jobs";
 import type { BrowserService } from "./services/browser";
+import type { HealthMonitor } from "./services/health";
 import { badRequest, forbidden, HttpError, notFound, unauthorized } from "./errors";
 
 export interface AppContext {
@@ -49,6 +50,7 @@ export interface AppContext {
   mail: Mailer;
   jobs: Jobs;
   browser: BrowserService;
+  health: HealthMonitor;
 }
 
 export interface SessionUser {

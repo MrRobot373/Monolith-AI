@@ -1087,6 +1087,15 @@ await step("Overview", "Overview shows stats, chart and provider health", owner,
   await owner.getByText("Ollama").first().waitFor();
 });
 
+await step("Health", "Health shows every area; a test alert reaches the bell", owner, async () => {
+  await owner.goto(`${BASE}/admin/health`);
+  await owner.getByTestId("health-summary").waitFor();
+  for (const area of ["models", "database", "disk", "backups", "work-ai", "background-jobs", "security", "license", "email"]) await owner.getByTestId(`health-${area}`).waitFor({ timeout: 10000 });
+  expect((await owner.getByTestId("health-models").textContent()).includes("answering"), "the model server answers");
+  await owner.getByTestId("health-test-alert").click();
+  await toast(owner, "Test alert sent");
+});
+
 /* ═════════════ O. Sign-in flows ═════════════ */
 await step("Auth", "Sign out returns to sign-in", owner, async () => {
   await owner.goto(`${BASE}/app/chat`);
@@ -1125,7 +1134,7 @@ await step("Mobile", "Chat on mobile: sidebar opens as a drawer and closes", mob
 });
 await step("Mobile", "No horizontal scrolling on main pages", mob, async () => {
   const bad = [];
-  for (const p of ["/", "/login", "/app/chat", "/app/settings", "/app/work", "/app/work/schedules", "/app/work/skills", "/app/code", "/admin", "/admin/work", "/admin/users", "/admin/workspaces", "/admin/models", "/admin/requests", "/admin/usage", "/admin/audit", "/admin/settings"]) {
+  for (const p of ["/", "/login", "/app/chat", "/app/settings", "/app/work", "/app/work/schedules", "/app/work/skills", "/app/code", "/admin", "/admin/work", "/admin/users", "/admin/workspaces", "/admin/models", "/admin/requests", "/admin/usage", "/admin/audit", "/admin/health", "/admin/settings"]) {
     await mob.goto(`${BASE}${p}`);
     await wait(900);
     const over = await mob.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

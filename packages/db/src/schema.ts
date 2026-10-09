@@ -924,3 +924,15 @@ export const codeWorkspace = pgTable(
   },
   (t) => [uniqueIndex("code_workspace_user_slug_idx").on(t.userId, t.slug), index("code_workspace_ws_idx").on(t.workspaceId, t.userId)],
 );
+
+/* ───────────── System status ───────────── */
+
+/**
+ * Small facts about the installation, by key: "backup" (written by deploy/backup/backup.sh after
+ * each run), "health_alerts" (which problems admins were told about) and "health_settings".
+ */
+export const systemStatus = pgTable("system_status", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<Record<string, unknown>>().notNull(),
+  updatedAt: updatedAt(),
+});

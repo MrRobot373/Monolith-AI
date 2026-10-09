@@ -9,7 +9,11 @@ KEEP="${BACKUP_KEEP:-14}"
 NAME="aatmiq-$(date +%Y%m%d-%H%M%S)"
 WORK="$DIR/.$NAME.partial"
 log() { echo "$(date '+%F %T') backup: $*"; }
-trap 'rm -rf "$WORK"; log "FAILED"' EXIT
+# Tell Aatmiq how it went (Admin → Health); older databases without the table are skipped quietly.
+record() { # ok name bytes
+  psql -qtAX -v ON_ERROR_STOP=1 -c "insert into system_status (key, value, updated_at) values ('backup', jsonb_build_object('ok', $1, 'name', '$2', 'bytes', $3, 'at', now(), 'lastOk', case when $1 then to_jsonb(now()) else (select value->'lastOk' from system_status where key = 'backup') end), now()) on conflict (key) do update set value = excluded.value, updated_at = now()" >/dev/null 2>&1 || true
+}
+trap 'rm -rf "$WORK"; log "FAILED"; record false "$NAME" 0' EXIT
 
 mkdir -p "$WORK"
 log "database…"
@@ -34,6 +38,7 @@ fi
 } > "$WORK/backup.info"
 mv "$WORK" "$DIR/$NAME"
 trap - EXIT
+record true "$NAME" "$(du -sb "$DIR/$NAME" | cut -f1)"
 
 # Keep the newest $KEEP complete backups.
 ls -1d "$DIR"/aatmiq-* 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))" | while read -r old; do rm -rf "$old"; log "removed $(basename "$old")"; done

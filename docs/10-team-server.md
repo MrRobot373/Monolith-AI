@@ -219,6 +219,17 @@ Database changes are applied when the API starts.
 
 ## Keeping an eye on it
 
+**Admin → Health** checks the server every 5 minutes: the database, free disk space, each model
+server (asked for its models), Work AI's queue, background jobs, the last backup (each run of the
+backup service records itself), the network fence for tasks and IDEs, the license and email. Each
+problem says what to do. When something breaks (a model server stops answering, the disk drops
+under 10 GB or 15%, a backup fails or is over 36 hours old, tasks wait over 15 minutes for a slot)
+every admin gets a notification in Aatmiq and, with email set up, an email; a reminder each day
+while it lasts; and a note when it's fixed. *Also email admins* turns the emails off; *Send a test
+alert* checks the way there. `HEALTH_CHECK_MINUTES` changes the interval (0: no automatic checks).
+
+From the server itself:
+
 - `deploy/team.sh ps`: everything *running* or *healthy*.
 - `nvidia-smi`: GPU memory about 90% used is normal (vLLM reserves it); the GPU busy while people
   work.

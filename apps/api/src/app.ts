@@ -38,6 +38,8 @@ import { createConnectors } from "./services/connectors";
 import { createMailer } from "./services/mail";
 import { createInProcessJobs, createRedisJobs, type Jobs } from "./services/jobs";
 import { BrowserService, findChromium } from "./services/browser";
+import { HealthMonitor } from "./services/health";
+import { healthRoutes } from "./routes/health";
 import { startEgressProxy, type EgressProxy } from "./services/egress";
 import { getWorkSettings, WorkRunner } from "./services/work";
 import type { HarnessEngine } from "@aatmiq/harness";
@@ -99,6 +101,9 @@ export async function buildApp(
     log: (msg, err) => app.log.warn(err, msg),
   });
   const jobLog = (msg: string, err?: unknown) => app.log.warn(err, msg);
+  ctx.health = new HealthMonitor(ctx, { intervalMs: (cfg.healthIntervalMinutes || 5) * 60_000, log: jobLog });
+  // For tests and tools that run a health round on demand.
+  app.decorate("health", ctx.health);
   ctx.jobs = opts.jobs
     ? opts.jobs(ctx)
     : cfg.redisUrl
@@ -200,6 +205,7 @@ export async function buildApp(
   await codeInternalRoutes(app, ctx);
   await connectorRoutes(app, ctx);
   await accountRoutes(app, ctx);
+  await healthRoutes(app, ctx);
 
   let stopScheduler: (() => void) | undefined;
   app.addHook("onReady", async () => {
@@ -217,12 +223,15 @@ export async function buildApp(
     }
     void ctx.work.recover().catch((e) => app.log.warn(e, "recovering Work AI tasks failed"));
     stopScheduler = startScheduler(ctx, (msg, err) => app.log.warn(err, msg));
+    // Admins hear about problems (Admin → Health) without having to look.
+    if (cfg.healthIntervalMinutes) ctx.health.start();
   });
   app.addHook("preClose", async () => {
     ideProxy?.closeAll();
   });
   app.addHook("onClose", async () => {
     stopScheduler?.();
+    ctx.health.stop();
     await ctx.jobs.close();
     await ctx.browser.closeAll();
     if (egress) await (await egress).close();
@@ -231,4 +240,10 @@ export async function buildApp(
     await stopOcr();
   });
   return app;
+}
+
+declare module "fastify" {
+  interface FastifyInstance {
+    health: HealthMonitor;
+  }
 }

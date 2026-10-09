@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, ShieldCheck, Users, UsersRound, Workflow } from "lucide-react";
+import { Activity, ArrowLeft, BarChart3, Cpu, Inbox, KeyRound, LayoutDashboard, Layers, ScrollText, Settings2, ShieldCheck, Users, UsersRound, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -31,6 +31,7 @@ const GROUPS = [
       { href: "/admin/requests", label: "Token requests", icon: Inbox, badge: true },
       { href: "/admin/usage", label: "Usage", icon: BarChart3 },
       { href: "/admin/audit", label: "Audit log", icon: ScrollText, org: true },
+      { href: "/admin/health", label: "Health", icon: Activity, org: true },
     ],
   },
   {
