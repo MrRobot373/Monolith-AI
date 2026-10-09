@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chunkPages, extractText, isSupported, UnsupportedFileError } from "./extract";
+import { chunkPages, decodeText, extractText, isSupported, UnsupportedFileError } from "./extract";
 
 describe("chunkPages", () => {
   it("keeps short documents in one chunk", () => {
@@ -37,6 +37,24 @@ describe("extractText", () => {
     const html = await extractText("a.html", Buffer.from("<p>Hi<script>x()</script></p><p>there</p>"));
     expect(html[0]!.text).not.toContain("script");
     expect(html[0]!.text).toContain("there");
+  });
+
+  it("reads UTF-16 text (Windows \"Unicode\" files), with or without a byte-order mark", async () => {
+    const text = "Name,City\nAsha,Pune\nRavi,Mumbai ₹\n";
+    const le = Buffer.from(text, "utf16le");
+    const be = Buffer.from(le).swap16();
+    for (const data of [Buffer.concat([Buffer.from([0xff, 0xfe]), le]), Buffer.concat([Buffer.from([0xfe, 0xff]), be]), le, be]) {
+      expect(decodeText(data)).toBe(text);
+    }
+    expect(decodeText(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]))).toBe(text);
+    expect(decodeText(Buffer.concat([Buffer.from([0xff, 0xfe]), le, Buffer.from([0x41])]))).toBe(text);
+    expect(decodeText(Buffer.from("plain ascii"))).toBe("plain ascii");
+    expect((await extractText("people.csv", Buffer.concat([Buffer.from([0xff, 0xfe]), le])))[0]!.text).toContain("Ravi,Mumbai");
+  });
+
+  it("drops NUL and other control characters before chunking", () => {
+    const [c] = chunkPages([{ page: null, text: "before\u0000after \u001b[31mred\u001b[0m\ttab" }]);
+    expect(c!.content).toBe("beforeafter [31mred[0m tab");
   });
 
   it("rejects unsupported files", async () => {

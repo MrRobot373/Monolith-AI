@@ -119,14 +119,42 @@ export async function extractText(name: string, data: Buffer): Promise<PageText[
     return [{ page: null, text: value }];
   }
   if (TEXT_EXTENSIONS.has(ext)) {
-    const text = data.toString("utf8");
+    const text = decodeText(data);
     return [{ page: null, text: ext === "html" || ext === "htm" ? stripHtml(text) : text }];
   }
   throw new UnsupportedFileError(`This file type isn't supported yet. Upload ${SUPPORTED_HINT}.`);
 }
 
+/**
+ * A text file's characters. Windows saves "Unicode" text and Excel's "Unicode Text" as UTF-16,
+ * which read as UTF-8 is every other byte a NUL; tell it by the byte-order mark, or without one by
+ * the zero bytes in every other position.
+ */
+export function decodeText(data: Buffer): string {
+  // UTF-16 comes in pairs of bytes; a stray last byte is dropped.
+  const le = (b: Buffer) => b.subarray(0, b.length & ~1).toString("utf16le");
+  const be = (b: Buffer) => Buffer.from(b.subarray(0, b.length & ~1)).swap16().toString("utf16le");
+  if (data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf) return data.subarray(3).toString("utf8");
+  if (data[0] === 0xff && data[1] === 0xfe) return le(data.subarray(2));
+  if (data[0] === 0xfe && data[1] === 0xff) return be(data.subarray(2));
+  const pairs = Math.min(data.length, 4000) >> 1;
+  if (pairs >= 2) {
+    let even = 0;
+    let odd = 0;
+    for (let i = 0; i < pairs; i++) {
+      if (data[2 * i] === 0) even++;
+      if (data[2 * i + 1] === 0) odd++;
+    }
+    if (odd > pairs * 0.4 && even < pairs * 0.05) return le(data);
+    if (even > pairs * 0.4 && odd < pairs * 0.05) return be(data);
+  }
+  return data.toString("utf8");
+}
+
 function normalize(text: string): string {
   return text
+    // Postgres text can't hold NUL, and other control characters only get in the way of search.
+    .replace(/[\u0000-\u0008\u000e-\u001f\u007f]/g, "")
     .replace(/\r\n?/g, "\n")
     .replace(/[ \t\f\v]+/g, " ")
     .replace(/ *\n */g, "\n")
