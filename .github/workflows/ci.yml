@@ -47,25 +47,30 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends bubblewrap
           sudo python3 -m pip install -q --break-system-packages python-docx openpyxl
       - run: pnpm install --frozen-lockfile
+      # Each Work AI task runs as its own Unix user; it has to reach the checkout (in the runner's
+      # home, closed to others by default) the way it reaches /app in the Docker image.
+      - name: Let task users reach the checkout
+        run: sudo chmod a+x /home/runner
+      # '!aatmiq': not the root package (its scripts run turbo over everything again).
       - name: Typecheck
-        run: pnpm -r --if-present typecheck
+        run: pnpm -r --if-present --filter '!aatmiq' typecheck
       - name: Test databases
         run: |
           psql "$PG/aatmiq_test" -qc "create extension if not exists vector" -c "create database license_test"
           DATABASE_URL="$PG/aatmiq_test" pnpm db:migrate
       - name: Unit tests
-        run: pnpm -r --if-present --filter '!@aatmiq/api' --filter '!@aatmiq/harness' test
+        run: pnpm -r --if-present --filter '!aatmiq' --filter '!@aatmiq/api' --filter '!@aatmiq/harness' test
         env:
           LICENSE_TEST_DATABASE_URL: ${{ env.PG }}/license_test
       - name: Agent runtime and API tests (as root)
-        run: sudo -E env "PATH=$PATH" pnpm --filter @aatmiq/harness --filter @aatmiq/api test
+        run: sudo -E env "PATH=$PATH" pnpm -r --no-bail --filter @aatmiq/harness --filter @aatmiq/api test
         env:
           TEST_DATABASE_URL: ${{ env.PG }}/aatmiq_test
           REDIS_TEST_URL: redis://localhost:6379/5
           BROWSER_PATH: ${{ env.CHROME }}
       - name: Builds
         # The IDE (apps/code) is built inside the API image; see the images job.
-        run: pnpm -r --if-present --filter '!@aatmiq/code' build
+        run: pnpm -r --if-present --filter '!aatmiq' --filter '!@aatmiq/code' build
 
   e2e:
     name: Browser suites
@@ -83,6 +88,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: sudo python3 -m pip install -q --break-system-packages python-docx openpyxl
+      - name: Let task users reach the checkout
+        run: sudo chmod a+x /home/runner
       - run: pnpm install --frozen-lockfile
       - run: npm install --prefix tests/e2e --no-audit --no-fund
       - run: pnpm --filter @aatmiq/web build
