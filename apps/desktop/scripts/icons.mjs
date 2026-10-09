@@ -2,7 +2,9 @@
 // the Windows .ico and macOS .icns from it. Uses @napi-rs/canvas from apps/code.
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
-const root = new URL("..", import.meta.url).pathname;
+import { fileURLToPath } from "node:url";
+// With a trailing slash, so `${root}…` joins (fileURLToPath also works on Windows).
+const root = fileURLToPath(new URL("../", import.meta.url));
 const canvas = createRequire(`${root}../code/package.json`)("@napi-rs/canvas");
 const size = 1024;
 // Rasterise at full size (the SVG's own size is 32px).

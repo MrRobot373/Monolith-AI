@@ -38,7 +38,13 @@ jobs:
       - run: pnpm --filter @aatmiq/desktop build
       - name: Package
         working-directory: apps/desktop
-        run: pnpm exec electron-builder ${{ matrix.target }} --publish never
+        shell: bash
+        # Secrets that aren't set arrive as empty strings, which electron-builder would take for a
+        # certificate path: unset them, and the packages are simply unsigned.
+        run: |
+          [ -n "$CSC_LINK" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          [ -n "$APPLE_ID" ] || unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          pnpm exec electron-builder ${{ matrix.target }} --publish never
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
