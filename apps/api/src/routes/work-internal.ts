@@ -11,7 +11,7 @@
  *   POST /api/internal/work/browser                    the agent's browser
  */
 import { document, eq, sql, usageEvent, user, workTask } from "@aatmiq/db";
-import { estimateUsage, fetchWithKeys, openAiBase } from "@aatmiq/model-gateway";
+import { estimateUsage, fetchWithKeys, openAiBase, thinkingParams } from "@aatmiq/model-gateway";
 import { estimateTokens } from "@aatmiq/shared";
 import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -80,7 +80,7 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
       return llmError(reply, status, message);
     };
     if (!(await ctx.license.hasSection("work"))) return refuse(403, "Work AI isn't included in your organization's license.");
-    const [task] = await db.select({ modelId: workTask.modelId, codeWorkspaceId: workTask.codeWorkspaceId }).from(workTask).where(eq(workTask.id, t.taskId));
+    const [task] = await db.select({ modelId: workTask.modelId, codeWorkspaceId: workTask.codeWorkspaceId, routing: workTask.routing }).from(workTask).where(eq(workTask.id, t.taskId));
     let resolved: Awaited<ReturnType<typeof resolveModel>>;
     try {
       resolved = await resolveModel(db, box, t.workspaceId, task?.codeWorkspaceId ? "code" : "work", task?.modelId, t.userId);
@@ -94,6 +94,8 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
       return refuse(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period. Ask your admin for more.` : "You've used your token allowance for this period. Ask your admin for more tokens.");
     const body = (req.body ?? {}) as Record<string, unknown> & { messages?: unknown[]; stream?: boolean };
     const inputGuess = estimateTokens(JSON.stringify(body.messages ?? []));
+    // Models that can switch thinking: on only when Auto judged the task hard.
+    const thinking = thinkingParams(provider, m.thinkingSwitch ? (task?.routing?.thinking ?? false) : undefined);
     const started = Date.now();
 
     const meter = async (usage: { inputTokens: number; outputTokens: number; estimated: boolean }, status: "ok" | "error" | "aborted") => {
@@ -155,7 +157,7 @@ export async function workInternalRoutes(app: FastifyInstance, ctx: AppContext) 
           upstream = await fetchWithKeys(provider, `${openAiBase(provider)}/chat/completions`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ...body, model: m.modelKey, ...(body.stream ? { stream_options: { include_usage: true } } : {}) }),
+            body: JSON.stringify({ ...body, model: m.modelKey, ...(body.stream ? { stream_options: { include_usage: true } } : {}), ...thinking }),
             signal: AbortSignal.any([abort.signal, attemptAbort.signal]),
           });
         } finally {

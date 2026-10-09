@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ORG_ROLES, SECTIONS, WORKSPACE_ROLES } from "./permissions";
+import { MODEL_TIERS } from "./routing";
 
 export const PROVIDER_TYPES = ["ollama", "openai_compatible", "mock"] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
@@ -66,6 +67,10 @@ export const modelSchema = z.object({
   /** Embedding models: text put before search queries and before document passages ({title}). */
   queryPrefix: z.string().max(200).nullable().optional(),
   documentPrefix: z.string().max(200).nullable().optional(),
+  /** Where Auto uses it (null: Auto leaves it out). */
+  tier: z.enum(MODEL_TIERS).nullable().optional(),
+  /** Thinking can be switched per request (vLLM's chat template or Ollama's reasoning effort). */
+  thinkingSwitch: z.boolean().optional(),
 });
 
 /** Updates must not carry defaults, or a partial update would silently reset other fields. */
@@ -80,6 +85,8 @@ export const modelUpdateSchema = z.object({
   costOutPerM: z.number().nonnegative().optional(),
   queryPrefix: z.string().max(200).nullable().optional(),
   documentPrefix: z.string().max(200).nullable().optional(),
+  tier: z.enum(MODEL_TIERS).nullable().optional(),
+  thinkingSwitch: z.boolean().optional(),
 });
 
 export const workspaceModelsSchema = z.object({

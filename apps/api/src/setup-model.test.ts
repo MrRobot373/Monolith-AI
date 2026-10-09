@@ -25,7 +25,17 @@ describe("SETUP_MODEL_* settings", () => {
       apiKey: null,
       vision: true,
       sections: ["chat", "work", "code"],
+      type: "openai_compatible",
+      tier: null,
+      thinkingSwitch: false,
     });
+    // An Ollama model in a tier, whose thinking is switched per request.
+    expect(
+      loadSetupModel({ SETUP_LARGE_MODEL_URL: "http://ollama:11434", SETUP_LARGE_MODEL: "nemotron-3-super", SETUP_LARGE_MODEL_PROVIDER: "ollama", SETUP_LARGE_MODEL_THINKING: "switch" }, "SETUP_LARGE_MODEL", ["chat"], "advanced"),
+    ).toMatchObject({ type: "ollama", tier: "advanced", thinkingSwitch: true });
+    expect(loadSetupModel({ SETUP_MODEL_URL: "http://x", SETUP_MODEL: "x", SETUP_MODEL_TIER: "none" }, "SETUP_MODEL", ["chat"], "standard")?.tier).toBeNull();
+    expect(() => loadSetupModel({ SETUP_MODEL_URL: "http://x", SETUP_MODEL: "x", SETUP_MODEL_TIER: "huge" })).toThrow("TIER");
+    expect(() => loadSetupModel({ SETUP_MODEL_URL: "http://x", SETUP_MODEL: "x", SETUP_MODEL_PROVIDER: "tgi" })).toThrow("PROVIDER");
     expect(() => loadSetupModel({ SETUP_MODEL_URL: "http://vllm:8000/v1" })).toThrow("SETUP_MODEL");
     expect(() => loadSetupModel({ SETUP_MODEL_URL: "vllm:8000", SETUP_MODEL: "x" })).toThrow("http");
     expect(() => loadSetupModel({ SETUP_MODEL_URL: "http://x", SETUP_MODEL: "x", SETUP_MODEL_SECTIONS: "chat,email" })).toThrow("SECTIONS");
@@ -34,7 +44,7 @@ describe("SETUP_MODEL_* settings", () => {
     expect(loadConfig(base).setupMaxRunning).toBeNull();
     // The small model is Chat-only unless told otherwise.
     const both = loadConfig({ ...base, SETUP_MODEL_URL: "http://a/v1", SETUP_MODEL: "big", SETUP_SMALL_MODEL_URL: "http://b/v1", SETUP_SMALL_MODEL: "small" }).setupModels!;
-    expect(both.map((m) => [m.key, m.sections])).toEqual([["big", ["chat", "work", "code"]], ["small", ["chat"]]]);
+    expect(both.map((m) => [m.key, m.sections, m.tier])).toEqual([["big", ["chat", "work", "code"], "standard"], ["small", ["chat"], "fast"]]);
   });
 });
 
@@ -67,8 +77,8 @@ describe("SETUP_MODEL_* settings", () => {
       storageDir: await mkdtemp(join(tmpdir(), "aatmiq-files-")),
       workDir: await mkdtemp(join(tmpdir(), "aatmiq-work-")),
       setupModels: [
-        { url: "http://vllm:8000/v1", key: "qwen3.6-35b-a3b", displayName: "Qwen3.6 35B A3B", contextLength: 65536, apiKey: "local-key", vision: true, sections: ["chat", "work", "code"] },
-        { url: "http://vllm-small:8000/v1", key: "gemma-4-e2b", displayName: "Gemma 4 E2B (fast)", contextLength: 32768, apiKey: null, vision: false, sections: ["chat"] },
+        { url: "http://vllm:8000/v1", key: "qwen3.6-35b-a3b", displayName: "Qwen3.6 35B A3B", contextLength: 65536, apiKey: "local-key", vision: true, sections: ["chat", "work", "code"], type: "openai_compatible", tier: "standard", thinkingSwitch: true },
+        { url: "http://vllm-small:8000/v1", key: "gemma-4-e2b", displayName: "Gemma 4 E2B (fast)", contextLength: 32768, apiKey: null, vision: false, sections: ["chat"], type: "openai_compatible", tier: "fast", thinkingSwitch: false },
       ],
       setupMaxRunning: 10,
     };
@@ -83,14 +93,15 @@ describe("SETUP_MODEL_* settings", () => {
     expect((await call("POST", "/api/setup", { orgName: "Acme", name: "Asha Owner", email: "owner@acme.test", password: "correct-horse-battery" })).status).toBe(200);
     const models = (await call("GET", "/api/admin/models")).json;
     expect(models).toHaveLength(2);
-    expect(models.find((m: { modelKey: string }) => m.modelKey === "qwen3.6-35b-a3b")).toMatchObject({ contextLength: 65536, vision: true, sections: ["chat", "work", "code"], enabled: true });
-    expect(models.find((m: { modelKey: string }) => m.modelKey === "gemma-4-e2b")).toMatchObject({ sections: ["chat"], vision: false });
+    expect(models.find((m: { modelKey: string }) => m.modelKey === "qwen3.6-35b-a3b")).toMatchObject({ contextLength: 65536, vision: true, sections: ["chat", "work", "code"], enabled: true, tier: "standard", thinkingSwitch: true });
+    expect(models.find((m: { modelKey: string }) => m.modelKey === "gemma-4-e2b")).toMatchObject({ sections: ["chat"], vision: false, tier: "fast", thinkingSwitch: false });
     const providers = (await call("GET", "/api/admin/providers")).json;
     expect(providers.map((p: { baseUrl: string; hasApiKey: boolean }) => [p.baseUrl, p.hasApiKey]).sort()).toEqual([["http://vllm-small:8000/v1", false], ["http://vllm:8000/v1", true]]);
     const ws = (await call("GET", "/api/me")).json.workspaces[0].id;
     const names = async (section: string) =>
       ((await call("GET", `/api/workspaces/${ws}/models?section=${section}`)).json as { displayName: string; isDefault: boolean }[]).map((m) => [m.displayName, m.isDefault]).sort();
-    expect(await names("chat")).toEqual([["Gemma 4 E2B (fast)", false], ["Qwen3.6 35B A3B", true]]);
+    // Two tiers in Chat: Auto is offered there, and is what new chats start with.
+    expect(await names("chat")).toEqual([["Auto", true], ["Gemma 4 E2B (fast)", false], ["Qwen3.6 35B A3B", false]]);
     expect(await names("work")).toEqual([["Qwen3.6 35B A3B", true]]);
     expect(await names("code")).toEqual([["Qwen3.6 35B A3B", true]]);
     expect((await call("GET", "/api/admin/work")).json.settings).toMatchObject({ maxRunning: 10, maxConcurrentPerUser: 2 });

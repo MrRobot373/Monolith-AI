@@ -26,3 +26,6 @@ export function greeting(): string {
   const h = new Date().getHours();
   return h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
+
+/** Auto's tiers, as people read them. */
+export const TIER_NAMES = { fast: "Fast", standard: "Standard", advanced: "Advanced" } as const;

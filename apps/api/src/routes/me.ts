@@ -17,6 +17,7 @@ import { z } from "zod";
 import { getOrg, parse, requireUser, requireWorkspaceCap, type AppContext } from "../context";
 import { forbidden } from "../errors";
 import { availableModels } from "../services/models";
+import { routingSettings, withAuto } from "../services/router";
 import { logoUrl } from "../services/branding";
 import { getQuotaStatus, quotaFor } from "../services/quota";
 
@@ -97,7 +98,8 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
     const m = await requireWorkspaceCap(ctx, u, req.params.id, "workspace.use");
     const section = req.query.section ?? "chat";
     if (m && !m.sections.includes(section) && !isOrgAdmin(u.orgRole)) throw forbidden("This section is not enabled for you.");
-    return availableModels(db, req.params.id, section, u.id);
+    // Auto first, when the person's models cover two tiers or more.
+    return withAuto(await availableModels(db, req.params.id, section, u.id), await routingSettings(db));
   });
 
   app.get("/api/notifications", async (req) => {

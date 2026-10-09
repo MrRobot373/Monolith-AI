@@ -308,8 +308,8 @@ function ScheduleDialog({ schedule, workspaceId, onClose, onSaved }: { schedule?
           </Field>
           <Field label="Model">
             <Select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-              <option value="">Workspace default</option>
-              {(models.data ?? []).map((m) => (
+              <option value="">{models.data?.find((m) => m.id === "auto" && m.isDefault) ? "Default (Auto)" : "Workspace default"}</option>
+              {(models.data ?? []).filter((m) => m.id !== "auto").map((m) => (
                 <option key={m.id} value={m.id}>{m.displayName}</option>
               ))}
             </Select>

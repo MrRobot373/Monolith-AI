@@ -85,6 +85,8 @@ export const organization = pgTable("organization", {
   logo: jsonb("logo").$type<{ key: string; type: string; version: string }>(),
   /** Outgoing email (SMTP) for invitations and password resets; the password is encrypted. */
   emailSettings: jsonb("email_settings").$type<EmailSettingsStored>(),
+  /** Auto model choice (see RoutingSettings). */
+  routingSettings: jsonb("routing_settings").$type<Partial<RoutingSettings>>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -260,6 +262,13 @@ export const model = pgTable(
      */
     queryPrefix: text("query_prefix"),
     documentPrefix: text("document_prefix"),
+    /** Where Auto uses this model: "fast", "standard" or "advanced" (null: Auto leaves it out). */
+    tier: text("tier"),
+    /**
+     * The model can turn thinking on and off per request (Qwen3, Nemotron 3, Gemma 4 on vLLM or
+     * Ollama). Off for everyday answers; Auto turns it on for hard ones.
+     */
+    thinkingSwitch: boolean("thinking_switch").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -393,6 +402,8 @@ export const chat = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("New chat"),
     modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
+    /** The person chose Auto: each answer's model is picked for its message (modelId: the last one). */
+    auto: boolean("auto").notNull().default(false),
     pinned: boolean("pinned").notNull().default(false),
     /** Chats inside a project inherit its instructions, sources and project-only memory. */
     projectId: text("project_id").references((): AnyPgColumn => project.id, { onDelete: "cascade" }),
@@ -432,6 +443,8 @@ export const message = pgTable(
     attachments: jsonb("attachments").$type<{ id: string; name: string }[]>(),
     /** Sources used for this assistant reply, numbered as cited in the text. */
     citations: jsonb("citations").$type<Citation[]>(),
+    /** How Auto picked this answer's model, when it did. */
+    routing: jsonb("routing").$type<Routing>(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -691,6 +704,24 @@ export interface WorkSettings {
   containerNetwork: "proxy" | "none";
 }
 
+/** Auto model choice, set by org admins. */
+export interface RoutingSettings {
+  enabled: boolean;
+  default: boolean;
+  judge: "rules" | "model";
+  judgeModelId: string | null;
+  thinkOnHard: boolean;
+}
+
+/** How Auto picked a model for one answer or task. */
+export interface Routing {
+  difficulty: "easy" | "medium" | "hard";
+  tier: "fast" | "standard" | "advanced";
+  thinking: boolean;
+  by: "rules" | "judge";
+  reason: string;
+}
+
 /** Unix user ids for task runtimes (each task runs as its own user when the API runs as root). */
 export const workUidSeq = pgSequence("work_uid_seq", { startWith: 100000, minValue: 100000, maxValue: 2000000000 });
 
@@ -711,6 +742,8 @@ export const workTask = pgTable(
     title: text("title").notNull().default("New task"),
     status: workTaskStatusEnum("status").notNull().default("queued"),
     modelId: text("model_id").references(() => model.id, { onDelete: "set null" }),
+    /** How Auto picked the task's model, when it did (thinking stays as decided for the whole task). */
+    routing: jsonb("routing").$type<Routing>(),
     /** Harness session id (the engine's own conversation log). */
     sessionId: text("session_id"),
     /** Last answer, for lists and notifications. */

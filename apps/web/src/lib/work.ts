@@ -1,5 +1,6 @@
 "use client";
 
+import type { Routing } from "@aatmiq/shared";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "./api";
 
@@ -13,6 +14,8 @@ export interface WorkTaskSummary {
   error: string | null;
   pinned: boolean;
   modelId: string | null;
+  /** How Auto picked the task's model. */
+  routing?: Routing | null;
   scheduleId: string | null;
   projectId?: string | null;
   projectName?: string | null;

@@ -28,12 +28,26 @@ export interface Usage {
 
 export type StreamEvent =
   | { type: "delta"; text: string }
+  /** The model's thinking, before its answer (not part of the answer). */
+  | { type: "reasoning"; text: string }
   | { type: "done"; usage: Usage; finishReason: string | null };
 
 export interface StreamOptions {
   signal?: AbortSignal;
   temperature?: number;
   maxTokens?: number;
+  /** Turn thinking on or off, for models that can switch it (undefined: the server's default). */
+  thinking?: boolean;
+}
+
+/**
+ * Request fields that turn thinking on or off: Ollama takes a reasoning effort ("none" is off),
+ * vLLM passes the switch to the model's chat template (Qwen3, Nemotron 3, Gemma 4 read enable_thinking).
+ */
+export function thinkingParams(cfg: ProviderConfig, thinking: boolean | undefined): Record<string, unknown> {
+  if (thinking === undefined || cfg.type === "mock") return {};
+  if (cfg.type === "ollama") return { reasoning_effort: thinking ? "high" : "none" };
+  return { chat_template_kwargs: { enable_thinking: thinking } };
 }
 
 export interface ProviderTestResult {
@@ -200,6 +214,7 @@ async function* streamOpenAiCompatible(
       stream_options: { include_usage: true },
       ...(opts.temperature !== undefined && { temperature: opts.temperature }),
       ...(opts.maxTokens !== undefined && { max_tokens: opts.maxTokens }),
+      ...thinkingParams(cfg, opts.thinking),
     }),
   });
   if (!res.ok || !res.body) {
@@ -212,7 +227,7 @@ async function* streamOpenAiCompatible(
   let finishReason: string | null = null;
   for await (const data of parseSse(res.body)) {
     let json: {
-      choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
+      choices?: { delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null }; finish_reason?: string | null }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
     };
     try {
@@ -221,6 +236,9 @@ async function* streamOpenAiCompatible(
       continue;
     }
     const choice = json.choices?.[0];
+    // vLLM's reasoning parsers send thinking as reasoning_content, Ollama as reasoning.
+    const thought = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+    if (thought) yield { type: "reasoning", text: thought };
     const text = choice?.delta?.content;
     if (text) {
       output += text;
@@ -320,7 +338,7 @@ export async function completeChat(
   let text = "";
   for await (const ev of streamChat(cfg, modelKey, messages, opts)) {
     if (ev.type === "delta") text += ev.text;
-    else return { text, usage: ev.usage };
+    else if (ev.type === "done") return { text, usage: ev.usage };
   }
   return { text, usage: estimateUsage(messages, text) };
 }
@@ -390,7 +408,7 @@ export async function listModels(cfg: ProviderConfig, signal?: AbortSignal): Pro
 }
 
 /** What a model can do, when the provider says (Ollama's /api/show). Empty when unknown. */
-export async function modelInfo(cfg: ProviderConfig, key: string, signal?: AbortSignal): Promise<{ vision?: boolean; contextLength?: number }> {
+export async function modelInfo(cfg: ProviderConfig, key: string, signal?: AbortSignal): Promise<{ vision?: boolean; contextLength?: number; thinking?: boolean }> {
   if (cfg.type !== "ollama" || !cfg.baseUrl) return {};
   try {
     const res = await fetchWithKeys(cfg, `${trimSlash(cfg.baseUrl).replace(/\/v1$/, "")}/api/show`, {
@@ -403,7 +421,7 @@ export async function modelInfo(cfg: ProviderConfig, key: string, signal?: Abort
     const json = (await res.json()) as { capabilities?: string[]; model_info?: Record<string, unknown> };
     const ctx = Object.entries(json.model_info ?? {}).find(([k]) => k.endsWith(".context_length"))?.[1];
     return {
-      ...(Array.isArray(json.capabilities) ? { vision: json.capabilities.includes("vision") } : {}),
+      ...(Array.isArray(json.capabilities) ? { vision: json.capabilities.includes("vision"), thinking: json.capabilities.includes("thinking") } : {}),
       ...(typeof ctx === "number" && ctx > 0 ? { contextLength: ctx } : {}),
     };
   } catch {

@@ -1,10 +1,12 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { completeChat, embed, listModels, mockEmbed, openAiBase, streamChat, testProvider } from "./index";
+import { completeChat, embed, listModels, mockEmbed, openAiBase, streamChat, testProvider, thinkingParams } from "./index";
 
 let server: Server;
 let base = "";
+/** Request bodies sent to /chat/completions, newest last. */
+const bodies: Record<string, unknown>[] = [];
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -19,7 +21,13 @@ beforeAll(async () => {
       return;
     }
     if (req.url === "/v1/chat/completions") {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => bodies.push(JSON.parse(raw)));
       res.setHeader("content-type", "text/event-stream");
+      // Thinking first (vLLM's field, then Ollama's), then the answer.
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Let me see. " } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning: "Greeting." } }] })}\n\n`);
       const chunks = ["Hel", "lo ", "world"];
       for (const c of chunks)
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: c } }] })}\n\n`);
@@ -51,6 +59,32 @@ describe("openai-compatible provider", () => {
       usage: { inputTokens: 11, outputTokens: 3, estimated: false },
       finishReason: "stop",
     });
+  });
+
+  it("keeps the model's thinking apart from its answer", async () => {
+    const cfg = { type: "openai_compatible" as const, baseUrl: base };
+    const events = [];
+    for await (const e of streamChat(cfg, "qwen-test", [{ role: "user", content: "hi" }])) events.push(e);
+    expect(events.filter((e) => e.type === "reasoning").map((e) => (e as { text: string }).text)).toEqual(["Let me see. ", "Greeting."]);
+    expect((await completeChat(cfg, "qwen-test", [{ role: "user", content: "hi" }])).text).toBe("Hello world");
+  });
+
+  it("switches thinking per request: vLLM through the chat template, Ollama by reasoning effort", async () => {
+    const vllm = { type: "openai_compatible" as const, baseUrl: base };
+    await completeChat(vllm, "qwen-test", [{ role: "user", content: "hi" }], { thinking: false });
+    expect(bodies.at(-1)).toMatchObject({ chat_template_kwargs: { enable_thinking: false } });
+    await completeChat(vllm, "qwen-test", [{ role: "user", content: "hi" }], { thinking: true });
+    expect(bodies.at(-1)).toMatchObject({ chat_template_kwargs: { enable_thinking: true } });
+    // Left alone, the server's default applies.
+    await completeChat(vllm, "qwen-test", [{ role: "user", content: "hi" }]);
+    expect(bodies.at(-1)).not.toHaveProperty("chat_template_kwargs");
+
+    const ollama = { type: "ollama" as const, baseUrl: base.replace(/\/v1$/, "") };
+    await completeChat(ollama, "nemotron-3-nano:4b", [{ role: "user", content: "hi" }], { thinking: false });
+    expect(bodies.at(-1)).toMatchObject({ reasoning_effort: "none" });
+    expect(bodies.at(-1)).not.toHaveProperty("chat_template_kwargs");
+    expect(thinkingParams(ollama, true)).toEqual({ reasoning_effort: "high" });
+    expect(thinkingParams({ type: "mock" }, true)).toEqual({});
   });
 
   it("lists models and passes the health test", async () => {

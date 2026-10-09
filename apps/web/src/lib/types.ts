@@ -1,4 +1,4 @@
-import type { OrgRole, QuotaResult, Section, WorkspaceRole } from "@aatmiq/shared";
+import type { ModelTier, OrgRole, QuotaResult, Routing, Section, WorkspaceRole } from "@aatmiq/shared";
 
 export interface Me {
   user: {
@@ -61,6 +61,10 @@ export interface AvailableModel {
   isDefault: boolean;
   /** Groups that give this model when the workspace doesn't; their budget pays for it. */
   groups: { id: string; name: string }[];
+  /** Where Auto uses it. */
+  tier?: ModelTier | null;
+  /** On the Auto entry (id "auto"): the model each tier uses. */
+  tiers?: { tier: ModelTier; modelId: string; displayName: string }[];
 }
 
 export interface ChatSummary {
@@ -84,6 +88,8 @@ export interface ChatDetail {
   sharedToProject: boolean;
   archivedAt: string | null;
   temporary: boolean;
+  /** Auto picks each answer's model. */
+  auto?: boolean;
   leafMessageId: string | null;
   messages: ChatMessageRow[];
   documents: { id: string; name: string }[];
@@ -164,6 +170,7 @@ export interface ChatMessageRow {
   error: string | null;
   attachments?: { id: string; name: string }[] | null;
   citations?: Citation[] | null;
+  routing?: Routing | null;
   createdAt: string;
 }
 

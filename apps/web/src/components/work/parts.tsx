@@ -197,8 +197,9 @@ export const WorkComposer = forwardRef<
                   <span className="flex flex-col">
                     <span>{m.displayName}</span>
                     <span className="text-[11.5px] text-fg-subtle">
-                      {m.providerName}
-                      {m.groups?.length ? ` · via ${m.groups.map((g) => g.name).join(", ")}` : ""}
+                      {m.id === "auto"
+                        ? `Picks by the task: ${m.tiers?.map((t) => t.displayName).join(", ")}`
+                        : `${m.providerName}${m.groups?.length ? ` · via ${m.groups.map((g) => g.name).join(", ")}` : ""}`}
                     </span>
                   </span>
                 </MenuItem>

@@ -14,6 +14,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { del, get, patch, post } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatTokens, timeAgo } from "@/lib/format";
+import { AutoRouting } from "@/components/admin/auto-routing";
+import type { ModelTier } from "@aatmiq/shared";
 
 interface Provider {
   id: string;
@@ -39,6 +41,8 @@ interface ModelRow {
   enabled: boolean;
   queryPrefix: string | null;
   documentPrefix: string | null;
+  tier: ModelTier | null;
+  thinkingSwitch: boolean;
 }
 
 const TYPE_LABEL: Record<Provider["type"], string> = { ollama: "Ollama", openai_compatible: "OpenAI-compatible", mock: "Demo" };
@@ -67,9 +71,16 @@ export default function ModelsPage() {
   });
   const removeProvider = useMutation({ mutationFn: (id: string) => del(`/api/admin/providers/${id}`), onSuccess: invalidate });
   const updateModel = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; enabled?: boolean; sections?: string[]; vision?: boolean; queryPrefix?: string | null; documentPrefix?: string | null }) =>
+    mutationFn: ({
+      id,
+      ...body
+    }: { id: string; enabled?: boolean; sections?: string[]; vision?: boolean; queryPrefix?: string | null; documentPrefix?: string | null; tier?: ModelTier | null; thinkingSwitch?: boolean }) =>
       patch(`/api/admin/models/${id}`, body),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      // Tiers decide whether Auto is offered.
+      qc.invalidateQueries({ queryKey: ["models"] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const removeModel = useMutation({ mutationFn: (id: string) => del(`/api/admin/models/${id}`), onSuccess: invalidate });
@@ -149,9 +160,11 @@ export default function ModelsPage() {
         )}
       </Section>
 
-      <Section title="Models" description="Turn a model off to hide it everywhere. Sections control where it can be used.">
+      <AutoRouting models={models.data ?? []} />
+
+      <Section title="Models" description="Turn a model off to hide it everywhere. Sections control where it can be used; the tier, where Auto uses it.">
         {models.data?.length ? (
-          <Table head={["Model", "Type", "Provider", "Available in", "Enabled", ""]}>
+          <Table head={["Model", "Type", "Provider", "Available in", "Auto", "Enabled", ""]}>
             {models.data.map((m) => (
               <tr key={m.id} className="hover:bg-surface-2/50">
                 <Td>
@@ -211,7 +224,35 @@ export default function ModelsPage() {
                         Images
                       </button>
                     </Tooltip>
+                    <Tooltip content={m.thinkingSwitch ? "Thinking is switched per answer: off for everyday answers, on for hard ones (with Auto)" : "Turn on for models that can switch thinking (Qwen3, Nemotron 3, Gemma 4 on vLLM or Ollama)"}>
+                      <button
+                        onClick={() => updateModel.mutate({ id: m.id, thinkingSwitch: !m.thinkingSwitch })}
+                        className={cn(
+                          "rounded-md border px-1.5 py-0.5 text-[11.5px] transition-colors",
+                          m.thinkingSwitch ? "border-border-strong bg-surface-3 text-fg" : "border-border text-fg-subtle hover:text-fg-muted",
+                        )}
+                        data-testid="model-thinking"
+                      >
+                        Thinking
+                      </button>
+                    </Tooltip>
                   </div>
+                  )}
+                </Td>
+                <Td>
+                  {m.kind === "chat" && (
+                    <Select
+                      value={m.tier ?? ""}
+                      onChange={(e) => updateModel.mutate({ id: m.id, tier: (e.target.value || null) as ModelTier | null })}
+                      className="h-7 w-28 text-[12px]"
+                      aria-label={`Auto tier for ${m.displayName}`}
+                      data-testid="model-tier"
+                    >
+                      <option value="">Not used</option>
+                      <option value="fast">Fast</option>
+                      <option value="standard">Standard</option>
+                      <option value="advanced">Advanced</option>
+                    </Select>
                   )}
                 </Td>
                 <Td>

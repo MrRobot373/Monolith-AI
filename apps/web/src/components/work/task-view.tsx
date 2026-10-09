@@ -50,7 +50,7 @@ import { Dialog, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from 
 import { Skeleton } from "@/components/ui/spinner";
 import { ApiError, del, formatBytes, get, patch, post, readSse } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatTokens, timeAgo } from "@/lib/format";
+import { formatTokens, timeAgo, TIER_NAMES } from "@/lib/format";
 import { ACTIVE, describeCall, type TaskStatus, type WorkEvent, type WorkFile, type WorkTaskDetail } from "@/lib/work";
 import { StatusPill, WorkComposer, type WorkComposerHandle } from "./parts";
 
@@ -349,6 +349,14 @@ export function TaskView({ taskId }: { taskId: string }) {
             )}
             <span className="truncate" data-testid="task-title">{task?.title ?? "Task"}</span>
             {task && <StatusPill status={status} />}
+            {task?.routing && (
+              <Tooltip content={`Auto picked the ${TIER_NAMES[task.routing.tier].toLowerCase()} model: ${task.routing.reason}${task.routing.thinking ? ", with thinking on" : ""}.`}>
+                <span className="hidden shrink-0 items-center gap-1 rounded-full bg-surface-2 px-1.5 py-px text-[11px] text-fg-muted sm:inline-flex" data-testid="task-routed">
+                  <Sparkles className="size-3 text-accent" />
+                  Auto · {TIER_NAMES[task.routing.tier].toLowerCase()}
+                </span>
+              </Tooltip>
+            )}
           </span>
         }
         actions={

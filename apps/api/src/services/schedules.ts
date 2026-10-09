@@ -7,7 +7,9 @@ import { CronExpressionParser } from "cron-parser";
 import type { AppContext } from "../context";
 import { badRequest } from "../errors";
 import { getMembership } from "../context";
+import type { Routing } from "@aatmiq/shared";
 import { availableModels } from "./models";
+import { chooseModel } from "./router";
 
 /** Next run after `from`, or a readable error for a bad expression or time zone. */
 export function nextRun(cron: string, timezone: string, from = new Date()): Date {
@@ -32,10 +34,16 @@ export async function runSchedule(ctx: AppContext, s: typeof workSchedule.$infer
   if (!(await ctx.license.hasSection("work"))) return null;
   // The person may have left the workspace (org admins aren't members but may use it).
   const models = await availableModels(db, s.workspaceId, "work", s.userId);
-  const model = models.find((x) => x.id === s.modelId) ?? models.find((x) => x.isDefault) ?? models[0];
+  let model = models.find((x) => x.id === s.modelId) ?? models.find((x) => x.isDefault) ?? models[0];
+  let routing: Routing | null = null;
+  // Without a model of its own, the default applies, and that may be Auto.
+  if (models.length && !models.some((x) => x.id === s.modelId)) {
+    const chosen = await chooseModel(db, ctx.box, { workspaceId: s.workspaceId, section: "work", userId: s.userId, requested: null, text: s.prompt, hasSources: Boolean(s.projectId) }).catch(() => null);
+    if (chosen) ({ model, routing } = chosen);
+  }
   const [t] = await db
     .insert(workTask)
-    .values({ workspaceId: s.workspaceId, userId: s.userId, title: s.name, modelId: model?.id ?? null, scheduleId: s.id, projectId: s.projectId })
+    .values({ workspaceId: s.workspaceId, userId: s.userId, title: s.name, modelId: model?.id ?? null, routing, scheduleId: s.id, projectId: s.projectId })
     .returning();
   await db.update(workSchedule).set({ lastRunAt: new Date(), lastTaskId: t!.id }).where(eq(workSchedule.id, s.id));
   if (!model || (m && !m.sections.includes("work") && m.role !== "admin")) {

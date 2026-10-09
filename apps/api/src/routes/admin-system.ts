@@ -19,6 +19,7 @@ import {
 } from "@aatmiq/db";
 import { keyStatus, listModels, modelInfo, testProvider } from "@aatmiq/model-gateway";
 import {
+  AUTO_MODEL_ID,
   BUDGET_PERIODS,
   brandingSchema,
   DEFAULT_ACCENT,
@@ -29,11 +30,14 @@ import {
   orgSettingsSchema,
   PRODUCT_NAME,
   providerSchema,
+  routingSettingsSchema,
+  routingTrySchema,
 } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit, getOrg, parse, requireOrgCap, requireUser, type AppContext } from "../context";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
+import { chooseModel, routingSettings } from "../services/router";
 import { LOGO_TYPES, logoUrl, MAX_LOGO_BYTES, newLogoVersion, sniffLogo, svgProblem } from "../services/branding";
 
 export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
@@ -163,6 +167,8 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         enabled: model.enabled,
         queryPrefix: model.queryPrefix,
         documentPrefix: model.documentPrefix,
+        tier: model.tier,
+        thinkingSwitch: model.thinkingSwitch,
         costInPerM: model.costInPerM,
         costOutPerM: model.costOutPerM,
       })
@@ -177,7 +183,8 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
     const body = parse(modelSchema, req.body);
     const p = await loadProvider(body.providerId);
     // Fill in what the provider knows (Ollama reports image support and context length).
-    const info = body.vision === undefined || body.contextLength === undefined ? await modelInfo(providerCfg(p), body.modelKey) : {};
+    const info =
+      body.vision === undefined || body.contextLength === undefined || body.thinkingSwitch === undefined ? await modelInfo(providerCfg(p), body.modelKey) : {};
     // Embedding models trained with task prefixes (EmbeddingGemma) get them unless the admin chose.
     const prefixes = body.kind === "embedding" ? embeddingPrefixes(body.modelKey) : null;
     const [m] = await db
@@ -186,6 +193,8 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
         ...body,
         vision: body.vision ?? info.vision ?? false,
         contextLength: body.contextLength ?? info.contextLength,
+        // Ollama says which models think (and can be told not to).
+        thinkingSwitch: body.thinkingSwitch ?? info.thinking ?? false,
         queryPrefix: body.queryPrefix !== undefined ? body.queryPrefix : (prefixes?.queryPrefix ?? null),
         documentPrefix: body.documentPrefix !== undefined ? body.documentPrefix : (prefixes?.documentPrefix ?? null),
       })
@@ -499,5 +508,39 @@ export async function adminSystemRoutes(app: FastifyInstance, ctx: AppContext) {
       meta: body,
     });
     return { ok: true };
+  });
+
+  /* ───────────── Auto model choice ───────────── */
+
+  app.get("/api/admin/routing", async (req) => {
+    const u = await requireUser(ctx, req);
+    requireOrgCap(u, "org.models.manage");
+    return routingSettings(db);
+  });
+
+  app.put("/api/admin/routing", async (req) => {
+    const u = await requireUser(ctx, req);
+    requireOrgCap(u, "org.models.manage");
+    const body = parse(routingSettingsSchema, req.body);
+    if (body.judgeModelId) {
+      const [j] = await db.select({ id: model.id }).from(model).where(and(eq(model.id, body.judgeModelId), eq(model.kind, "chat")));
+      if (!j) throw badRequest("Pick one of your chat models as the judge.");
+    }
+    const org = await getOrg(db);
+    if (!org) throw notFound();
+    const next = { ...(org.routingSettings ?? {}), ...body };
+    await db.update(organization).set({ routingSettings: next }).where(eq(organization.id, org.id));
+    await audit(ctx, { actor: u, action: "routing.changed", targetType: "organization", targetId: org.id, meta: body });
+    return routingSettings(db);
+  });
+
+  /** Which model Auto would pick for a message, and why (nothing is sent to the answering model). */
+  app.post("/api/admin/routing/try", async (req) => {
+    const u = await requireUser(ctx, req);
+    requireOrgCap(u, "org.models.manage");
+    const b = parse(routingTrySchema, req.body);
+    const started = Date.now();
+    const chosen = await chooseModel(db, box, { workspaceId: b.workspaceId, section: b.section, userId: u.id, requested: AUTO_MODEL_ID, text: b.text });
+    return { model: { id: chosen.model.id, displayName: chosen.model.displayName }, routing: chosen.routing, ms: Date.now() - started };
   });
 }

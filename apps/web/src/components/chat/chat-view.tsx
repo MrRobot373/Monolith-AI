@@ -16,6 +16,7 @@ import {
   FolderInput,
   MoreHorizontal,
   Share2,
+  Sparkles,
   Code2,
   Copy,
   FileText,
@@ -50,7 +51,8 @@ import { MoveToProjectDialog, ProjectIcon } from "@/components/projects/projects
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/overlay";
 import { ApiError, get, patch, post, readSse, uploadDocument } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { greeting, timeAgo } from "@/lib/format";
+import { greeting, timeAgo, TIER_NAMES } from "@/lib/format";
+import type { Routing } from "@aatmiq/shared";
 import type { AvailableModel, ChatDetail, Citation, DocumentRow, QuotaStatus } from "@/lib/types";
 import { SourcesRow, useSourceDialog } from "./citations";
 import { Composer, type Attachment, type ComposerHandle } from "./composer";
@@ -67,6 +69,8 @@ interface UiMessage {
   model?: string;
   attachments?: { id: string; name: string }[] | null;
   citations?: Citation[] | null;
+  /** How Auto picked the model for this answer. */
+  routing?: Routing | null;
 }
 
 const PERIOD_ADJ = { day: "daily", week: "weekly", month: "monthly" } as const;
@@ -173,10 +177,12 @@ export function ChatView({
           model: m.modelId ?? undefined,
           attachments: m.attachments,
           citations: m.citations,
+          routing: m.routing,
         })),
     );
     setChatDocs(existing.data.documents ?? []);
-    if (existing.data.modelId) setModelId(existing.data.modelId);
+    if (existing.data.auto) setModelId("auto");
+    else if (existing.data.modelId) setModelId(existing.data.modelId);
   }, [existing.data]);
 
   // Keep attachment chips in sync with processing status from the library.
@@ -326,7 +332,7 @@ export function ChatView({
               setLiveTitle(ev.data.title);
               qc.invalidateQueries({ queryKey: ["chats", workspaceId] });
             }
-            patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model, citations: ev.data.citations?.length ? ev.data.citations : null }));
+            patchAsst((m) => ({ ...m, model: ev.data.model?.id ?? m.model, routing: ev.data.routing ?? null, citations: ev.data.citations?.length ? ev.data.citations : null }));
           } else if (ev.event === "delta") patchAsst((m) => ({ ...m, content: m.content + ev.data.text }));
           else if (ev.event === "done") {
             patchAsst((m) => ({ ...m, streaming: false }));
@@ -862,9 +868,17 @@ function MessageBlock({
       <div className="mb-2 flex items-center gap-2 text-[12.5px] text-fg-subtle">
         <AppLogo className="size-4" />
         <span>{modelLabel}</span>
+        {m.routing && (
+          <Tooltip content={`Auto picked ${modelLabel}: ${m.routing.reason}${m.routing.thinking ? ", so it thought it through first" : ""}.`}>
+            <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-1.5 py-px text-[11px] text-fg-muted" data-testid="routed" data-tier={m.routing.tier}>
+              <Sparkles className="size-3 text-accent" />
+              Auto · {TIER_NAMES[m.routing.tier].toLowerCase()}
+            </span>
+          </Tooltip>
+        )}
         {m.streaming && (
           <span className="bg-[linear-gradient(90deg,var(--fg-subtle)_0%,var(--fg)_50%,var(--fg-subtle)_100%)] bg-[length:200%_100%] bg-clip-text text-transparent animate-shimmer">
-            {m.content ? "Writing…" : "Thinking…"}
+            {m.content ? "Writing…" : m.routing?.thinking ? "Thinking it through…" : "Thinking…"}
           </span>
         )}
       </div>

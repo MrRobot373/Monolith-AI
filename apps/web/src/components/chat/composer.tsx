@@ -8,6 +8,7 @@ import { Tooltip } from "@/components/ui/misc";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from "@/components/ui/overlay";
 import { cn } from "@/lib/cn";
 import { formatTokens } from "@/lib/format";
+import { TIER_NAMES } from "@/lib/format";
 import type { AvailableModel, DocumentRow } from "@/lib/types";
 
 export interface Attachment {
@@ -245,9 +246,11 @@ function ModelPicker({ models, value, onChange }: { models?: AvailableModel[]; v
           className="flex h-7 items-center gap-2 rounded-md px-2 text-[13px] text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
         >
           <span className="flex -space-x-1">
-            {models.slice(0, 3).map((m) => (
-              <ModelDot key={m.id} name={m.displayName} />
-            ))}
+            {value?.id === "auto" ? (
+              <Sparkles className="size-3.5 text-accent" />
+            ) : (
+              models.slice(0, 3).map((m) => <ModelDot key={m.id} name={m.displayName} />)
+            )}
           </span>
           <span className="max-w-40 truncate">{value?.displayName}</span>
           <ChevronDown className="size-3.5 text-fg-subtle" />
@@ -255,22 +258,37 @@ function ModelPicker({ models, value, onChange }: { models?: AvailableModel[]; v
       </MenuTrigger>
       <MenuContent side="top" className="w-72">
         <MenuLabel>Models in this workspace</MenuLabel>
-        {models.map((m) => (
-          <MenuItem
-            key={m.id}
-            onSelect={() => onChange(m)}
-            icon={<ModelDot name={m.displayName} />}
-            shortcut={m.id === value?.id ? <Check className="size-3.5" /> : null}
-          >
-            <span className="block truncate">{m.displayName}</span>
-            <span className="block truncate text-[11px] text-fg-subtle">
-              {m.providerName}
-              {m.contextLength ? ` · ${formatTokens(m.contextLength)} context` : ""}
-              {m.isDefault ? " · default" : ""}
-              {m.groups?.length ? ` · via ${m.groups.map((g) => g.name).join(", ")}` : ""}
-            </span>
-          </MenuItem>
-        ))}
+        {models.map((m) =>
+          m.id === "auto" ? (
+            <MenuItem
+              key={m.id}
+              onSelect={() => onChange(m)}
+              icon={<Sparkles className="size-3.5 text-accent" />}
+              shortcut={m.id === value?.id ? <Check className="size-3.5" /> : null}
+            >
+              <span className="block truncate">Auto</span>
+              <span className="block truncate text-[11px] text-fg-subtle" title={m.tiers?.map((t) => `${TIER_NAMES[t.tier]}: ${t.displayName}`).join("\n")}>
+                Picks the model for each message: {m.tiers?.map((t) => `${TIER_NAMES[t.tier].toLowerCase()} ${t.displayName}`).join(", ")}
+                {m.isDefault ? " · default" : ""}
+              </span>
+            </MenuItem>
+          ) : (
+            <MenuItem
+              key={m.id}
+              onSelect={() => onChange(m)}
+              icon={<ModelDot name={m.displayName} />}
+              shortcut={m.id === value?.id ? <Check className="size-3.5" /> : null}
+            >
+              <span className="block truncate">{m.displayName}</span>
+              <span className="block truncate text-[11px] text-fg-subtle">
+                {m.providerName}
+                {m.contextLength ? ` · ${formatTokens(m.contextLength)} context` : ""}
+                {m.isDefault ? " · default" : ""}
+                {m.groups?.length ? ` · via ${m.groups.map((g) => g.name).join(", ")}` : ""}
+              </span>
+            </MenuItem>
+          ),
+        )}
       </MenuContent>
     </Menu>
   );

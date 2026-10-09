@@ -196,11 +196,20 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
     for (const [i, sm] of (cfg.setupModels ?? []).entries()) {
       const [p] = await db
         .insert(modelProvider)
-        .values({ name: sm.displayName, type: "openai_compatible", baseUrl: sm.url, apiKeyEnc: sm.apiKey ? ctx.box.encrypt(sm.apiKey) : null })
+        .values({ name: sm.displayName, type: sm.type, baseUrl: sm.url, apiKeyEnc: sm.apiKey ? ctx.box.encrypt(sm.apiKey) : null })
         .returning();
       const [m] = await db
         .insert(model)
-        .values({ providerId: p!.id, modelKey: sm.key, displayName: sm.displayName, contextLength: sm.contextLength, vision: sm.vision, sections: sm.sections })
+        .values({
+          providerId: p!.id,
+          modelKey: sm.key,
+          displayName: sm.displayName,
+          contextLength: sm.contextLength,
+          vision: sm.vision,
+          sections: sm.sections,
+          tier: sm.tier,
+          thinkingSwitch: sm.thinkingSwitch,
+        })
         .returning();
       await db.insert(workspaceModel).values({ workspaceId: ws!.id, modelId: m!.id });
       if (i === 0) await db.update(workspace).set({ defaultModelId: m!.id }).where(eq(workspace.id, ws!.id));

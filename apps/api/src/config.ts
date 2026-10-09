@@ -97,7 +97,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     mailFrom: env.MAIL_FROM || null,
     redisUrl: env.REDIS_URL || null,
     jobConcurrency: Math.max(1, Math.min(16, Number(env.JOB_CONCURRENCY ?? 2) || 2)),
-    setupModels: [loadSetupModel(env, "SETUP_MODEL", ["chat", "work", "code"]), loadSetupModel(env, "SETUP_SMALL_MODEL", ["chat"])].filter((m): m is SetupModel => !!m),
+    // The main model (the default), a small one for quick answers, and a large one for hard ones.
+    setupModels: [
+      loadSetupModel(env, "SETUP_MODEL", ["chat", "work", "code"], "standard"),
+      loadSetupModel(env, "SETUP_SMALL_MODEL", ["chat"], "fast"),
+      loadSetupModel(env, "SETUP_LARGE_MODEL", ["chat", "work", "code"], "advanced"),
+    ].filter((m): m is SetupModel => !!m),
     setupEmbedding: loadSetupEmbedding(env),
     setupMaxRunning: env.SETUP_MAX_RUNNING ? Math.max(1, Math.min(500, Math.round(Number(env.SETUP_MAX_RUNNING)) || 8)) : null,
   };
@@ -128,10 +133,25 @@ export interface SetupModel {
   apiKey: string | null;
   vision: boolean;
   sections: ("chat" | "work" | "code")[];
+  /** "openai_compatible" (vLLM) or "ollama". */
+  type: "openai_compatible" | "ollama";
+  /** Where Auto uses it (null: not at all). */
+  tier: "fast" | "standard" | "advanced" | null;
+  /** Thinking can be switched per request. */
+  thinkingSwitch: boolean;
 }
 
-/** <PREFIX>_URL, <PREFIX> (the model's name there), _DISPLAY_NAME, _CONTEXT, _API_KEY, _VISION, _SECTIONS. */
-export function loadSetupModel(env: NodeJS.ProcessEnv, prefix = "SETUP_MODEL", sections: SetupModel["sections"] = ["chat", "work", "code"]): SetupModel | null {
+/**
+ * <PREFIX>_URL, <PREFIX> (the model's name there), _DISPLAY_NAME, _CONTEXT, _API_KEY, _VISION,
+ * _SECTIONS, _PROVIDER (openai_compatible | ollama), _TIER (fast | standard | advanced | none),
+ * _THINKING (switch: thinking can be turned on and off per request).
+ */
+export function loadSetupModel(
+  env: NodeJS.ProcessEnv,
+  prefix = "SETUP_MODEL",
+  sections: SetupModel["sections"] = ["chat", "work", "code"],
+  tier: SetupModel["tier"] = null,
+): SetupModel | null {
   const url = env[`${prefix}_URL`];
   if (!url) return null;
   if (!/^https?:\/\//.test(url)) throw new Error(`${prefix}_URL must start with http:// or https://`);
@@ -140,6 +160,12 @@ export function loadSetupModel(env: NodeJS.ProcessEnv, prefix = "SETUP_MODEL", s
   const context = Number(env[`${prefix}_CONTEXT`]);
   const listed = (env[`${prefix}_SECTIONS`] ?? "").split(/[\s,]+/).filter(Boolean);
   if (listed.some((s) => !["chat", "work", "code"].includes(s))) throw new Error(`${prefix}_SECTIONS: use chat, work and/or code`);
+  const type = env[`${prefix}_PROVIDER`] || "openai_compatible";
+  if (type !== "ollama" && type !== "openai_compatible") throw new Error(`${prefix}_PROVIDER: use ollama or openai_compatible`);
+  const tierSet = env[`${prefix}_TIER`];
+  if (tierSet && !["fast", "standard", "advanced", "none"].includes(tierSet)) throw new Error(`${prefix}_TIER: use fast, standard, advanced or none`);
+  const thinking = env[`${prefix}_THINKING`];
+  if (thinking && thinking !== "switch" && thinking !== "fixed") throw new Error(`${prefix}_THINKING: use switch or fixed`);
   return {
     url: url.replace(/\/+$/, ""),
     key,
@@ -148,6 +174,9 @@ export function loadSetupModel(env: NodeJS.ProcessEnv, prefix = "SETUP_MODEL", s
     apiKey: env[`${prefix}_API_KEY`] || null,
     vision: env[`${prefix}_VISION`] === "true",
     sections: listed.length ? (listed as SetupModel["sections"]) : sections,
+    type,
+    tier: tierSet === "none" ? null : ((tierSet as SetupModel["tier"]) ?? tier),
+    thinkingSwitch: thinking === "switch",
   };
 }
 

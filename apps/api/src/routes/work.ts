@@ -12,7 +12,8 @@ import { basename, extname, join, relative, sep } from "node:path";
 import { z } from "zod";
 import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
-import { resolveModel } from "../services/models";
+import { resolveModel, type AvailableModel } from "../services/models";
+import { chooseModel } from "../services/router";
 import { randomToken } from "../crypto";
 import { isSupported, SUPPORTED_HINT } from "../services/extract";
 import { PROJECT_FOLDER } from "../services/project-work";
@@ -60,6 +61,10 @@ async function loadReadableTask(ctx: AppContext, u: SessionUser, id: string) {
 /** Budget check for the model a task will use (the workspace's, or the group's that gives it). */
 async function requireQuota(ctx: AppContext, workspaceId: string, userId: string, modelId: string | null, section: "work" | "code" = "work") {
   const { model: m } = await resolveModel(ctx.db, ctx.box, workspaceId, section, modelId, userId);
+  return checkQuota(ctx, workspaceId, userId, m);
+}
+
+async function checkQuota(ctx: AppContext, workspaceId: string, userId: string, m: AvailableModel) {
   const { status: quota } = await quotaFor(ctx.db, workspaceId, userId, m);
   if (!quota.result.allowed)
     throw new HttpError(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period.` : "You've used your token allowance for this period.", "quota_exceeded", quota);
@@ -146,14 +151,23 @@ export async function workRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     const b = parse(workTaskCreateSchema, req.body);
     await requireWorkSection(ctx, u, b.workspaceId);
-    const m = await requireQuota(ctx, b.workspaceId, u.id, b.modelId ?? null);
+    // The model asked for, or Auto's pick for this task (it keeps the model for its follow-ups).
+    const { model: m, routing } = await chooseModel(db, ctx.box, {
+      workspaceId: b.workspaceId,
+      section: "work",
+      userId: u.id,
+      requested: b.modelId ?? null,
+      text: b.prompt,
+      hasSources: Boolean(b.projectId),
+    });
+    await checkQuota(ctx, b.workspaceId, u.id, m);
     if (b.projectId) {
       const p = await getProjectAccess(ctx, u, b.projectId);
       if (p.project.workspaceId !== b.workspaceId) throw badRequest("That project is in another workspace.");
     }
     const [t] = await db
       .insert(workTask)
-      .values({ workspaceId: b.workspaceId, userId: u.id, title: titleFrom(b.prompt), modelId: m.id, projectId: b.projectId ?? null })
+      .values({ workspaceId: b.workspaceId, userId: u.id, title: titleFrom(b.prompt), modelId: m.id, routing, projectId: b.projectId ?? null })
       .returning();
     if (b.start) await work.submit(t!.id, b.prompt);
     const [fresh] = await db.select().from(workTask).where(eq(workTask.id, t!.id));

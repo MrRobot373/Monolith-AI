@@ -1,13 +1,13 @@
 import { and, asc, chat, chatDocument, desc, document, eq, inArray, isNotNull, isNull, message, organization, project, projectSource, sql, usageEvent, user, type DB } from "@aatmiq/db";
 import { streamChat, type ChatMessage } from "@aatmiq/model-gateway";
-import { chatCreateSchema, chatUpdateSchema, isOrgAdmin, PRODUCT_NAME, sendMessageSchema } from "@aatmiq/shared";
+import { AUTO_MODEL_ID, chatCreateSchema, chatUpdateSchema, estimateTokens, isOrgAdmin, PRODUCT_NAME, sendMessageSchema, type Routing } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { audit, parse, requireUser, requireWorkspaceCap, type AppContext, type SessionUser } from "../context";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
 import { accessibleDocs, buildContext, recallProjectChats, retrieve } from "../services/documents";
 import { chatToDocx, chatToMarkdown, fileNameFor, type ExportMessage } from "../services/export";
 import { getProjectAccess } from "../services/projects";
-import { resolveModel } from "../services/models";
+import { chooseModel } from "../services/router";
 import { quotaFor } from "../services/quota";
 
 const MAX_HISTORY = 40;
@@ -120,7 +120,9 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         workspaceId: body.workspaceId,
         userId: u.id,
         title: body.title ?? "New chat",
-        modelId: body.modelId,
+        // Auto picks the model per message; otherwise the chat remembers the one chosen.
+        modelId: body.modelId === AUTO_MODEL_ID ? null : body.modelId,
+        auto: body.modelId === AUTO_MODEL_ID,
         projectId: body.projectId,
         temporary: body.temporary ?? false,
       })
@@ -231,13 +233,6 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     await requireChatSection(ctx, u, c.workspaceId);
     const body = parse(sendMessageSchema, req.body);
 
-    const { model: m, provider } = await resolveModel(db, box, c.workspaceId, "chat", body.modelId ?? c.modelId, u.id);
-    // The workspace pays for its own models; a group pays for a model only it gives.
-    const { status: quota, groupId } = await quotaFor(db, c.workspaceId, u.id, m);
-    if (!quota.result.allowed) {
-      throw new HttpError(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period.` : "You've used your token allowance for this period.", "quota_exceeded", quota);
-    }
-
     // Where the new messages go. Default: after the branch being shown. An earlier parent edits and branches.
     const inChat = async (id: string) =>
       (await db.select({ id: message.id, parentId: message.parentId, role: message.role, content: message.content }).from(message).where(and(eq(message.id, id), eq(message.chatId, c.id))))[0];
@@ -253,6 +248,51 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     }
     const content = regenerateOf ? regenerateOf.content : body.content!;
 
+    // The branch so far, walking up from the parent.
+    const history = parentId
+      ? ((await db.execute(sql`
+          with recursive path as (
+            select id, parent_id, role, content, error, routing, 0 as depth from message where id = ${parentId}
+            union all
+            select m.id, m.parent_id, m.role, m.content, m.error, m.routing, p.depth + 1
+            from message m join path p on m.id = p.parent_id where p.depth < 500
+          )
+          select role, content, error, routing from path order by depth asc limit ${MAX_HISTORY}`)) as unknown as {
+          role: "system" | "user" | "assistant";
+          content: string;
+          error: string | null;
+          routing: Routing | null;
+        }[])
+      : [];
+
+    // Documents in play: the chat's, newly attached ones, and inside a project its sources.
+    const chatDocIds = (
+      await db.select({ id: chatDocument.documentId }).from(chatDocument).where(eq(chatDocument.chatId, c.id))
+    ).map((r) => r.id);
+    // Inside a project, its sources are always in reach. If access was revoked, the chat carries on without them.
+    const proj = c.projectId ? await getProjectAccess(ctx, u, c.projectId).then((a) => a.project, () => null) : null;
+    const projectDocIds = proj
+      ? (await db.select({ id: projectSource.documentId }).from(projectSource).where(eq(projectSource.projectId, proj.id))).map((r) => r.id)
+      : [];
+
+    // The model: the one chosen, or Auto's pick for this message.
+    const { model: m, provider, routing, thinking } = await chooseModel(db, box, {
+      workspaceId: c.workspaceId,
+      section: "chat",
+      userId: u.id,
+      requested: body.modelId ?? (c.auto ? AUTO_MODEL_ID : c.modelId),
+      text: content,
+      // Sources take up to a few thousand tokens; the branch is read in full.
+      contextTokens: history.reduce((n, h) => n + estimateTokens(h.content), 0) + (chatDocIds.length || projectDocIds.length || body.documentIds?.length ? 3000 : 0),
+      hasSources: Boolean(chatDocIds.length || projectDocIds.length || body.documentIds?.length),
+      follows: history.find((h) => h.role === "assistant")?.routing?.difficulty ?? null,
+    });
+    // The workspace pays for its own models; a group pays for a model only it gives.
+    const { status: quota, groupId } = await quotaFor(db, c.workspaceId, u.id, m);
+    if (!quota.result.allowed) {
+      throw new HttpError(402, quota.scope.kind === "group" ? `You've used your share of the ${quota.scope.name} group's tokens for this period.` : "You've used your token allowance for this period.", "quota_exceeded", quota);
+    }
+
     // Attach any newly referenced documents to the chat (only ones this user may read).
     let attachments: { id: string; name: string }[] = [];
     if (body.documentIds?.length && !regenerateOf) {
@@ -265,29 +305,9 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         .insert(chatDocument)
         .values(attachments.map((a) => ({ chatId: c.id, documentId: a.id })))
         .onConflictDoNothing();
+      for (const a of attachments) if (!chatDocIds.includes(a.id)) chatDocIds.push(a.id);
     }
-    const chatDocIds = (
-      await db.select({ id: chatDocument.documentId }).from(chatDocument).where(eq(chatDocument.chatId, c.id))
-    ).map((r) => r.id);
-
-    // Inside a project, its sources are always in reach. If access was revoked, the chat carries on without them.
-    const proj = c.projectId ? await getProjectAccess(ctx, u, c.projectId).then((a) => a.project, () => null) : null;
-    const projectDocIds = proj
-      ? (await db.select({ id: projectSource.documentId }).from(projectSource).where(eq(projectSource.projectId, proj.id))).map((r) => r.id)
-      : [];
     await waitForProcessing(db, [...chatDocIds, ...projectDocIds]);
-
-    // The branch so far, walking up from the parent.
-    const history = parentId
-      ? ((await db.execute(sql`
-          with recursive path as (
-            select id, parent_id, role, content, error, 0 as depth from message where id = ${parentId}
-            union all
-            select m.id, m.parent_id, m.role, m.content, m.error, p.depth + 1
-            from message m join path p on m.id = p.parent_id where p.depth < 500
-          )
-          select role, content, error from path order by depth asc limit ${MAX_HISTORY}`)) as unknown as { role: "system" | "user" | "assistant"; content: string; error: string | null }[])
-      : [];
 
     const userMsgId = regenerateOf
       ? regenerateOf.id
@@ -350,7 +370,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     // Replying to an archived chat brings it back.
     await db
       .update(chat)
-      .set({ ...titleUpdate, modelId: m.id, updatedAt: new Date(), archivedAt: null, leafMessageId: userMsgId })
+      .set({ ...titleUpdate, modelId: m.id, auto: routing !== null, updatedAt: new Date(), archivedAt: null, leafMessageId: userMsgId })
       .where(eq(chat.id, c.id));
     if (proj) await db.update(project).set({ updatedAt: new Date() }).where(eq(project.id, proj.id));
 
@@ -371,6 +391,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       userMessageId: userMsgId,
       parentId,
       model: { id: m.id, displayName: m.displayName },
+      routing,
       citations: docContext.citations,
       ...titleUpdate,
     });
@@ -380,10 +401,15 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
     let error: string | null = null;
     let usage = { inputTokens: 0, outputTokens: 0, estimated: true };
     try {
-      for await (const ev of streamChat(provider, m.modelKey, messages, { signal: abort.signal })) {
+      let thought = false;
+      for await (const ev of streamChat(provider, m.modelKey, messages, { signal: abort.signal, thinking })) {
         if (ev.type === "delta") {
           text += ev.text;
           send("delta", { text: ev.text });
+        } else if (ev.type === "reasoning") {
+          // Thinking isn't shown, but people see that the model is working on it.
+          if (!thought) send("thinking", {});
+          thought = true;
         } else {
           usage = ev.usage;
         }
@@ -407,6 +433,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
         outputTokens: usage.outputTokens,
         error,
         citations: docContext.citations.length ? docContext.citations : null,
+        routing,
       })
       .returning({ id: message.id });
     await db.update(chat).set({ leafMessageId: assistant!.id }).where(eq(chat.id, c.id));

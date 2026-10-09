@@ -3,7 +3,7 @@
  */
 import { and, asc, eq, ne, or, organization, project, skill, sql, workSchedule, workTask } from "@aatmiq/db";
 import { librarySkill, librarySkills } from "@aatmiq/skills";
-import { DEFAULT_WORK_SETTINGS, orgCan, scheduleSchema, skillSchema, workSettingsSchema } from "@aatmiq/shared";
+import { AUTO_MODEL_ID, DEFAULT_WORK_SETTINGS, orgCan, scheduleSchema, skillSchema, workSettingsSchema } from "@aatmiq/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit, parse, requireOrgCap, requireUser, type AppContext, type SessionUser } from "../context";
@@ -180,6 +180,8 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post("/api/work/schedules", async (req) => {
     const u = await requireUser(ctx, req);
     const b = parse(scheduleSchema, req.body);
+    // Schedules keep a model of their own, or follow the default (Auto, where that's the default).
+    if (b.modelId === AUTO_MODEL_ID) b.modelId = null;
     await requireWorkSection(ctx, u, b.workspaceId);
     if (b.modelId) await resolveModel(db, box, b.workspaceId, "work", b.modelId, u.id);
     await checkProject(u, b.workspaceId, b.projectId);
@@ -195,6 +197,7 @@ export async function workConfigRoutes(app: FastifyInstance, ctx: AppContext) {
     const u = await requireUser(ctx, req);
     const s = await loadOwnSchedule(u, req.params.id);
     const b = parse(scheduleSchema.omit({ workspaceId: true }).partial(), req.body);
+    if (b.modelId === AUTO_MODEL_ID) b.modelId = null;
     if (b.modelId) await resolveModel(db, box, s.workspaceId, "work", b.modelId, u.id);
     if (b.projectId !== s.projectId) await checkProject(u, s.workspaceId, b.projectId);
     const next = { ...s, ...b };
