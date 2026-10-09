@@ -297,6 +297,9 @@ d("Work AI", () => {
     await waitStatus(taskId, "completed");
     const t = await getTask(taskId);
     expect(t.events.filter((e) => e.kind === "approval").map((e) => e.data.status)).toEqual(["pending", "rejected", "pending", "approved"]);
+    // The bell links to the task page.
+    const notes = (await call("GET", "/api/notifications")).json as { type: string; link: string }[];
+    expect(notes.find((n) => n.type === "work_approval")?.link).toBe(`/app/work/${taskId}`);
   }, 90_000);
 
   it("searches the web through SearXNG", async () => {
@@ -332,6 +335,11 @@ d("Work AI", () => {
     const r2 = await call("POST", "/api/work/tasks", { workspaceId, prompt: "run: printf 'before\\0after'" });
     const t2 = await waitStatus(r2.json.id, "completed", "failed");
     expect(t2.events.find((e) => e.kind === "tool_result")?.data.text).toContain("beforeafter");
+    // The finished notice carries the answer, which can hold the NUL byte Postgres refuses.
+    const notes = (await call("GET", "/api/notifications")).json as { type: string; link: string }[];
+    expect(notes.filter((n) => n.type === "work_done").map((n) => n.link)).toEqual(
+      expect.arrayContaining([`/app/work/${r.json.id}`, `/app/work/${r2.json.id}`]),
+    );
     expect((await call("GET", "/api/health")).status).toBe(200);
   }, 60_000);
 

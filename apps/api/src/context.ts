@@ -204,5 +204,8 @@ export async function notify(
 ): Promise<void> {
   const unique = [...new Set(userIds)];
   if (unique.length === 0) return;
-  await db.insert(notification).values(unique.map((userId) => ({ userId, ...n })));
+  // Postgres text can't hold NUL bytes (a task's binary output can carry them).
+  const clean = (t?: string) => t?.replaceAll("\u0000", "");
+  const row = { ...n, title: clean(n.title)!, body: clean(n.body), link: n.link };
+  await db.insert(notification).values(unique.map((userId) => ({ userId, ...row })));
 }

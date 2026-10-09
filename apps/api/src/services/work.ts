@@ -22,7 +22,6 @@ import {
   desc,
   eq,
   inArray,
-  notification,
   or,
   organization,
   skill,
@@ -40,7 +39,7 @@ const CODE_LIBRARY: readonly LibraryCategory[] = ["Software development", "Data"
 import { randomBytes } from "node:crypto";
 import { chmod, chown, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { AppContext } from "../context";
+import { notify, type AppContext } from "../context";
 import { resolveModel } from "./models";
 import { PROJECT_FOLDER, projectFor, projectInstructions, writeProjectFiles } from "./project-work";
 
@@ -587,12 +586,11 @@ export class WorkRunner {
 
   private async notifyDone(l: Live, error: string | null) {
     const [t] = await this.ctx.db.select({ title: workTask.title }).from(workTask).where(eq(workTask.id, l.taskId));
-    await this.ctx.db.insert(notification).values({
-      userId: l.userId,
+    await notify(this.ctx.db, [l.userId], {
       type: error ? "work_failed" : "work_done",
       title: error ? `Task needs attention: ${t?.title ?? "task"}` : `Task finished: ${t?.title ?? "task"}`,
       body: error ?? (l.lastAnswer ? clip(l.lastAnswer, 200) : undefined),
-      link: `/work/${l.taskId}`,
+      link: `/app/work/${l.taskId}`,
     });
   }
 
@@ -712,12 +710,11 @@ export class WorkRunner {
     const l = this.live.get(taskId);
     const [t] = await db.select({ title: workTask.title }).from(workTask).where(eq(workTask.id, taskId));
     if (l) {
-      await db.insert(notification).values({
-        userId: l.userId,
+      await notify(db, [l.userId], {
         type: "work_approval",
         title: `Approval needed: ${t?.title ?? "task"}`,
         body: a.reason ?? `The agent wants to use ${a.toolName}.`,
-        link: `/work/${taskId}`,
+        link: `/app/work/${taskId}`,
       });
     }
     return row!;
