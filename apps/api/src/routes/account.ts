@@ -4,7 +4,7 @@
  * - admin help when someone is locked out (reset link, turning off two-step sign-in),
  * - Admin → Settings → Email (the SMTP server for invitations and resets).
  */
-import { account, and, eq, organization, session, twoFactor, user } from "@aatmiq/db";
+import { account, and, desc, eq, gt, ne, organization, session, twoFactor, user } from "@aatmiq/db";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { fromNodeHeaders } from "better-auth/node";
@@ -13,6 +13,27 @@ import { audit, getOrg, parse, requireOrgCap, requireUser, type AppContext } fro
 import { randomToken } from "../crypto";
 import { badRequest, forbidden, HttpError, notFound } from "../errors";
 import type { MailServer } from "../services/mail";
+
+/** "Chrome on Windows", "Aatmiq Code on macOS"… from a browser's user agent. */
+export function describeDevice(ua: string | null): string {
+  if (!ua) return "Unknown device";
+  const app = /Electron\//.test(ua) ? "Aatmiq Code"
+    : /Edg\//.test(ua) ? "Edge"
+    : /OPR\//.test(ua) ? "Opera"
+    : /Firefox\//.test(ua) ? "Firefox"
+    : /Chrome\//.test(ua) ? "Chrome"
+    : /Safari\//.test(ua) ? "Safari"
+    : null;
+  const os = /Windows/.test(ua) ? "Windows"
+    : /iPhone|iPad|iPod/.test(ua) ? "iOS"
+    : /Mac OS X|Macintosh/.test(ua) ? "macOS"
+    : /Android/.test(ua) ? "Android"
+    : /CrOS/.test(ua) ? "ChromeOS"
+    : /Linux/.test(ua) ? "Linux"
+    : null;
+  if (app && os) return `${app} on ${os}`;
+  return app ?? os ?? "Unknown device";
+}
 
 const emailSchema = z.object({
   host: z.string().trim().min(1).max(253),
@@ -49,6 +70,45 @@ export async function accountRoutes(app: FastifyInstance, ctx: AppContext) {
       otherSessions: Math.max(0, sessions.length - 1),
       emailEnabled: await ctx.mail.configured(),
     };
+  });
+
+  /* ───────────── Signed-in devices ───────────── */
+
+  /** Where the person is signed in (never the session tokens themselves). */
+  app.get("/api/me/sessions", async (req) => {
+    const u = await requireUser(ctx, req);
+    const rows = await db
+      .select({ id: session.id, userAgent: session.userAgent, ip: session.ipAddress, createdAt: session.createdAt, updatedAt: session.updatedAt })
+      .from(session)
+      .where(and(eq(session.userId, u.id), gt(session.expiresAt, new Date())))
+      .orderBy(desc(session.updatedAt));
+    return rows
+      .map((r) => ({ id: r.id, device: describeDevice(r.userAgent), ip: r.ip || null, signedInAt: r.createdAt, lastActiveAt: r.updatedAt, current: r.id === u.sessionId }))
+      .sort((a, b) => Number(b.current) - Number(a.current));
+  });
+
+  /** Sign out one other device. */
+  app.delete<{ Params: { id: string } }>("/api/me/sessions/:id", async (req) => {
+    const u = await requireUser(ctx, req);
+    if (req.params.id === u.sessionId) throw badRequest("That's this device: use Sign out instead.");
+    const gone = await db
+      .delete(session)
+      .where(and(eq(session.id, req.params.id), eq(session.userId, u.id)))
+      .returning({ userAgent: session.userAgent });
+    if (!gone.length) throw notFound("Session not found");
+    await audit(ctx, { actor: u, action: "user.session_revoked", targetType: "user", targetId: u.id, meta: { device: describeDevice(gone[0]!.userAgent) }, ip: req.ip });
+    return { ok: true };
+  });
+
+  /** Sign out everywhere but here. */
+  app.post("/api/me/sessions/revoke-others", async (req) => {
+    const u = await requireUser(ctx, req);
+    const gone = await db
+      .delete(session)
+      .where(and(eq(session.userId, u.id), ...(u.sessionId ? [ne(session.id, u.sessionId)] : [])))
+      .returning({ id: session.id });
+    await audit(ctx, { actor: u, action: "user.sessions_revoked", targetType: "user", targetId: u.id, meta: { count: gone.length }, ip: req.ip });
+    return { ok: true, signedOut: gone.length };
   });
 
   /** Emails a link that confirms the person's address (Better Auth marks it confirmed when opened). */

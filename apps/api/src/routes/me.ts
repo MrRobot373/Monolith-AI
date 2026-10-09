@@ -51,7 +51,7 @@ export async function meRoutes(app: FastifyInstance, ctx: AppContext) {
     const lic = await ctx.license.info();
     const admin = isOrgAdmin(u.orgRole);
     return {
-      user: { ...u, ...profile, twoFactorSetupRequired: u.twoFactorSetupRequired ?? false },
+      user: { ...u, ...profile, twoFactorSetupRequired: u.twoFactorSetupRequired ?? false, twoFactorDue: u.twoFactorDue ?? null },
       emailEnabled: await ctx.mail.configured(),
       isAdmin: isOrgAdmin(u.orgRole),
       isWorkspaceAdmin: workspaces.some((w) => w.role === "admin"),

@@ -289,21 +289,54 @@ async function setUpTwoStep(page, password) {
   return key;
 }
 
+await step("Devices", "Settings → Security lists where you're signed in", owner, async () => {
+  await owner.goto(`${APP}/app/settings#security`);
+  const devices = owner.getByTestId("devices");
+  await devices.getByText("This device").waitFor();
+  expect((await devices.getByTestId("device").count()) >= 1, "no devices listed");
+  expect(/Chrome|Chromium/.test(await devices.getByTestId("device").first().textContent()), "device name");
+});
+
 await step("Require", "The admin must set it up for themselves before requiring it", owner, async () => {
   await owner.goto(`${APP}/admin/authentication`);
   const policy = owner.getByTestId("two-step-policy");
   await policy.getByText("2 people sign in with a password").waitFor();
   await policy.getByRole("switch").click();
+  await owner.getByTestId("two-step-require").click();
   await toast(owner, "for your own account first");
+  await owner.keyboard.press("Escape");
   await owner.goto(`${APP}/app/settings#security`);
   await setUpTwoStep(owner, "correct-horse-battery");
   await owner.getByText("On", { exact: true }).waitFor();
   await owner.goto(`${APP}/admin/authentication`);
   await policy.getByText("1 person signs in with a password").waitFor();
+  // A week's grace: people without it are reminded first.
   await policy.getByRole("switch").click();
+  await owner.getByTestId("two-step-grace").selectOption("7");
+  await owner.getByTestId("two-step-require").click();
+  await toast(owner, "people without it were told");
+  await policy.getByText("they're reminded until").waitFor();
+  await shot(owner, "two-step-required-policy");
+});
+
+await step("Require", "During the grace period people keep working, with a reminder and a notification", maya, async () => {
+  await maya.goto(`${APP}/app/chat`);
+  await maya.getByTestId("two-step-banner").waitFor();
+  await maya.getByTestId("two-step-banner").getByText("in 7 days").waitFor();
+  const ok = await maya.request.get(`${APP}/api/notifications`);
+  expect(ok.status() === 200, `notifications ${ok.status()}`);
+  expect(JSON.stringify(await ok.json()).includes("Set up two-step sign-in by"), "no notification with the date");
+  await shot(maya, "two-step-grace-banner");
+  // Then the admin makes it apply right away.
+  await owner.goto(`${APP}/admin/authentication`);
+  const policy = owner.getByTestId("two-step-policy");
+  await policy.getByRole("switch").click();
+  await toast(owner, "optional again");
+  await policy.getByRole("switch").click();
+  await owner.getByTestId("two-step-grace").selectOption("0");
+  await owner.getByTestId("two-step-require").click();
   await toast(owner, "Two-step sign-in is now required");
   await policy.getByText("they'll be asked at their next visit").waitFor();
-  await shot(owner, "two-step-required-policy");
 });
 
 await step("Require", "Someone without it only gets the setup page until it's on", maya, async () => {

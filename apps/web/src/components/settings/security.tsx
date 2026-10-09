@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, LogOut, Mail, ShieldCheck, Smartphone } from "lucide-react";
+import { Check, Copy, KeyRound, LogOut, Mail, Monitor, ShieldCheck, Smartphone } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -10,7 +10,8 @@ import { Field, Input } from "@/components/ui/field";
 import { Badge, Card } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/overlay";
 import { Spinner } from "@/components/ui/spinner";
-import { api, get, post } from "@/lib/api";
+import { api, del, get, post } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 
 interface Security {
   hasPassword: boolean;
@@ -406,24 +407,57 @@ function BackupCodes({ codes }: { codes: string[] }) {
   );
 }
 
+interface Device {
+  id: string;
+  device: string;
+  ip: string | null;
+  signedInAt: string;
+  lastActiveAt: string;
+  current: boolean;
+}
+
+/** Where you're signed in, with sign-out for any other device (or all of them). */
 function OtherDevices({ count }: { count: number }) {
   const qc = useQueryClient();
-  const out = useMutation({
-    mutationFn: () => post("/api/auth/revoke-other-sessions", {}),
-    onSuccess: () => {
-      toast.success("Signed out on your other devices");
-      qc.invalidateQueries({ queryKey: ["me-security"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const devices = useQuery({ queryKey: ["me-sessions", count], queryFn: () => get<Device[]>("/api/me/sessions") });
+  const done = (msg: string) => {
+    toast.success(msg);
+    qc.invalidateQueries({ queryKey: ["me-security"] });
+    qc.invalidateQueries({ queryKey: ["me-sessions"] });
+  };
+  const outOne = useMutation({ mutationFn: (id: string) => del(`/api/me/sessions/${id}`), onSuccess: () => done("Signed out on that device"), onError: (e: Error) => toast.error(e.message) });
+  const outAll = useMutation({ mutationFn: () => post("/api/me/sessions/revoke-others", {}), onSuccess: () => done("Signed out on your other devices"), onError: (e: Error) => toast.error(e.message) });
+  const others = devices.data?.filter((d) => !d.current).length ?? count;
   return (
     <Section
-      icon={count ? LogOut : ShieldCheck}
-      title="Other devices"
-      description={count ? `You're also signed in on ${count === 1 ? "1 other device" : `${count} other devices`}.` : "You're only signed in here."}
+      icon={others ? LogOut : ShieldCheck}
+      title="Signed-in devices"
+      description={others ? `You're signed in here and on ${others === 1 ? "1 other device" : `${others} other devices`}. Sign out of any you don't recognise.` : "You're only signed in here."}
     >
-      {count > 0 && (
-        <Button onClick={() => out.mutate()} loading={out.isPending} data-testid="sign-out-others">
+      <ul className="divide-y divide-border rounded-lg border border-border" data-testid="devices">
+        {(devices.data ?? []).map((d) => (
+          <li key={d.id} className="flex items-center gap-3 px-3 py-2.5 text-sm" data-testid="device">
+            <Monitor className="size-4 shrink-0 text-fg-subtle" />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate">{d.device}</span>
+                {d.current && <Badge tone="success">This device</Badge>}
+              </div>
+              <div className="text-xs text-fg-subtle">
+                {d.current ? "Active now" : `Last active ${timeAgo(d.lastActiveAt)}`}
+                {d.ip ? ` · ${d.ip}` : ""} · signed in {timeAgo(d.signedInAt)}
+              </div>
+            </div>
+            {!d.current && (
+              <Button variant="ghost" size="sm" onClick={() => outOne.mutate(d.id)} loading={outOne.isPending && outOne.variables === d.id} data-testid="device-sign-out">
+                Sign out
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {others > 1 && (
+        <Button className="mt-3" onClick={() => outAll.mutate()} loading={outAll.isPending} data-testid="sign-out-others">
           Sign out everywhere else
         </Button>
       )}

@@ -32,6 +32,8 @@ interface Connection {
 interface AuthSettings {
   ssoRequired: boolean;
   twoFactorRequired: boolean;
+  /** Required from this date; until then people without it are reminded. */
+  twoFactorDeadline: string | null;
   /** Password users who haven't set up two-step sign-in yet. */
   withoutTwoStep: number;
   redirectUri: string;
@@ -56,6 +58,8 @@ export default function AuthenticationPage() {
   const q = useQuery({ queryKey: ["admin-auth"], queryFn: () => get<AuthSettings>("/api/admin/auth") });
   const [editing, setEditing] = useState<{ type: ProviderType; conn?: Connection } | null>(null);
   const [choosing, setChoosing] = useState(false);
+  const [requiring, setRequiring] = useState(false);
+  const [graceDays, setGraceDays] = useState(7);
   const [removing, setRemoving] = useState<Connection | null>(null);
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["admin-auth"] });
@@ -73,10 +77,17 @@ export default function AuthenticationPage() {
     onError,
   });
   const setTwoStep = useMutation({
-    mutationFn: (twoFactorRequired: boolean) => put<AuthSettings>("/api/admin/auth", { twoFactorRequired }),
+    mutationFn: (v: { twoFactorRequired: boolean; twoFactorGraceDays?: number }) => put<AuthSettings>("/api/admin/auth", v),
     onSuccess: (d) => {
       qc.setQueryData(["admin-auth"], d);
-      toast.success(d.twoFactorRequired ? "Two-step sign-in is now required" : "Two-step sign-in is optional again");
+      setRequiring(false);
+      toast.success(
+        !d.twoFactorRequired
+          ? "Two-step sign-in is optional again"
+          : d.twoFactorDeadline
+            ? `Two-step sign-in is required from ${new Date(d.twoFactorDeadline).toLocaleDateString(undefined, { day: "numeric", month: "long" })}; people without it were told`
+            : "Two-step sign-in is now required",
+      );
     },
     onError,
   });
@@ -187,13 +198,45 @@ export default function AuthenticationPage() {
             {d.withoutTwoStep > 0 && (
               <p className="mt-2 text-[12.5px] text-fg-muted" data-testid="without-two-step">
                 {d.withoutTwoStep === 1 ? "1 person signs in" : `${d.withoutTwoStep} people sign in`} with a password and hasn&apos;t set it up
-                {d.twoFactorRequired ? " yet; they'll be asked at their next visit." : "."}
+                {!d.twoFactorRequired
+                  ? "."
+                  : d.twoFactorDeadline
+                    ? ` yet; they're reminded until ${new Date(d.twoFactorDeadline).toLocaleDateString(undefined, { day: "numeric", month: "long" })}, then asked before they continue.`
+                    : " yet; they'll be asked at their next visit."}
               </p>
             )}
           </div>
-          <Switch checked={d.twoFactorRequired} onCheckedChange={(v) => setTwoStep.mutate(v)} label="Require two-step sign-in" />
+          <Switch
+            checked={d.twoFactorRequired}
+            onCheckedChange={(v) => (v ? setRequiring(true) : setTwoStep.mutate({ twoFactorRequired: false }))}
+            label="Require two-step sign-in"
+          />
         </Card>
       </Section>
+
+      <Dialog
+        open={requiring}
+        onOpenChange={setRequiring}
+        title="Require two-step sign-in"
+        description={d.withoutTwoStep > 0 ? `${d.withoutTwoStep === 1 ? "1 person hasn't" : `${d.withoutTwoStep} people haven't`} set it up yet. They'll get a notification either way.` : "Everyone who signs in with a password already has it."}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRequiring(false)}>Cancel</Button>
+            <Button onClick={() => setTwoStep.mutate({ twoFactorRequired: true, twoFactorGraceDays: graceDays })} disabled={setTwoStep.isPending} data-testid="two-step-require">
+              Require it
+            </Button>
+          </>
+        }
+      >
+        <Field label="From when">
+          <Select value={String(graceDays)} onChange={(e) => setGraceDays(Number(e.target.value))} data-testid="two-step-grace">
+            <option value="0">Right away (asked at their next visit)</option>
+            <option value="3">In 3 days (reminders until then)</option>
+            <option value="7">In a week (reminders until then)</option>
+            <option value="14">In two weeks (reminders until then)</option>
+          </Select>
+        </Field>
+      </Dialog>
 
       <Dialog open={choosing} onOpenChange={setChoosing} title="Add a sign-in provider" className="max-w-2xl">
         <div className="grid gap-3 sm:grid-cols-3">

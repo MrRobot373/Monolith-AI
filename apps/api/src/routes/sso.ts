@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { PRODUCT_NAME } from "@aatmiq/shared";
 import { z } from "zod";
 import { ssoTicketId } from "../auth";
-import { audit, getOrg, parse, requireOrgCap, requireUser, type AppContext } from "../context";
+import { audit, getOrg, notify, parse, requireOrgCap, requireUser, type AppContext } from "../context";
 import { randomToken, sha256 } from "../crypto";
 import { badRequest, HttpError, notFound } from "../errors";
 import {
@@ -240,6 +240,7 @@ export async function ssoRoutes(app: FastifyInstance, ctx: AppContext) {
     return {
       ssoRequired: org?.ssoRequired ?? false,
       twoFactorRequired: org?.twoFactorRequired ?? false,
+      twoFactorDeadline: org?.twoFactorRequired && org.twoFactorDeadline && org.twoFactorDeadline > new Date() ? org.twoFactorDeadline.toISOString() : null,
       withoutTwoStep: (await withoutTwoStep(org?.ssoRequired ?? false)).length,
       redirectUri,
       connections: connections.map(publicConn),
@@ -256,7 +257,15 @@ export async function ssoRoutes(app: FastifyInstance, ctx: AppContext) {
   app.put("/api/admin/auth", async (req) => {
     const u = await requireUser(ctx, req);
     requireOrgCap(u, "org.auth.manage");
-    const body = parse(z.object({ ssoRequired: z.boolean().optional(), twoFactorRequired: z.boolean().optional() }), req.body);
+    const body = parse(
+      z.object({
+        ssoRequired: z.boolean().optional(),
+        twoFactorRequired: z.boolean().optional(),
+        /** Days people without two-step sign-in may keep working (with reminders) before it's enforced. */
+        twoFactorGraceDays: z.number().int().min(0).max(30).optional(),
+      }),
+      req.body,
+    );
     const org = await getOrg(db);
     if (body.ssoRequired !== undefined) {
       const { ssoRequired } = body;
@@ -273,8 +282,29 @@ export async function ssoRoutes(app: FastifyInstance, ctx: AppContext) {
       if (twoFactorRequired && (await withoutTwoStep(org?.ssoRequired ?? false)).some((r) => r.id === u.id)) {
         throw badRequest("Set up two-step sign-in for your own account first (Settings → Security).");
       }
-      await db.update(organization).set({ twoFactorRequired }).where(eq(organization.id, org!.id));
-      await audit(ctx, { actor: u, action: twoFactorRequired ? "auth.two_factor_required_on" : "auth.two_factor_required_off", targetType: "organization", targetId: org!.id });
+      const graceDays = twoFactorRequired ? (body.twoFactorGraceDays ?? 0) : 0;
+      const deadline = twoFactorRequired && graceDays > 0 ? new Date(Date.now() + graceDays * 86_400_000) : null;
+      await db.update(organization).set({ twoFactorRequired, twoFactorDeadline: deadline }).where(eq(organization.id, org!.id));
+      await audit(ctx, {
+        actor: u,
+        action: twoFactorRequired ? "auth.two_factor_required_on" : "auth.two_factor_required_off",
+        targetType: "organization",
+        targetId: org!.id,
+        ...(twoFactorRequired ? { meta: { graceDays, deadline: deadline?.toISOString() ?? null } } : {}),
+      });
+      if (twoFactorRequired && !org?.twoFactorRequired) {
+        // Tell the people it affects, with the date (or that they'll be asked at their next visit).
+        const people = (await withoutTwoStep(org?.ssoRequired ?? false)).map((r) => r.id).filter((id) => id !== u.id);
+        const when = deadline ? deadline.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }) : null;
+        await notify(db, people, {
+          type: "security",
+          title: when ? `Set up two-step sign-in by ${when}` : "Two-step sign-in is now required",
+          body: when
+            ? `Your organization requires two-step sign-in from ${when}. Set it up in Settings → Security; it takes a minute with an authenticator app.`
+            : "Your organization now requires two-step sign-in: you'll be asked to set it up before you continue.",
+          link: "/app/settings#security",
+        });
+      }
     }
     return authSettings();
   });

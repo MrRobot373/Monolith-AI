@@ -349,6 +349,78 @@ d("Email, password reset and two-step sign-in", () => {
     expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(["user.email_verified", "auth.two_factor_required_on", "auth.two_factor_required_off"]));
   });
 
+  it("required two-step sign-in with a grace period: reminders first, the lock after the date", async () => {
+    const ravi = jar();
+    expect((await signIn(ravi, "ravi@acme.test", "first-password-123")).status).toBe(200);
+    expect((await call(ravi, "GET", "/api/me")).json.user).toMatchObject({ twoFactorSetupRequired: false, twoFactorDue: null });
+    const on = await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: true, twoFactorGraceDays: 7 });
+    expect(on.status).toBe(200);
+    const days = (new Date(on.json.twoFactorDeadline).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(6.9);
+    expect(days).toBeLessThan(7.1);
+    // Ravi keeps working, knows the date, and was told.
+    const me = (await call(ravi, "GET", "/api/me")).json.user;
+    expect(me).toMatchObject({ twoFactorSetupRequired: false, twoFactorDue: on.json.twoFactorDeadline });
+    const notes = (await call(ravi, "GET", "/api/notifications")).json as { type: string; title: string; link: string }[];
+    expect(notes.find((n) => n.type === "security")).toMatchObject({ title: expect.stringMatching(/^Set up two-step sign-in by \d+ \w+ \d{4}$/), link: "/app/settings#security" });
+    // Once the date passes, setup comes first.
+    await db.execute(sql`update organization set two_factor_deadline = now() - interval '1 minute'`);
+    expect((await call(ravi, "GET", "/api/me")).json.user).toMatchObject({ twoFactorSetupRequired: true, twoFactorDue: null });
+    expect((await call(ravi, "GET", "/api/notifications")).status).toBe(403);
+    expect((await call(owner, "GET", "/api/admin/auth")).json.twoFactorDeadline).toBeNull();
+    // Turning it off clears the date; on again "right away" has none.
+    expect((await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: false })).json).toMatchObject({ twoFactorRequired: false, twoFactorDeadline: null });
+    expect((await call(ravi, "GET", "/api/notifications")).status).toBe(200);
+    expect((await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: true })).json).toMatchObject({ twoFactorRequired: true, twoFactorDeadline: null });
+    expect((await call(ravi, "GET", "/api/notifications")).status).toBe(403);
+    await call(owner, "PUT", "/api/admin/auth", { twoFactorRequired: false });
+  });
+
+  it("signed-in devices: listed without tokens, signed out one by one or all at once", async () => {
+    const signInAs = async (ua: string) => {
+      const j = jar();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/sign-in/email",
+        headers: { origin: APP_URL, "content-type": "application/json", "user-agent": ua, "x-forwarded-for": "198.51.100.7" },
+        payload: JSON.stringify({ email: "ravi@acme.test", password: "first-password-123" }),
+      });
+      expect(res.statusCode).toBe(200);
+      absorb(j, res.headers["set-cookie"]);
+      return j;
+    };
+    await db.execute(sql`delete from session where user_id = (select id from "user" where email = 'ravi@acme.test')`);
+    const laptop = await signInAs("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36");
+    const phone = await signInAs("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1");
+    const desk = await signInAs("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) AatmiqCode/0.1.0 Chrome/138.0 Electron/37.2.0 Safari/537.36");
+
+    const list = (await call(laptop, "GET", "/api/me/sessions")).json as { id: string; device: string; ip: string | null; current: boolean }[];
+    // This device first, then the most recently active.
+    expect(list.map((d) => [d.device, d.current])).toEqual([
+      ["Chrome on Windows", true],
+      ["Aatmiq Code on macOS", false],
+      ["Safari on iOS", false],
+    ]);
+    expect(list.every((d) => d.ip === "198.51.100.7")).toBe(true);
+    expect(JSON.stringify(list)).not.toMatch(/token/i);
+    // Better Auth's own list (with tokens) isn't served.
+    expect((await call(laptop, "GET", "/api/auth/list-sessions")).status).toBe(404);
+
+    // One device: the phone is signed out; this device can't be signed out here; others' sessions aren't found.
+    const phoneId = list.find((d) => d.device === "Safari on iOS")!.id;
+    expect((await call(laptop, "DELETE", `/api/me/sessions/${phoneId}`)).status).toBe(200);
+    expect((await call(phone, "GET", "/api/me")).status).toBe(401);
+    expect((await call(laptop, "DELETE", `/api/me/sessions/${list.find((d) => d.current)!.id}`)).status).toBe(400);
+    expect((await call(owner, "DELETE", `/api/me/sessions/${list.find((d) => d.device === "Aatmiq Code on macOS")!.id}`)).status).toBe(404);
+    expect((await call(desk, "GET", "/api/me")).status).toBe(200);
+
+    // Everywhere else.
+    expect((await call(laptop, "POST", "/api/me/sessions/revoke-others")).json).toEqual({ ok: true, signedOut: 1 });
+    expect((await call(desk, "GET", "/api/me")).status).toBe(401);
+    expect((await call(laptop, "GET", "/api/me")).status).toBe(200);
+    expect(((await call(laptop, "GET", "/api/me/sessions")).json as unknown[]).length).toBe(1);
+  });
+
   it("reset emails: three per address in 15 minutes, whatever address the client claims", async () => {
     const ask = (ip: string) =>
       app.inject({

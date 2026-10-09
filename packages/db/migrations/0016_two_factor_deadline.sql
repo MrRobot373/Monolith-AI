@@ -1,0 +1,1 @@
+ALTER TABLE "organization" ADD COLUMN "two_factor_deadline" timestamp with time zone;

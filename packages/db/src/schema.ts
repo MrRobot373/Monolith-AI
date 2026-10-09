@@ -77,6 +77,8 @@ export const organization = pgTable("organization", {
   ssoRequired: boolean("sso_required").notNull().default(false),
   /** When on, everyone who signs in with a password must set up two-step sign-in before using the app. */
   twoFactorRequired: boolean("two_factor_required").notNull().default(false),
+  /** With twoFactorRequired: from when (until then people without it get reminders, not the lock). */
+  twoFactorDeadline: timestamp("two_factor_deadline", { withTimezone: true }),
   /** Work AI policy set by org admins (see WorkSettings). */
   workSettings: jsonb("work_settings").$type<Partial<WorkSettings>>(),
   /** Uploaded logo (storage key, media type, version for cache busting); null shows the product mark. */

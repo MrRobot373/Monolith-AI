@@ -61,6 +61,10 @@ export interface SessionUser {
   orgRole: OrgRole;
   /** The org requires two-step sign-in and this person signs in with a password but hasn't set it up. */
   twoFactorSetupRequired?: boolean;
+  /** Required from this date and not set up yet: reminders until then, then the setup-only lock. */
+  twoFactorDue?: string | null;
+  /** The session this request came with (signed-in devices). */
+  sessionId?: string;
 }
 
 /** The only routes open to someone who still has to set up the required two-step sign-in. */
@@ -78,7 +82,8 @@ export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T>
 export async function getSessionUser(ctx: AppContext, req: FastifyRequest): Promise<SessionUser | null> {
   const s = await ctx.auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
   if (!s) return null;
-  return userById(ctx, s.user.id);
+  const u = await userById(ctx, s.user.id);
+  return u && { ...u, sessionId: s.session.id };
 }
 
 /** The person behind a session that was already checked (active only), with the two-step rule applied. */
@@ -95,6 +100,7 @@ export async function userById(ctx: AppContext, userId: string): Promise<Session
       // Raw "user"."id": Drizzle drops table prefixes in single-table selects, so ${user.id} would bind to account.id.
       hasPassword: sql<boolean>`exists (select 1 from ${account} where ${account.userId} = ${sql.raw(`"user"."id"`)} and ${account.providerId} = 'credential')`,
       twoFactorRequired: sql<boolean>`coalesce((select ${organization.twoFactorRequired} from ${organization} limit 1), false)`,
+      twoFactorDeadline: sql<string | null>`(select ${organization.twoFactorDeadline} from ${organization} limit 1)`,
       ssoRequired: sql<boolean>`coalesce((select ${organization.ssoRequired} from ${organization} limit 1), false)`,
     })
     .from(user)
@@ -102,8 +108,19 @@ export async function userById(ctx: AppContext, userId: string): Promise<Session
   if (!u || u.status !== "active") return null;
   // Single sign-on users are exempt: the identity provider runs its own check.
   const usesPassword = u.hasPassword && (!u.ssoRequired || u.orgRole === "owner");
-  const twoFactorSetupRequired = u.twoFactorRequired && usesPassword && !u.twoFactorEnabled;
-  return { id: u.id, name: u.name, email: u.email, image: u.image, orgRole: u.orgRole, twoFactorSetupRequired };
+  const missing = u.twoFactorRequired && usesPassword && !u.twoFactorEnabled;
+  // Within the grace period the person works normally (and is reminded); after it, setup comes first.
+  const deadline = u.twoFactorDeadline ? new Date(u.twoFactorDeadline) : null;
+  const inGrace = missing && deadline !== null && deadline.getTime() > Date.now();
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    image: u.image,
+    orgRole: u.orgRole,
+    twoFactorSetupRequired: missing && !inGrace,
+    twoFactorDue: inGrace ? deadline.toISOString() : null,
+  };
 }
 
 export async function requireUser(ctx: AppContext, req: FastifyRequest): Promise<SessionUser> {

@@ -64,6 +64,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       if (req.url.startsWith("/api/auth/sign-up")) {
         throw new HttpError(403, "Accounts are created by invitation. Ask your admin for an invite.", "signup_disabled");
       }
+      // Session tokens never go to the browser: devices are listed by /api/me/sessions instead.
+      if (req.url.startsWith("/api/auth/list-sessions")) throw new HttpError(404, "Not found", "not_found");
       // Confirmation emails go out only through POST /api/me/email/verify (signed in, rate limited).
       if (req.url.startsWith("/api/auth/send-verification-email")) {
         throw new HttpError(403, "Sign in to get a new confirmation link.", "forbidden");
@@ -173,6 +175,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
 
     const { headers, response } = await auth.api.signUpEmail({
       body: { email: body.email, password: body.password, name: body.name },
+      // So the first session records this browser and address (Settings → Security → devices).
+      headers: fromNodeHeaders({ ...req.headers, "x-forwarded-for": req.ip }),
       returnHeaders: true,
     });
     const ownerId = response.user.id;
@@ -283,7 +287,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       if (existing && existing.n > 0) throw conflict("An account with this email already exists. Please sign in.");
 
       const { headers, response } = await auth.api
-        .signUpEmail({ body: { email: inv.email, password: body.password, name: body.name }, returnHeaders: true })
+        .signUpEmail({ body: { email: inv.email, password: body.password, name: body.name }, headers: fromNodeHeaders({ ...req.headers, "x-forwarded-for": req.ip }), returnHeaders: true })
         .catch((e: unknown) => {
           throw badRequest(e instanceof Error ? e.message : "Could not create account");
         });
