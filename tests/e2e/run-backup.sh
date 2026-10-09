@@ -49,6 +49,7 @@ check "data to back up: a project with a file" '[ "$(api GET /api/documents/$DOC
 B=$(ls -1 "$T/backups" | grep '^aatmiq-' | head -1)
 check "a backup holds the database, the files and a summary" '[ -s "$T/backups/$B/db.dump" ] && [ -s "$T/backups/$B/files.tar.gz" ] && grep -q database_bytes "$T/backups/$B/backup.info"'
 check "the files archive has the uploaded file" 'tar -tzf "$T/backups/$B/files.tar.gz" | grep -q "^./files/"'
+check "Admin → Health shows the backup" 'api GET /api/admin/health | jq -r ".checks[] | select(.id == \"backup\") | .level + \" \" + .summary" | grep -q "^ok Last backup $B "'
 
 # Retention: three more backups with BACKUP_KEEP=2 leave the newest two.
 for _ in 1 2 3; do sleep 1; "${C[@]}" exec -T backup /scripts/backup.sh >/dev/null 2>&1; done
