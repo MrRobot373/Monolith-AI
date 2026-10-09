@@ -268,6 +268,8 @@ export interface ChooseInput {
   follows?: Difficulty | null;
   /** Images to look at: prefer models that read images. */
   needsVision?: boolean;
+  /** "auto" came from what was saved (a chat on Auto), not from the request: without Auto, use the default. */
+  savedAuto?: boolean;
 }
 
 export interface Chosen {
@@ -287,9 +289,10 @@ export async function chooseModel(db: DB, box: SecretBox, input: ChooseInput): P
     input.requested === AUTO_MODEL_ID || (!input.requested && settings.default)
       ? autoAvailable(models, settings)
       : false;
-  if (input.requested === AUTO_MODEL_ID && !auto) throw badRequest("Auto isn't available here: ask your admin to put models in at least two tiers.");
+  if (input.requested === AUTO_MODEL_ID && !auto && !input.savedAuto) throw badRequest("Auto isn't available here: ask your admin to put models in at least two tiers.");
   if (!auto) {
-    const r = await resolveModel(db, box, input.workspaceId, input.section, input.requested, input.userId);
+    const requested = input.requested === AUTO_MODEL_ID ? null : input.requested;
+    const r = await resolveModel(db, box, input.workspaceId, input.section, requested, input.userId);
     return { ...r, routing: null, thinking: r.model.thinkingSwitch ? false : undefined };
   }
 

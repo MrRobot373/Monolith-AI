@@ -311,10 +311,13 @@ describe("rules", () => {
     const { start } = await ask(await newChat(), "hi");
     expect(start).toMatchObject({ model: { id: ids["nano-30b"] }, routing: null });
 
+    const onAuto = await newChat("auto");
     await call("PUT", "/api/admin/routing", { enabled: false });
     models = (await call("GET", `/api/workspaces/${workspaceId}/models?section=chat`)).json;
     expect(models.map((m) => m.id)).not.toContain("auto");
-    expect((await call("POST", `/api/chats/${await newChat("auto")}/messages`, { content: "hi" })).status).toBe(400);
+    // Asking for Auto is refused; a chat saved on Auto carries on with the default model.
+    expect((await call("POST", `/api/chats/${onAuto}/messages`, { content: "hi", modelId: "auto" })).status).toBe(400);
+    expect(startOf((await call("POST", `/api/chats/${onAuto}/messages`, { content: "hi" })).body)).toMatchObject({ model: { id: ids["nano-30b"] }, routing: null });
     expect((await call("PUT", "/api/admin/routing", { judgeModelId: "nope" })).status).toBe(400);
     await call("PUT", "/api/admin/routing", { enabled: true, default: true });
   });

@@ -281,6 +281,7 @@ export async function chatRoutes(app: FastifyInstance, ctx: AppContext) {
       section: "chat",
       userId: u.id,
       requested: body.modelId ?? (c.auto ? AUTO_MODEL_ID : c.modelId),
+      savedAuto: !body.modelId && c.auto,
       text: content,
       // Sources take up to a few thousand tokens; the branch is read in full.
       contextTokens: history.reduce((n, h) => n + estimateTokens(h.content), 0) + (chatDocIds.length || projectDocIds.length || body.documentIds?.length ? 3000 : 0),
