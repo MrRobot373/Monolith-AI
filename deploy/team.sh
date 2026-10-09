@@ -55,6 +55,9 @@ case "$lineup" in
     ;;
 esac
 
+# Thinking on for every request (VLLM_THINKING=true): Aatmiq leaves the switch to vLLM.
+[ "$(env_value VLLM_THINKING)" = true ] && default MAIN_THINKING fixed
+
 # Each Work AI task in its own container (no network but Aatmiq's, limits, a read-only system),
 # unless WORK_CONTAINERS=off in .env.
 containers=(-f "$DIR/docker-compose.containers.yml")
