@@ -107,6 +107,13 @@ await step("Tasks", "Start a task: plan, steps, files and the answer stream in",
   await page.getByTestId("plan").getByText("Summarize the result").waitFor();
   await shot(page, "task-done");
 });
+await step("Tasks", "The bell says the task finished and opens it", page, async () => {
+  await page.goto(`${APP}/app/work`);
+  await page.locator('button[aria-label^="Notifications ("]').click();
+  await page.getByText(/^Task finished:/).first().click();
+  await page.waitForURL(taskUrl);
+  await page.getByTestId("task-answer").filter({ hasText: "North leads South by 25" }).waitFor();
+});
 await step("Tasks", "Expand a step to see the command and its output", page, async () => {
   await page.getByTestId("task-step").filter({ hasText: "Ran" }).first().locator("button").first().click();
   await page.getByText("North,120").first().waitFor();

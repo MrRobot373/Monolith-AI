@@ -18,8 +18,8 @@ Each step reports PASS/FAIL; failures save a screenshot to `results/`.
 ## Work AI
 
 `run-work.sh` starts the fake model (which also plays SearXNG and an MCP server) on :11500, a fresh
-API on :4000 and the built web app on :3300, then runs `work.mjs` (27 checks) against the real agent
-runtime: a multi-step task with a plan and files, approvals (reject, approve from the inbox), web
+API on :4000 and the built web app on :3300, then runs `work.mjs` (32 checks) against the real agent
+runtime: a multi-step task with a plan and files, the notification that opens it, approvals (reject, approve from the inbox), web
 search, the agent's browser (an internal sign-up page refused, then allowed by the admin, with the
 form submission approved), uploads, stop and continue, isolation (own Unix user, no writes outside
 the folder), skills, schedules, connectors, light theme and phone layout. Outside the Docker image,

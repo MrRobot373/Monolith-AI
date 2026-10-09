@@ -119,7 +119,7 @@ What we have, and what's left before a customer pays for it.
 | Accounts | Passwords, two-step sign-in (with a grace period), single sign-on, email, signed-in devices |
 | Operations | One-command team install, HTTPS, nightly backups with a recorded status, restore, licensing |
 | Isolation | Each task and IDE as its own user, tasks in containers, a firewall from private networks, an egress proxy |
-| Quality | 180 API tests, 24 runtime tests, 115 + 31 + 18 + 14 browser checks, an authorization sweep of every route, a 25-person load test; CI on every push builds the images and runs them |
+| Quality | 180 API tests, 24 runtime tests, 115 + 32 + 18 + 14 browser checks, an authorization sweep of every route, a 25-person load test; CI on every push builds the images and runs them |
 
 ### Before the first sale
 

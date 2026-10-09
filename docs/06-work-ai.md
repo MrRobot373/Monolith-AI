@@ -368,7 +368,7 @@ Runtime only (task token): `/api/internal/work/llm/v1/chat/completions`, `/appro
   folder from inside its container, a read-only system, the network (an allowed internal host through
   the proxy, the database refused, nothing direct, *none* refused even by hand), new limits for the
   next task, and clean-up on stop and after an API restart.
-- `tests/e2e/run-work.sh`: 31 browser checks (task timeline, plan, files, approvals, search, the
+- `tests/e2e/run-work.sh`: 32 browser checks (task timeline, plan, files, the notification, approvals, search, the
   agent's browser on an internal site before and after the admin allows it, uploads, stop and
   continue, isolation, skills, schedules, connectors, project tasks with a colleague reading a shared
   one, light theme, phone layout).
