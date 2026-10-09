@@ -54,7 +54,9 @@ export async function buildApp(
   let ideProxy: ReturnType<typeof createCodeProxy> | null = null;
   const app = Fastify({
     logger: opts.logger ?? false,
-    trustProxy: true,
+    // Only the proxies in front of us (hop 0 is the connection itself, then X-Forwarded-For from the
+    // right): a client can't choose its own address for rate limits and the audit log.
+    trustProxy: (_address: string, hop: number) => hop < (cfg.trustProxyHops ?? 1),
     bodyLimit: 2 * 1024 * 1024,
     // Live streams and IDE connections never go idle; close them on shutdown.
     forceCloseConnections: true,

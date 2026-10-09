@@ -55,10 +55,11 @@ d("Single sign-on", () => {
     const atIdp = await fetch(loc, { redirect: "manual" });
     const back = new URL(atIdp.headers.get("location")!);
     if (opts.tamperState) back.searchParams.set("state", "forged");
-    const cb = await app.inject({ method: "GET", url: back.pathname + back.search, headers: opts.dropCookie ? {} : { cookie: stateCookie } });
+    // Through a proxy: the client's own claim (left), then the address the web app's proxy saw (right).
+    const cb = await app.inject({ method: "GET", url: back.pathname + back.search, headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.9", ...(opts.dropCookie ? {} : { cookie: stateCookie }) } });
     const next = String(cb.headers.location);
     if (!next.startsWith("/api/auth/sso/ticket")) return { error: new URL(next, APP_URL).searchParams.get("sso_error"), j };
-    const t = await app.inject({ method: "GET", url: next, headers: { origin: APP_URL } });
+    const t = await app.inject({ method: "GET", url: next, headers: { origin: APP_URL, "x-forwarded-for": "6.6.6.6, 203.0.113.9" } });
     absorb(j, t.headers["set-cookie"]);
     return { location: String(t.headers.location), j, ticketUrl: next };
   }
@@ -156,6 +157,9 @@ d("Single sign-on", () => {
     expect(me.workspaces.map((w: { id: string }) => w.id)).toEqual([workspaceId]);
     const audit = (await call(owner, "GET", "/api/admin/audit")).json.map((a: { action: string }) => a.action);
     expect(audit).toEqual(expect.arrayContaining(["user.sso_created", "auth.sso_login", "auth.sso_added"]));
+    // The audit log has the address the proxy in front saw, not the one the client claimed.
+    const ips = (await db.execute(sql`select distinct ip from audit_log where action = 'auth.sso_login'`)) as unknown as { ip: string }[];
+    expect(ips.map((x) => x.ip)).toEqual(["203.0.113.9"]);
   });
 
   it("deactivated people can't sign in with SSO", async () => {

@@ -348,4 +348,18 @@ d("Email, password reset and two-step sign-in", () => {
     const actions = (await db.execute(sql`select action from audit_log`)) as unknown as { action: string }[];
     expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(["user.email_verified", "auth.two_factor_required_on", "auth.two_factor_required_off"]));
   });
+
+  it("reset emails: three per address in 15 minutes, whatever address the client claims", async () => {
+    const ask = (ip: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/auth/request-password-reset",
+        headers: { origin: APP_URL, "content-type": "application/json", "x-forwarded-for": ip },
+        payload: JSON.stringify({ email: "Flood@acme.test", redirectTo: "/reset-password" }),
+      });
+    for (const ip of ["6.6.6.1", "6.6.6.2", "6.6.6.3"]) expect((await ask(ip)).statusCode).toBe(200);
+    const fourth = await ask("6.6.6.4");
+    expect(fourth.statusCode).toBe(429);
+    expect(fourth.json().code).toBe("too_many_resets");
+  });
 });

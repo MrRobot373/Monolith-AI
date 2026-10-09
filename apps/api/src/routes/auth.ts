@@ -27,6 +27,19 @@ function forwardCookies(reply: FastifyReply, headers: Headers) {
   if (cookies.length) reply.header("set-cookie", cookies);
 }
 
+/** Password-reset emails per address: 3 per 15 minutes, whatever IP asks (no mail bombing). */
+const RESET_WINDOW_MS = 15 * 60_000;
+const RESET_MAX = 3;
+const resetRequests = new Map<string, number[]>();
+
+/** Records a reset request; false when this address already had its share. */
+function allowReset(email: string, now = Date.now()): boolean {
+  const list = (resetRequests.get(email) ?? []).filter((t) => now - t < RESET_WINDOW_MS);
+  if (list.length >= RESET_MAX) return false;
+  resetRequests.set(email, [...list, now]);
+  return true;
+}
+
 /** Failed sign-ins per account: 10 per 15 minutes (brute-force protection that doesn't punish shared office IPs). */
 const FAIL_WINDOW_MS = 15 * 60_000;
 const FAIL_MAX = 10;
@@ -61,6 +74,10 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       if (req.method === "POST" && req.url.startsWith("/api/auth/request-password-reset") && !(await ctx.mail.configured())) {
         throw new HttpError(503, "Email isn't set up on this server, so we can't send a reset link. Ask your admin for one.", "email_off");
       }
+      if (req.method === "POST" && req.url.startsWith("/api/auth/request-password-reset")) {
+        const to = String((req.body as { email?: unknown } | undefined)?.email ?? "").trim().toLowerCase();
+        if (to && !allowReset(to)) throw new HttpError(429, "A reset link was sent to this address several times already. Check your inbox (and spam), or try again in 15 minutes.", "too_many_resets");
+      }
       const isSignIn = req.method === "POST" && req.url.startsWith("/api/auth/sign-in/email");
       const email = isSignIn ? String((req.body as { email?: unknown } | undefined)?.email ?? "").toLowerCase() : "";
       if (isSignIn && email && recentFailures(email).length >= FAIL_MAX) {
@@ -78,7 +95,8 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext) {
       const res = await auth.handler(
         new Request(url, {
           method: req.method,
-          headers: fromNodeHeaders(req.headers),
+          // Better Auth's own per-IP limits read X-Forwarded-For: give it the address we trust.
+          headers: fromNodeHeaders({ ...req.headers, "x-forwarded-for": req.ip }),
           body: req.method === "GET" || req.body === undefined ? undefined : JSON.stringify(req.body),
         }),
       );

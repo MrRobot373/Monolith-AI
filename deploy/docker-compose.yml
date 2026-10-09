@@ -43,6 +43,7 @@ x-app-env: &app-env
   # Internal networks Work AI tasks and IDEs may reach anyway (they're refused private addresses
   # otherwise), e.g. an internal GitLab: 10.20.0.15/32, 192.168.40.0/24.
   USER_ALLOWED_NETWORKS: ${USER_ALLOWED_NETWORKS:-}
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
   JOB_CONCURRENCY: ${JOB_CONCURRENCY:-2}
 
 services:

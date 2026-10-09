@@ -29,6 +29,11 @@ export interface Config {
   workContainer?: { image: string; network: string; volume: { name: string; root: string } | null; docker: string } | null;
   /** Port the browser's (and task containers') egress proxy listens on; 0 = any, on 127.0.0.1 only. */
   egressPort?: number;
+  /**
+   * Proxies in front of the API whose X-Forwarded-For to believe: 1 = the web app (default), 2 with
+   * a reverse proxy (Caddy) before it. Anything further left in the header is the client's own claim.
+   */
+  trustProxyHops?: number;
   /** Aatmiq Code homes (one per person). */
   codeDir?: string;
   /**
@@ -81,6 +86,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     workIsolation: env.WORK_ISOLATION === "off" ? "off" : env.WORK_ISOLATION === "container" ? "container" : "auto",
     workContainer: loadWorkContainer(env),
     egressPort: Number(env.EGRESS_PORT ?? (env.WORK_ISOLATION === "container" ? 3128 : 0)),
+    trustProxyHops: Math.max(0, Math.min(5, Number(env.TRUST_PROXY_HOPS ?? 1) || 0)),
     codeDir: env.CODE_DIR ?? ".data/code",
     codeIdleMinutes: Number(env.CODE_IDLE_MINUTES ?? 30),
     ideUrl: loadIdeUrl(env.IDE_URL, env.APP_URL ?? "http://localhost:3000"),
