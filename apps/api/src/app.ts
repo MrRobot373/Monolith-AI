@@ -229,15 +229,32 @@ export async function buildApp(
   app.addHook("preClose", async () => {
     ideProxy?.closeAll();
   });
+  // Each shutdown step gets a few seconds: one that hangs (a browser that won't quit, a stuck
+  // runtime) is reported and skipped, so stopping the server never stalls.
+  const shutdownStep = async (name: string, fn: () => Promise<unknown>, ms = 10_000) => {
+    let timer: NodeJS.Timeout | undefined;
+    const finished = await Promise.race([
+      fn().then(
+        () => true,
+        (e: unknown) => (app.log.warn(e, `shutdown: ${name} failed`), true),
+      ),
+      new Promise<false>((r) => (timer = setTimeout(() => r(false), ms))),
+    ]);
+    clearTimeout(timer);
+    if (!finished) {
+      app.log.warn(`shutdown: ${name} didn't finish in ${ms / 1000} s; going on`);
+      if (!opts.logger) console.warn(`shutdown: ${name} didn't finish in ${ms / 1000} s; going on`);
+    }
+  };
   app.addHook("onClose", async () => {
     stopScheduler?.();
     ctx.health.stop();
-    await ctx.jobs.close();
-    await ctx.browser.closeAll();
-    if (egress) await (await egress).close();
-    await ctx.work.stopAll();
-    await ctx.code.stopAll();
-    await stopOcr();
+    await shutdownStep("background jobs", () => ctx.jobs.close());
+    await shutdownStep("browsers", () => ctx.browser.closeAll());
+    if (egress) await shutdownStep("egress proxy", async () => (await egress!).close());
+    await shutdownStep("Work AI runtimes", () => ctx.work.stopAll());
+    await shutdownStep("IDE servers", () => ctx.code.stopAll());
+    await shutdownStep("OCR", () => stopOcr());
   });
   return app;
 }

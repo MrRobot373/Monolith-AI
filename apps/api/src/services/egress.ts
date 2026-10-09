@@ -221,7 +221,13 @@ export async function startEgressProxy(opts: EgressOptions): Promise<EgressProxy
   }
 
   const server: Server = createServer((req, res) => void onRequest(req, res));
-  server.on("connect", (req, socket, head) => void onConnect(req, socket, head));
+  // Tunnels leave the HTTP server's books once they're established; keep track to end them on close.
+  const tunnels = new Set<Socket | Duplex>();
+  server.on("connect", (req, socket, head) => {
+    tunnels.add(socket);
+    socket.once("close", () => tunnels.delete(socket));
+    void onConnect(req, socket, head);
+  });
   await new Promise<void>((r) => server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", r));
   const addr = server.address() as { port: number };
   return {
@@ -234,6 +240,7 @@ export async function startEgressProxy(opts: EgressOptions): Promise<EgressProxy
     lastBlock: () => last,
     close: () =>
       new Promise((r) => {
+        for (const t of tunnels) t.destroy();
         server.closeAllConnections?.();
         server.close(() => r());
       }),

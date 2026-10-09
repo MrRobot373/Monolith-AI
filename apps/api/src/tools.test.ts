@@ -279,6 +279,8 @@ d("Work AI tools", () => {
   afterAll(async () => {
     await app?.close();
     await close?.();
+    // Runtimes and the browser may leave keep-alive connections to the fake servers open.
+    fake?.closeAllConnections();
     await new Promise<void>((r) => fake?.close(() => r()));
   });
 
